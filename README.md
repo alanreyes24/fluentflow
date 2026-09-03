@@ -7,11 +7,17 @@ with example sentences generated on the device rather than by an API, Anki
 ```
 npm install
 npm run build          # build the shared core package
-npm test               # 98 tests
+npm test               # 163 tests
 npm run verify         # end-to-end check of the success criteria
+npm run verify:web     # the same criteria, driven through Chrome
 npm run server         # sync API on :8787 (no Firebase project needed)
 npm run mobile         # Expo dev server
 ```
+
+A packaged Windows build is on the
+[releases page](https://github.com/alanreyes24/fluentflow/releases): a portable
+executable that needs no installation, and an installer. Both are unsigned, so
+SmartScreen asks for **More info → Run anyway** the first time.
 
 Nothing above needs a Firebase project or the model weights. The server starts
 in local mode with an in-memory store, and examples fall back to written
@@ -50,9 +56,12 @@ misread:
 | AI **weights** | **Not bundled.** `npm run prepare-model` fetches and converts them |
 | iOS / Android / web | Expo, standard |
 | Windows / macOS | Electron around the web export, not native RN |
+| The views | 65 render tests; the web and desktop builds walked through by a browser |
 
 All three platform bundles build: `npx expo export --platform web` and
 `--platform ios --platform android` both complete, the latter through Hermes.
+The web and Windows builds are also driven end to end by a real browser — see
+Testing — so what is claimed below has been watched running, not only compiled.
 
 The AI integration is real code — a greedy decoder over an ONNX graph with KV
 cache reuse, and a Llama-style BPE tokenizer with byte fallback, both written
@@ -179,17 +188,44 @@ fails on the second.
 ## Testing
 
 ```
-npm test              # unit and integration tests
-npm run verify        # end-to-end against the real server
+npm test              # 163 unit and integration tests
+npm run verify        # 26 checks end-to-end against the real server
+npm run verify:web    # 18 checks driving the web build through Chrome
+npm run verify:desktop  # 13 checks driving the packaged Windows app
 ```
 
-`npm run verify` is the one to run when judging whether this works. It starts
-the sync server, drives two simulated devices through the success criteria over
-HTTP, imports a generated 60-card `.apkg`, takes a device offline and back, and
-checks that conflicting edits converge. It covers everything except the React
-Native views.
+`npm run verify` is the one to run when judging whether the *logic* works. It
+starts the sync server, drives two simulated devices through the success
+criteria over HTTP, imports a generated 60-card `.apkg`, takes a device offline
+and back, and checks that conflicting edits converge.
 
-It has already earned its place. It caught a real bug: the import endpoint
+`npm run verify:web` is the one to run when judging whether the *app* works. It
+builds the web export, serves it, and walks Chrome through the brief: continue
+without an account, create a Spanish deck, add cards, reveal, rate with the
+keyboard, reload, and switch the interface to Bosnian. `verify:desktop` does the
+same against the packaged executable, which is how the `app://` scheme, the
+content security policy and SQLite-outside-a-browser get exercised. Both leave
+screenshots behind as evidence.
+
+The 65 view tests run under jest-expo in two projects, iOS and web, rather than
+one with a mocked `Platform`. Keyboard shortcuts only bind on web and the rating
+buttons only show their number prefix there, so running the same components
+under both presets tests the real branch instead of the mock. The repository
+they run against is real SQLite through `node:sqlite`, so pressing "Good" in a
+test runs the same SM-2 code a phone runs.
+
+These have earned their place. `verify:web` found that refreshing the page
+mid-session left the app on "FluentFlow could not start": on the web,
+expo-sqlite is wa-sqlite over the origin-private file system, which allows one
+access handle per file, and a reload begins the new document before the old one
+has let go. It fails two ways that need different answers — a held handle clears
+within a few hundred milliseconds and is waited out, while "Invalid VFS state"
+leaves wa-sqlite unusable for the life of the document and is met with a single
+guarded reload. Writing the render tests also turned up `Field` rendering its
+label as a sibling `Text` with nothing tying it to the input, so a screen reader
+announced an unnamed text box.
+
+`npm run verify` caught a real bug of its own: the import endpoint
 stored records with `syncStatus: 'pending'` because the importer marks its
 output that way — correctly, since on a device those records do still owe the
 server an upload. Every device that pulled an imported deck therefore believed
@@ -204,17 +240,48 @@ see
 
 ## Known gaps
 
-- The React Native views have no tests. They typecheck, and the logic beneath
-  them is covered, but nothing here has rendered them on a device.
+- **iOS and Android have never been run on a device.** Both bundles export, and
+  the views are covered by 65 render tests plus a browser walkthrough of the
+  same components under react-native-web, but nothing here has launched them on
+  a phone or a simulator. The native paths that differ from the web — the real
+  SQLite backend, the document picker, ONNX Runtime — are unexercised.
+- The model weights are not bundled, as described above, so the desktop and web
+  builds fall back to written sentences and the mobile build does too until
+  `npm run prepare-model` has run. The decode loop has never seen a real ONNX
+  graph.
 - `firebase-admin` pulls transitive dependencies with moderate `npm audit`
   advisories (via `@google-cloud/storage` → `teeny-request` → `uuid`). Nothing
   in this app uses Cloud Storage; resolving them needs an upstream release.
-- The Electron shell has been built and its layout verified, but not launched —
-  this machine has no display for it.
+- Sync has only been exercised against the local server. No Firebase project has
+  been provisioned, so the Firestore store and its security rules are unproven
+  against the real service.
 - Google sign-in is not implemented; email/password is. The unused strings for
   it were removed rather than left as a promise the UI does not keep.
 - Import merges reverse and cloze siblings into one card per note and reports
   the count. Studying both directions of a card is not supported yet.
-- The desktop and web builds have no local model, as described above.
+- Windows builds are unsigned, and `dist:win:unsigned` skips the executable
+  resource edit — see below. macOS has not been packaged at all; it needs a Mac.
 - Phase-2 items from the brief (deck sharing, TTS, image occlusion, streaks) are
   not started.
+
+## Building the desktop app
+
+```
+npm run desktop           # installs Electron, builds, packages for Windows
+npm run verify:desktop    # launches the packaged app and drives it
+```
+
+Two Windows-specific notes, both learned the hard way:
+
+**The build skips the executable resource edit.** electron-builder fetches a
+signing toolchain whose archive contains macOS symlinks, and Windows refuses to
+create those without Developer Mode or an elevated prompt, so the extraction
+fails and takes the build with it. Nothing here is signed anyway, and asking
+every contributor to change a Windows setting is worse than losing the version
+metadata stamped into the exe.
+
+**`ELECTRON_RUN_AS_NODE` must not be set.** Editors built on Electron — VS Code
+among them — export it for their own child processes, and any Electron binary
+that inherits it runs as plain Node: no window, no `protocol`, and an immediate
+exit with status 0. It imitates a broken build convincingly enough to send you
+looking at asar and code signing first. `verify-desktop.mjs` strips it.
