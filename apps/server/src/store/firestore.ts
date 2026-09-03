@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import type { Card, Deck } from '@fluentflow/core';
 import { resolveConflict } from '@fluentflow/core';
 import type { Config } from '../config.ts';
-import type { Store } from './types.ts';
+import { toStored, type Store } from './types.ts';
 
 /**
  * Firestore-backed store.
@@ -57,7 +57,7 @@ export class FirestoreStore implements Store {
     return snapshot.docs.map((doc) => doc.data() as T);
   }
 
-  private async put<T extends { id: string; lastModified: string }>(
+  private async put<T extends { id: string; lastModified: string; syncStatus?: string }>(
     userId: string,
     name: string,
     records: T[],
@@ -65,7 +65,7 @@ export class FirestoreStore implements Store {
     if (records.length === 0) return;
 
     const collection = this.db.collection(`users/${userId}/${name}`);
-    const deduped = dedupeById(records);
+    const deduped = dedupeById(records.map(toStored));
     const winners = await this.resolveAgainstStored(collection, deduped);
 
     for (const chunk of chunks(winners, MAX_BATCH_WRITES)) {

@@ -1,0 +1,29 @@
+{
+  "name": "@fluentflow/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows and macOS desktop shell for FluentFlow",
+  "main": "main.js",
+  "scripts": {
+    "build:web": "npm run export:web -w @fluentflow/mobile",
+    "start": "electron .",
+    "dev": "cross-env FLUENTFLOW_DEV_URL=http://localhost:8081 electron .",
+    "dist": "npm run build:web && electron-builder",
+    "dist:win": "npm run build:web && electron-builder --win",
+    "dist:mac": "npm run build:web && electron-builder --mac"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^44.1.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.fluentflow.desktop",
+    "productName": "FluentFlow",
+    "files": ["main.js", "preload.js", "web/**/*"],
+    "extraMetadata": { "main": "main.js" },
+    "win": { "target": ["nsis"] },
+    "mac": { "target": ["dmg"], "category": "public.app-category.education" },
+    "linux": { "target": ["AppImage"], "category": "Education" }
+  }
+}

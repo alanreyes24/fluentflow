@@ -1,0 +1,83 @@
+rules_version = '2';
+
+// Access control for FluentFlow.
+//
+// The data model exists to make this file short: everything a user owns lives
+// under `users/{userId}`, so ownership is a path comparison rather than a
+// per-document field check. A rule that had to read `resource.data.userId`
+// would also have to handle the create case, where there is no `resource` yet.
+//
+// Validation is duplicated between here and apps/server/src/validate.ts on
+// purpose. The app writes to Firestore directly through the client SDK, so
+// these rules are the only thing standing between a modified client and the
+// database; the server validator covers the HTTP path.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function isIsoTimestamp(value) {
+      return value is string && value.size() >= 20 && value.size() <= 30;
+    }
+
+    function isValidDeck(deck) {
+      return deck.keys().hasAll(['id', 'userId', 'name', 'language', 'lastModified'])
+        && deck.id is string && deck.id.size() > 0 && deck.id.size() <= 200
+        && deck.name is string && deck.name.size() > 0 && deck.name.size() <= 200
+        && deck.language in ['es', 'bs']
+        && deck.cardCount is int && deck.cardCount >= 0
+        && isIsoTimestamp(deck.lastModified);
+    }
+
+    function isValidCard(card) {
+      return card.keys().hasAll(['id', 'deckId', 'userId', 'front', 'back', 'language',
+                                 'interval', 'easeFactor', 'nextReview', 'status', 'lastModified'])
+        && card.id is string && card.id.size() > 0 && card.id.size() <= 200
+        && card.front is string && card.front.size() > 0 && card.front.size() <= 4000
+        && card.back is string && card.back.size() > 0 && card.back.size() <= 4000
+        && card.language in ['es', 'bs']
+        && card.status in ['new', 'learning', 'mastered']
+        && card.interval is number && card.interval >= 0 && card.interval <= 36500
+        // 1.3 is the SM-2 floor. A client writing a lower ease factor would
+        // schedule the card into a death spiral on every other device.
+        && card.easeFactor is number && card.easeFactor >= 1.3 && card.easeFactor <= 10
+        && card.examples is list && card.examples.size() <= 10
+        && isIsoTimestamp(card.nextReview)
+        && isIsoTimestamp(card.lastModified);
+    }
+
+    // The user document itself carries no data yet; it exists so the
+    // subcollections have a parent.
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /decks/{deckId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId)
+          && isValidDeck(request.resource.data)
+          // The id in the document must match the document it is stored in, or
+          // a last-write-wins merge keyed on `id` would target the wrong row.
+          && request.resource.data.id == deckId
+          && request.resource.data.userId == userId;
+        allow delete: if isOwner(userId);
+      }
+
+      match /cards/{cardId} {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId)
+          && isValidCard(request.resource.data)
+          && request.resource.data.id == cardId
+          && request.resource.data.userId == userId;
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // Anything not matched above is denied. Stated explicitly so adding a
+    // collection later is a deliberate act.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -10,11 +10,16 @@
   ],
   "scripts": {
     "build": "npm run build -w @fluentflow/core",
-    "test": "npm run test -w @fluentflow/core",
+    "test": "npm run test -w @fluentflow/core && npm run test -w @fluentflow/server",
+    "verify": "npm run build -w @fluentflow/core && node scripts/verify-flow.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "server": "npm run dev -w @fluentflow/server",
     "mobile": "npm run start -w @fluentflow/mobile",
+    "web": "npm run web -w @fluentflow/mobile",
+    "desktop": "npm --prefix apps/desktop install && npm --prefix apps/desktop run dist",
     "prepare-model": "node scripts/prepare-model.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

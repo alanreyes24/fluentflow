@@ -291,3 +291,32 @@ test('unknown routes return JSON, not an HTML error page', async () => {
   assert.equal(response.status, 404);
   assert.equal((await response.json()).error, 'not_found');
 });
+
+test('imported records come back as synced, not as pending uploads', async () => {
+  const apkg = buildApkg({
+    schema: 11,
+    decks: ['Spanish A1'],
+    fieldNames: ['Front', 'Back'],
+    notes: spanishNotes(20),
+  });
+
+  await call('/api/import/apkg?filename=Spanish%20A1.apkg', {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream' },
+    body: apkg,
+    user: 'mallory',
+  });
+
+  const pulled = await (await call('/api/sync', { user: 'mallory' })).json();
+
+  // The importer marks its output `pending` because on a real device it is —
+  // those records still have to reach the server. Once stored, they are the
+  // server's copy, and a device pulling them owes nothing. Leaking `pending`
+  // here made every device re-upload an entire imported deck.
+  assert.equal(pulled.cards.length, 20);
+  assert.ok(
+    pulled.cards.every((c: { syncStatus: string }) => c.syncStatus === 'synced'),
+    'no pulled card may claim to be pending',
+  );
+  assert.ok(pulled.decks.every((d: { syncStatus: string }) => d.syncStatus === 'synced'));
+});

@@ -1,6 +1,6 @@
 import type { Card, Deck } from '@fluentflow/core';
 import { resolveConflict } from '@fluentflow/core';
-import type { Store } from './types.ts';
+import { toStored, type Store } from './types.ts';
 
 /**
  * In-memory store used in local mode and by the test suite.
@@ -44,11 +44,12 @@ function bucket<T>(map: Map<string, Map<string, T>>, userId: string): Map<string
   return entry;
 }
 
-function upsertAll<T extends { id: string; lastModified: string }>(
+function upsertAll<T extends { id: string; lastModified: string; syncStatus?: string }>(
   target: Map<string, T>,
   records: T[],
 ): void {
-  for (const record of records) {
+  for (const incoming of records) {
+    const record = toStored(incoming);
     const existing = target.get(record.id);
     if (!existing) {
       target.set(record.id, record);
