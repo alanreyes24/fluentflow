@@ -54,7 +54,11 @@ export interface AppState {
 
 const IDLE_SYNC: SyncStatus = { state: 'idle', pending: 0, lastSyncedAt: null, error: null };
 
-const AppContext = createContext<AppState | null>(null);
+/**
+ * Exported so tests can supply a state directly rather than mocking the module
+ * that {@link useApp} lives in. Application code should use {@link AppProvider}.
+ */
+export const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [repository, setRepository] = useState<Repository | null>(null);

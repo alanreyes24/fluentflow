@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "npm run build -w @fluentflow/core",
-    "test": "npm run test -w @fluentflow/core && npm run test -w @fluentflow/server",
+    "test": "npm run test -w @fluentflow/core && npm run test -w @fluentflow/server && npm run test -w @fluentflow/mobile",
     "verify": "npm run build -w @fluentflow/core && node scripts/verify-flow.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "server": "npm run dev -w @fluentflow/server",
