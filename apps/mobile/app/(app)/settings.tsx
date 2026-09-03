@@ -1,0 +1,177 @@
+import { useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { LANGUAGE_NAMES, SUPPORTED_LANGUAGES, type LanguageCode } from '@fluentflow/core';
+import { useI18n } from '../../src/i18n';
+import { useApp } from '../../src/state/app';
+import { modelStatus, type ModelStatus } from '../../src/ai/model';
+import { modelSizeBytes } from '../../src/ai/assets';
+import { Button, Label, Row, Screen, Spacer, Surface } from '../../src/ui/components';
+import { useTheme, useThemeContext, type ThemePreference } from '../../src/ui/theme';
+
+/**
+ * Settings: interface language, appearance, model status and the account.
+ *
+ * The model section exists because "why are my examples generic?" is the
+ * question this app will be asked most, and the answer is nearly always one of
+ * three specific things. Saying which one beats a spinner.
+ */
+export default function SettingsScreen() {
+  const { t, language, setLanguage } = useI18n();
+  const theme = useTheme();
+  const { preference, setPreference } = useThemeContext();
+  const { user, sync, syncNow, signOut, cloudAvailable, examples } = useApp();
+
+  const [model, setModel] = useState<ModelStatus | null>(null);
+  const [modelSize, setModelSize] = useState<number | null>(null);
+
+  useEffect(() => {
+    void modelStatus().then(setModel);
+    void modelSizeBytes().then(setModelSize);
+  }, []);
+
+  const themeOptions: { value: ThemePreference; label: string }[] = [
+    { value: 'system', label: t('themeSystem') },
+    { value: 'light', label: t('themeLight') },
+    { value: 'dark', label: t('themeDark') },
+  ];
+
+  return (
+    <Screen>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Section title={t('interfaceLanguage')}>
+          <Row gap={theme.spacing.sm}>
+            {SUPPORTED_LANGUAGES.map((code: LanguageCode) => (
+              <Button
+                key={code}
+                label={LANGUAGE_NAMES[code]}
+                variant={language === code ? 'primary' : 'secondary'}
+                onPress={() => setLanguage(code)}
+                style={styles.grow}
+              />
+            ))}
+          </Row>
+        </Section>
+
+        <Section title={t('appearance')}>
+          <Row gap={theme.spacing.sm}>
+            {themeOptions.map((option) => (
+              <Button
+                key={option.value}
+                label={option.label}
+                variant={preference === option.value ? 'primary' : 'secondary'}
+                onPress={() => setPreference(option.value)}
+                style={styles.grow}
+              />
+            ))}
+          </Row>
+        </Section>
+
+        <Section title={t('aiSection')}>
+          {model === null ? (
+            <Label variant="body" tone="muted">
+              {t('loading')}
+            </Label>
+          ) : model.available ? (
+            <>
+              <Row gap={theme.spacing.sm}>
+                <View style={[styles.dot, { backgroundColor: theme.colors.statusMastered }]} />
+                <Label variant="body">{t('aiModelReady')}</Label>
+              </Row>
+              <Label variant="caption" tone="faint">
+                {model.vocabSize?.toLocaleString()} tokens
+                {modelSize ? ` · ${formatBytes(modelSize)}` : ''}
+              </Label>
+            </>
+          ) : (
+            <>
+              <Row gap={theme.spacing.sm}>
+                <View style={[styles.dot, { backgroundColor: theme.colors.statusLearning }]} />
+                <Label variant="body">{t('aiModelMissing')}</Label>
+              </Row>
+              <Label variant="caption" tone="muted">
+                {model.reason ?? t('aiModelMissingHint')}
+              </Label>
+            </>
+          )}
+
+          <Spacer size={theme.spacing.sm} />
+          <Button
+            label="Clear cached examples"
+            variant="ghost"
+            onPress={() => {
+              examples?.reset();
+              void modelStatus().then(setModel);
+            }}
+          />
+        </Section>
+
+        <Section title={t('account')}>
+          <Label variant="body">{user?.email ?? t('workOffline')}</Label>
+          {cloudAvailable && !user?.anonymous ? (
+            <>
+              <Label variant="caption" tone="faint">
+                {sync.lastSyncedAt
+                  ? t('lastSynced', { time: new Date(sync.lastSyncedAt).toLocaleString() })
+                  : t('offline')}
+              </Label>
+              <Spacer size={theme.spacing.sm} />
+              <Button
+                label={t('syncNow')}
+                variant="secondary"
+                onPress={() => void syncNow()}
+                loading={sync.state === 'syncing'}
+              />
+            </>
+          ) : (
+            <Label variant="caption" tone="faint">
+              {t('offlineAccountNote')}
+            </Label>
+          )}
+
+          <Spacer size={theme.spacing.sm} />
+          <Button
+            label={user?.anonymous ? t('signIn') : t('signOut')}
+            variant="ghost"
+            onPress={() => {
+              if (user?.anonymous) {
+                router.push('/sign-in');
+              } else {
+                void signOut().then(() => router.replace('/sign-in'));
+              }
+            }}
+          />
+        </Section>
+      </ScrollView>
+    </Screen>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.section}>
+      <Label variant="caption" tone="faint" style={styles.sectionTitle}>
+        {title}
+      </Label>
+      <Spacer size={theme.spacing.sm} />
+      <Surface style={styles.card}>{children}</Surface>
+    </View>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  const megabytes = bytes / (1024 * 1024);
+  return megabytes >= 1024
+    ? `${(megabytes / 1024).toFixed(1)} GB`
+    : `${Math.round(megabytes)} MB`;
+}
+
+const styles = StyleSheet.create({
+  content: { padding: 16 },
+  section: { marginBottom: 24 },
+  sectionTitle: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  card: { gap: 4 },
+  grow: { flex: 1 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+});

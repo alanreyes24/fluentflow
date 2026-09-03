@@ -111,7 +111,12 @@ export const en = {
   keyboardHint: 'Press 1–4 to rate',
 } as const;
 
-export type Strings = typeof en;
+/**
+ * English is the source of truth for *which* keys exist, but the values are
+ * plain strings: `as const` above gives every English value a literal type, and
+ * a translation is by definition a different string.
+ */
+export type Strings = { readonly [K in keyof typeof en]: string };
 export type StringKey = keyof Strings;
 
 const es: Strings = {
