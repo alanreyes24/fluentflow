@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from 'react';
 import { render, type RenderOptions } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Deck } from '@fluentflow/core';
 import { AppContext, type AppState, type AuthUser } from '../src/state/app';
 import { I18nProvider } from '../src/i18n';
@@ -141,6 +142,15 @@ jest.mock('expo-router', () => ({
   Redirect: () => null,
   Stack: Object.assign(() => null, { Screen: () => null }),
 }));
+
+/**
+ * The AsyncStorage fake is module-level, so a preference written by one test
+ * would otherwise be read back by the next — the interface-language tests
+ * failed in exactly that way before this.
+ */
+beforeEach(async () => {
+  await AsyncStorage.clear();
+});
 
 // --- rendering --------------------------------------------------------------
 

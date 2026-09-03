@@ -19,9 +19,28 @@ import { ratingFromValue, type RatingName } from '@fluentflow/core';
  */
 
 /** Fraction of the card's width a swipe must cross to count. */
-const SWIPE_THRESHOLD_RATIO = 0.28;
+export const SWIPE_THRESHOLD_RATIO = 0.28;
 /** Velocity that counts as a flick even when the distance is short. */
-const FLICK_VELOCITY = 0.4;
+export const FLICK_VELOCITY = 0.4;
+
+/**
+ * The rating a finished drag commits to, or `null` for one that does not count.
+ *
+ * Separated from the responder because this is the part with a decision in it:
+ * how far is far enough, how fast is fast enough, and which direction means
+ * what. The responder around it is plumbing.
+ */
+export function swipeRating(
+  gesture: { dx: number; vx: number },
+  cardWidth: number,
+): RatingName | null {
+  const threshold = (cardWidth || 1) * SWIPE_THRESHOLD_RATIO;
+  const committed = Math.abs(gesture.dx) > threshold || Math.abs(gesture.vx) > FLICK_VELOCITY;
+  if (!committed) return null;
+  // A flick with no horizontal movement has no direction to read.
+  if (gesture.dx === 0) return null;
+  return gesture.dx < 0 ? 'again' : 'good';
+}
 
 export interface CardGestures {
   /** Spread onto the animated card container. */
@@ -72,13 +91,8 @@ export function useCardGestures({
 
         onPanResponderRelease: (_event, gesture) => {
           const { enabled: canRate, onRate: rate, cardWidth: width } = latest.current;
-          const threshold = (width || 1) * SWIPE_THRESHOLD_RATIO;
-          const committed =
-            Math.abs(gesture.dx) > threshold || Math.abs(gesture.vx) > FLICK_VELOCITY;
-
-          if (canRate && committed) {
-            rate(gesture.dx < 0 ? 'again' : 'good');
-          }
+          const rating = swipeRating(gesture, width);
+          if (canRate && rating) rate(rating);
           reset();
         },
 
