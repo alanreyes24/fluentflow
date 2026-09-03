@@ -1,0 +1,25 @@
+node_modules/
+dist/
+build/
+.expo/
+.expo-shared/
+*.tsbuildinfo
+.env
+.env.local
+*.log
+npm-debug.log*
+yarn-error.log
+.DS_Store
+Thumbs.db
+
+# Bundled model weights (fetched via `npm run prepare-model`)
+apps/mobile/assets/models/*
+!apps/mobile/assets/models/.gitkeep
+!apps/mobile/assets/models/README.md
+
+# Firebase service credentials
+**/serviceAccount*.json
+!**/serviceAccount.example.json
+
+# Test scratch
+packages/core/test/.fixtures/

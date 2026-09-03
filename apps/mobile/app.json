@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "FluentFlow",
+    "slug": "fluentflow",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "fluentflow",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "platforms": ["ios", "android", "web"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fluentflow.app"
+    },
+    "android": {
+      "package": "com.fluentflow.app",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-localization",
+      [
+        "expo-sqlite",
+        {
+          "enableFTS": false,
+          "useSQLCipher": false
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiBaseUrl": "http://localhost:8787",
+      "firebase": {
+        "apiKey": "",
+        "authDomain": "",
+        "projectId": "",
+        "storageBucket": "",
+        "messagingSenderId": "",
+        "appId": ""
+      },
+      "ai": {
+        "modelFamily": "tinyllama",
+        "budgetMs": 2000,
+        "maxTokens": 96
+      }
+    }
+  }
+}
