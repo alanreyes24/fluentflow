@@ -38,10 +38,6 @@ interface ModelManifest {
 
 let cached: ModelAssets | null | undefined;
 
-export function isModelBundled(): boolean {
-  return (manifest as ModelManifest).model !== null;
-}
-
 export async function loadModelAssets(): Promise<ModelAssets | null> {
   if (cached !== undefined) return cached;
   cached = await resolveAssets();

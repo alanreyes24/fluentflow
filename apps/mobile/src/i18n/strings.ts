@@ -17,7 +17,6 @@ export const en = {
   signOut: 'Sign out',
   email: 'Email',
   password: 'Password',
-  continueWithGoogle: 'Continue with Google',
   noAccountYet: 'No account yet? Create one',
   haveAccount: 'Already have an account? Sign in',
   authFailed: 'Could not sign you in',
@@ -63,7 +62,6 @@ export const en = {
   examplesOffline: 'Offline examples',
   examplesOfflineHint: 'The on-device model was unavailable, so these are generic.',
   regenerate: 'Regenerate',
-  nextReviewIn: 'Next review in {interval}',
 
   // Progress
   statusNew: 'New',
@@ -127,7 +125,6 @@ const es: Strings = {
   signOut: 'Cerrar sesión',
   email: 'Correo electrónico',
   password: 'Contraseña',
-  continueWithGoogle: 'Continuar con Google',
   noAccountYet: '¿No tienes cuenta? Crea una',
   haveAccount: '¿Ya tienes cuenta? Inicia sesión',
   authFailed: 'No se pudo iniciar sesión',
@@ -170,7 +167,6 @@ const es: Strings = {
   examplesOffline: 'Ejemplos sin conexión',
   examplesOfflineHint: 'El modelo del dispositivo no estaba disponible, así que estos son genéricos.',
   regenerate: 'Regenerar',
-  nextReviewIn: 'Próximo repaso en {interval}',
 
   statusNew: 'Nuevas',
   statusLearning: 'Aprendiendo',
@@ -221,7 +217,6 @@ const bs: Strings = {
   signOut: 'Odjava',
   email: 'Email',
   password: 'Lozinka',
-  continueWithGoogle: 'Nastavi sa Google',
   noAccountYet: 'Nemate račun? Napravite ga',
   haveAccount: 'Već imate račun? Prijavite se',
   authFailed: 'Prijava nije uspjela',
@@ -264,7 +259,6 @@ const bs: Strings = {
   examplesOffline: 'Primjeri bez interneta',
   examplesOfflineHint: 'Model na uređaju nije bio dostupan, pa su ovi primjeri opšti.',
   regenerate: 'Generiši ponovo',
-  nextReviewIn: 'Sljedeće ponavljanje za {interval}',
 
   statusNew: 'Nove',
   statusLearning: 'Učenje',

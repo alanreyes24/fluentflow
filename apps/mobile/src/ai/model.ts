@@ -314,10 +314,3 @@ function shapeFrom(config: unknown): LlamaShape {
 
   return { numLayers, numKeyValueHeads, headDim };
 }
-
-/** Drop the loaded session, e.g. when the settings screen clears the cache. */
-export async function releaseModel(): Promise<void> {
-  const model = await sessionPromise;
-  await model?.session.release?.();
-  sessionPromise = null;
-}

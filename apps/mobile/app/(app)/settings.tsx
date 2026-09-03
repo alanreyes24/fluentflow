@@ -20,10 +20,11 @@ export default function SettingsScreen() {
   const { t, language, setLanguage } = useI18n();
   const theme = useTheme();
   const { preference, setPreference } = useThemeContext();
-  const { user, sync, syncNow, signOut, cloudAvailable, examples } = useApp();
+  const { user, sync, syncNow, signOut, cloudAvailable, examples, repository } = useApp();
 
   const [model, setModel] = useState<ModelStatus | null>(null);
   const [modelSize, setModelSize] = useState<number | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     void modelStatus().then(setModel);
@@ -99,9 +100,23 @@ export default function SettingsScreen() {
           <Button
             label="Clear cached examples"
             variant="ghost"
+            loading={clearing}
             onPress={() => {
-              examples?.reset();
-              void modelStatus().then(setModel);
+              setClearing(true);
+              // Both halves are needed: the SQLite table holds generated
+              // sentences, and the service holds an in-memory handle to the
+              // model that should be re-probed in case one has been installed
+              // since launch. Examples already attached to a card are left
+              // alone — those are synced content, not a cache.
+              void (async () => {
+                try {
+                  await repository?.clearExampleCache();
+                  examples?.reset();
+                  setModel(await modelStatus());
+                } finally {
+                  setClearing(false);
+                }
+              })();
             }}
           />
         </Section>

@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import type { Image, Text, View } from 'react-native';
+import type { Text, View } from 'react-native';
 
 /**
  * Style prop types for components that accept a `style`.
@@ -18,4 +18,3 @@ import type { Image, Text, View } from 'react-native';
 
 export type ViewStyleProp = ComponentProps<typeof View>['style'];
 export type TextStyleProp = ComponentProps<typeof Text>['style'];
-export type ImageStyleProp = ComponentProps<typeof Image>['style'];

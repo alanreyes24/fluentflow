@@ -211,7 +211,8 @@ see
   in this app uses Cloud Storage; resolving them needs an upstream release.
 - The Electron shell has been built and its layout verified, but not launched —
   this machine has no display for it.
-- Google sign-in is in the UI strings but not wired up; email/password is.
+- Google sign-in is not implemented; email/password is. The unused strings for
+  it were removed rather than left as a promise the UI does not keep.
 - Import merges reverse and cloze siblings into one card per note and reports
   the count. Studying both directions of a card is not supported yet.
 - The desktop and web builds have no local model, as described above.

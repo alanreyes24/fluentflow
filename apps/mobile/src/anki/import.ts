@@ -16,6 +16,7 @@ import {
   type TargetLanguage,
 } from '@fluentflow/core';
 import type { Repository } from '../db/repository';
+import { authApi } from '../firebase/client';
 import { appConfig } from '../firebase/config';
 
 /**
@@ -67,8 +68,6 @@ export interface ImportOptions {
   flatten?: boolean;
   /** Prefer the sync server. Required on web, where there is no native SQLite. */
   useServer?: boolean;
-  /** Firebase ID token, when importing through the server. */
-  token?: string;
 }
 
 /**
@@ -158,11 +157,22 @@ async function importViaServer(
   if (options.language) params.set('language', options.language);
   if (options.flatten) params.set('flatten', 'true');
 
+  // The endpoint requires a bearer token and decides the owning account from
+  // it, so the token is fetched here rather than accepted from the caller —
+  // there is no correct way for a screen to supply one for a different user.
+  const token = await authApi()?.idToken();
+  if (!token) {
+    throw new ApkgError(
+      'SQLITE_FAILED',
+      'Importing on this platform needs you to be signed in.',
+    );
+  }
+
   const response = await fetch(`${base}/api/import/apkg?${params.toString()}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/octet-stream',
-      ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      authorization: `Bearer ${token}`,
     },
     body: bytes as unknown as BodyInit,
   });

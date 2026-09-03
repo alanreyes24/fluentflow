@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Animated, PanResponder, Platform, type PanResponderInstance } from 'react-native';
-import { RATINGS, ratingFromValue, type RatingName } from '@fluentflow/core';
+import { ratingFromValue, type RatingName } from '@fluentflow/core';
 
 /**
  * Rating input that is not a button press.
@@ -135,9 +135,6 @@ export function useCardGestures({
 
   return { handlers: responder.panHandlers, translateX, progress };
 }
-
-/** The digits shown on the rating buttons, in button order. */
-export const RATING_SHORTCUTS = RATINGS;
 
 function isTextEntry(target: unknown): boolean {
   if (!target || typeof target !== 'object') return false;
