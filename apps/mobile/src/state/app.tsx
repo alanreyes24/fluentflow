@@ -57,7 +57,6 @@ const IDLE_SYNC: SyncStatus = { state: 'idle', pending: 0, lastSyncedAt: null, e
 const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [database, setDatabase] = useState<SQLiteDatabase | null>(null);
   const [repository, setRepository] = useState<Repository | null>(null);
   const [examples, setExamples] = useState<ExampleService | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -80,7 +79,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await migrate(opened);
         if (cancelled) return;
         const repo = new Repository(opened);
-        setDatabase(opened);
         setRepository(repo);
         setExamples(new ExampleService(repo));
       } catch (cause) {
@@ -220,9 +218,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       signOut,
     ],
   );
-
-  // `database` is held only so the cleanup above can close it.
-  void database;
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
