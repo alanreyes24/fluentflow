@@ -17,11 +17,12 @@ import { loadModelAssets, type ModelAssets } from './assets';
  * only the first pass is long and each subsequent step processes a single
  * token.
  *
- * `onnxruntime-react-native` is loaded dynamically and is an optional
- * dependency. It is a native module, so it needs a development build rather
- * than Expo Go, and the app must stay fully usable when it is absent: every
- * failure path here resolves to "no model", and the example pipeline falls
- * back to written sentences.
+ * `onnxruntime-react-native` is an optional dependency: it is a native module,
+ * so it needs a development build rather than Expo Go, and the app must stay
+ * fully usable without it. Metro substitutes a stub when it is not installed
+ * (see metro.config.js), so the require below always resolves and the check is
+ * on what came back. Every failure path here ends at "no model", and the
+ * example pipeline falls back to written sentences.
  */
 
 /** Minimal slice of the ONNX Runtime API this file uses. */
@@ -77,25 +78,30 @@ interface LoadedModel {
  *
  * `undefined` means "not tried yet"; `null` means "tried and unavailable", so
  * a missing native module is probed once rather than on every card reveal.
+ *
+ * The require is a plain static specifier on purpose — see the note above about
+ * why dynamic import and try/catch both fail here.
  */
-async function loadOrt(): Promise<OrtModule | null> {
+function loadOrt(): OrtModule | null {
   if (ortModule !== undefined) return ortModule;
+
   try {
-    // The specifier is built at runtime so Metro does not try to resolve — and
-    // fail on — an optional native dependency at bundle time.
-    const moduleName = 'onnxruntime-react-native';
-    const imported = (await import(/* webpackIgnore: true */ moduleName)) as
-      | OrtModule
-      | { default: OrtModule };
-    ortModule = 'InferenceSession' in imported ? imported : imported.default;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const imported = require('onnxruntime-react-native') as Partial<OrtModule> & {
+      default?: Partial<OrtModule>;
+    };
+    const resolved = imported.InferenceSession ? imported : imported.default;
+    // The stub has no InferenceSession, which is how "not installed" is read.
+    ortModule = resolved?.InferenceSession && resolved.Tensor ? (resolved as OrtModule) : null;
   } catch {
     ortModule = null;
   }
+
   return ortModule;
 }
 
 async function loadModel(): Promise<LoadedModel | null> {
-  const ort = await loadOrt();
+  const ort = loadOrt();
   if (!ort) return null;
 
   const assets = await loadModelAssets();
@@ -122,7 +128,7 @@ export function modelSession(): Promise<LoadedModel | null> {
 }
 
 export async function modelStatus(): Promise<ModelStatus> {
-  const ort = await loadOrt();
+  const ort = loadOrt();
   if (!ort) {
     return {
       available: false,
@@ -159,7 +165,7 @@ export async function createInference(): Promise<((request: InferenceRequest) =>
 
 async function generate(model: LoadedModel, request: InferenceRequest): Promise<string> {
   const { session, tokenizer, shape } = model;
-  const ort = await loadOrt();
+  const ort = loadOrt();
   if (!ort) throw new Error('ONNX Runtime went away mid-request.');
 
   const promptIds = tokenizer.encode(request.prompt, { addBos: true });

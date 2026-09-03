@@ -1,5 +1,7 @@
 import { Asset } from 'expo-asset';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import manifest from '../../assets/models/manifest';
 
 /**
  * Locating the bundled model files.
@@ -7,15 +9,19 @@ import * as FileSystem from 'expo-file-system';
  * ONNX Runtime needs a filesystem path, not a bundler module, and the three
  * files behave differently:
  *
- *  - `model.onnx` is hundreds of megabytes. `expo-asset` copies it into the
- *    app's cache directory on first launch and hands back a local URI.
- *  - `tokenizer.json` and `config.json` are small JSON that gets read into
- *    memory once.
+ *  - `model.onnx` is hundreds of megabytes. `expo-asset` copies it out of the
+ *    bundle on first launch and hands back a local URI.
+ *  - `tokenizer.json` and `config.json` are small enough to read into memory
+ *    once and keep.
  *
- * The weights are not in version control (see `.gitignore`) — `npm run
- * prepare-model` fetches and converts them. Everything here therefore treats a
- * missing model as an ordinary state, not an error: `loadModelAssets` returns
- * `null` and the example pipeline uses written sentences instead.
+ * They are reached through `assets/models/manifest.js` rather than required
+ * directly, because Metro resolves `require` at bundle time: a
+ * `require('./model.onnx')` wrapped in try/catch still breaks the build when
+ * the weights are absent. The manifest is committed with null entries and
+ * rewritten by `npm run prepare-model`.
+ *
+ * A missing model is an ordinary state, not an error — `loadModelAssets`
+ * returns `null` and the example pipeline uses written sentences instead.
  */
 
 export interface ModelAssets {
@@ -24,7 +30,17 @@ export interface ModelAssets {
   configJson: unknown;
 }
 
+interface ModelManifest {
+  model: number | string | null;
+  tokenizer: unknown;
+  config: unknown;
+}
+
 let cached: ModelAssets | null | undefined;
+
+export function isModelBundled(): boolean {
+  return (manifest as ModelManifest).model !== null;
+}
 
 export async function loadModelAssets(): Promise<ModelAssets | null> {
   if (cached !== undefined) return cached;
@@ -33,28 +49,23 @@ export async function loadModelAssets(): Promise<ModelAssets | null> {
 }
 
 async function resolveAssets(): Promise<ModelAssets | null> {
-  try {
-    // `require` rather than `import`: these paths do not exist until
-    // prepare-model has run, and a static import would break the bundle.
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const modelModule = require('../../assets/models/model.onnx');
-    const tokenizerModule = require('../../assets/models/tokenizer.json');
-    const configModule = require('../../assets/models/config.json');
-    /* eslint-enable @typescript-eslint/no-require-imports */
+  const entries = manifest as ModelManifest;
+  if (entries.model === null || !entries.tokenizer || !entries.config) return null;
 
-    const asset = Asset.fromModule(modelModule);
+  try {
+    const asset = Asset.fromModule(entries.model);
     await asset.downloadAsync();
 
-    const modelPath = asset.localUri ?? asset.uri;
-    if (!modelPath) return null;
+    const uri = asset.localUri ?? asset.uri;
+    if (!uri) return null;
 
     return {
-      modelPath: stripFileScheme(modelPath),
-      tokenizerJson: unwrap(tokenizerModule),
-      configJson: unwrap(configModule),
+      modelPath: stripFileScheme(uri),
+      tokenizerJson: unwrap(entries.tokenizer),
+      configJson: unwrap(entries.config),
     };
   } catch {
-    // Missing weights, or a bundler that could not resolve them.
+    // The asset could not be unpacked — a truncated download, or no space.
     return null;
   }
 }
@@ -75,8 +86,8 @@ export async function modelSizeBytes(): Promise<number | null> {
   const assets = await loadModelAssets();
   if (!assets) return null;
   try {
-    const info = await FileSystem.getInfoAsync(`file://${assets.modelPath}`);
-    return info.exists && 'size' in info ? (info.size ?? null) : null;
+    const file = new File(`file://${assets.modelPath}`);
+    return file.exists ? (file.size ?? null) : null;
   } catch {
     return null;
   }

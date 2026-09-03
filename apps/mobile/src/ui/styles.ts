@@ -4,18 +4,16 @@ import type { Image, Text, View } from 'react-native';
 /**
  * Style prop types for components that accept a `style`.
  *
- * React Native 0.87 ships two parallel type definitions — the hand-written ones
- * under `types/` and Flow-derived generated ones under `types_generated/` — and
- * mixing them does not type-check: `View` picks up the generated
- * `____ViewStyleProp_Internal` while `Pressable` and `Text` still resolve to the
- * hand-written `StyleProp<ViewStyle>`, and the two disagree on properties such
- * as `backgroundImage`. `tsconfig.json` therefore pins the hand-written set via
- * the `react-native-legacy-deep-imports` export condition, which is the
- * consistent one across every component in this release.
+ * React Native is midway through replacing its hand-written types with
+ * Flow-derived generated ones. On 0.86 the hand-written set is still the
+ * default and the generated set is opt-in via the `react-native-strict-api`
+ * export condition; the two are not interchangeable, and mixing them fails to
+ * compile (`View` wants `____ViewStyleProp_Internal` where `Pressable` wants
+ * `StyleProp<ViewStyle>`, and they disagree about properties such as
+ * `backgroundImage`).
  *
- * These aliases are read off the components' own props rather than written out,
- * so the app keeps compiling when that pin is eventually removed and the
- * generated types become the only ones.
+ * Reading the aliases off the components' own props sidesteps the question
+ * entirely: whichever set is active, these follow it.
  */
 
 export type ViewStyleProp = ComponentProps<typeof View>['style'];

@@ -51,6 +51,9 @@ misread:
 | iOS / Android / web | Expo, standard |
 | Windows / macOS | Electron around the web export, not native RN |
 
+All three platform bundles build: `npx expo export --platform web` and
+`--platform ios --platform android` both complete, the latter through Hermes.
+
 The AI integration is real code — a greedy decoder over an ONNX graph with KV
 cache reuse, and a Llama-style BPE tokenizer with byte fallback, both written
 here and the tokenizer unit-tested. What is not in the repository is the ~620 MB
@@ -148,6 +151,24 @@ right without a model is not something a template can do honestly in either
 language, so the fallback produces sentences that are grammatical *about* the
 word (`«hablar» significa "to speak".`). The UI labels them as offline examples.
 
+**An optional native module needs resolver help, not a try/catch.** ONNX
+Runtime has to be optional — it is a native module, so it needs a development
+build and cannot load in Expo Go. Neither obvious approach works: `await
+import(name)` is a Hermes compile error ("Invalid expression encountered"), and
+a static `require` in a try/catch still breaks the *build*, because Metro
+resolves requires before any code runs. `metro.config.js` therefore maps the
+module to a stub when it is absent, and the app writes a plain require and
+checks what came back.
+
+**Package versions follow the SDK, not npm's `latest`.** Every `expo-*` and
+community package declares `react-native: *`, so npm hoists whatever is newest
+and a workspace quietly ends up with two copies of React Native — the classic
+cause of "invalid hook call". Worse, React Native 0.87 removed the `./*`
+subpath export that Expo's own CLI relies on, so the web export fails outright.
+The versions here come from `node_modules/expo/bundledNativeModules.json`
+(0.86.3), pinned with a root `overrides` block so a transitive `*` cannot drag
+in another.
+
 **KV cache reuse is what makes the budget reachable.** Without it, each new
 token re-reads the whole prompt: 40 tokens over a ~120-token prompt is roughly
 twenty times the work. `num_key_value_heads` differs from
@@ -185,9 +206,11 @@ see
 
 - The React Native views have no tests. They typecheck, and the logic beneath
   them is covered, but nothing here has rendered them on a device.
-- `firebase-admin` pulls transitive dependencies with 11 moderate `npm audit`
+- `firebase-admin` pulls transitive dependencies with moderate `npm audit`
   advisories (via `@google-cloud/storage` → `teeny-request` → `uuid`). Nothing
   in this app uses Cloud Storage; resolving them needs an upstream release.
+- The Electron shell has been built and its layout verified, but not launched —
+  this machine has no display for it.
 - Google sign-in is in the UI strings but not wired up; email/password is.
 - Import merges reverse and cloze siblings into one card per note and reports
   the count. Studying both directions of a card is not supported yet.

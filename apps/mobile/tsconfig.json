@@ -2,11 +2,6 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    // React Native 0.87 ships two incompatible type definitions and resolves
-    // different components to each. Pinning the hand-written set is the only
-    // combination that type-checks; see src/ui/styles.ts. Affects types only —
-    // Metro has its own resolver and is unaffected.
-    "customConditions": ["react-native-legacy-deep-imports", "react-native"],
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "paths": {

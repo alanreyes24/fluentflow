@@ -16,6 +16,7 @@ Thumbs.db
 apps/mobile/assets/models/*
 !apps/mobile/assets/models/.gitkeep
 !apps/mobile/assets/models/README.md
+!apps/mobile/assets/models/manifest.js
 
 # Firebase service credentials
 **/serviceAccount*.json

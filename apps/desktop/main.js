@@ -9,22 +9,33 @@
  * project. Wrapping the web export in Electron gets a real desktop app from the
  * same codebase, at the cost of the on-device ONNX model: `onnxruntime-react-
  * native` is a native mobile module, so the desktop build falls back to written
- * example sentences unless it is pointed at a local inference service.
+ * example sentences.
  *
- * The renderer is deliberately locked down. It loads only the bundled export
- * and never gets Node access, because it runs UI code that renders
- * user-supplied deck content.
+ * The export is served over a custom `app://` scheme rather than loaded from
+ * `file://`. That is not cosmetic:
+ *
+ *  - The build is a single-page app, and expo-router drives it with the History
+ *    API. Under `file://` those routes do not resolve, so a reload or a deep
+ *    link lands on a blank page.
+ *  - `file://` URLs have a null origin, which makes both CSP and any
+ *    same-origin navigation check meaningless.
+ *
+ * The renderer never gets Node access, because it renders user-supplied deck
+ * content.
  */
 
-const { app, BrowserWindow, Menu, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, net, protocol, shell, session } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { existsSync } = require('node:fs');
 
-/** Set to the Metro dev server URL to develop against a live reload. */
+/** Set to the Metro dev server URL to develop against live reload. */
 const DEV_URL = process.env.FLUENTFLOW_DEV_URL;
 const WEB_ROOT = path.join(__dirname, 'web');
 const INDEX_HTML = path.join(WEB_ROOT, 'index.html');
+
+const SCHEME = 'app';
+const APP_ORIGIN = `${SCHEME}://fluentflow`;
 
 /** Hosts the renderer may talk to. Firebase needs several. */
 const ALLOWED_CONNECT_HOSTS = [
@@ -33,6 +44,39 @@ const ALLOWED_CONNECT_HOSTS = [
   'https://*.cloudfunctions.net',
   'wss://*.firebaseio.com',
 ];
+
+// Must be called before `app.whenReady`. Registering the scheme as standard is
+// what gives it a real origin; without `secure`, the renderer is treated as an
+// insecure context and IndexedDB — which expo-sqlite's web backend needs — is
+// unavailable.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+]);
+
+/**
+ * Serve the export, falling back to `index.html` for unknown paths.
+ *
+ * The fallback is what makes client-side routing work: a request for
+ * `app://fluentflow/decks` has no matching file, and the SPA is expected to
+ * resolve that route itself once it boots.
+ */
+function registerProtocolHandler() {
+  protocol.handle(SCHEME, (request) => {
+    const { pathname } = new URL(request.url);
+    const relative = decodeURIComponent(pathname).replace(/^\/+/, '');
+    const candidate = path.join(WEB_ROOT, relative);
+
+    // Refuse anything that escapes the export directory.
+    const withinRoot =
+      candidate === WEB_ROOT || candidate.startsWith(WEB_ROOT + path.sep);
+
+    const target = withinRoot && relative && existsSync(candidate) ? candidate : INDEX_HTML;
+    return net.fetch(pathToFileURL(target).toString());
+  });
+}
 
 function createWindow() {
   const window = new BrowserWindow({
@@ -60,7 +104,7 @@ function createWindow() {
     void window.loadURL(DEV_URL);
     window.webContents.openDevTools({ mode: 'detach' });
   } else if (existsSync(INDEX_HTML)) {
-    void window.loadFile(INDEX_HTML);
+    void window.loadURL(`${APP_ORIGIN}/`);
   } else {
     void window.loadURL(missingBuildPage());
   }
@@ -74,12 +118,11 @@ function createWindow() {
   // Block in-app navigation away from the bundle. Without this, a link in a
   // card's text could replace the whole app with an arbitrary page.
   window.webContents.on('will-navigate', (event, url) => {
-    const target = new URL(url);
-    const allowed = DEV_URL ? new URL(DEV_URL).origin : pathToFileURL(WEB_ROOT).origin;
-    if (target.origin !== allowed) {
-      event.preventDefault();
-      if (/^https?:$/.test(target.protocol)) void shell.openExternal(url);
-    }
+    const allowedOrigin = DEV_URL ? new URL(DEV_URL).origin : APP_ORIGIN;
+    if (new URL(url).origin === allowedOrigin) return;
+
+    event.preventDefault();
+    if (/^https?:/.test(new URL(url).protocol)) void shell.openExternal(url);
   });
 
   return window;
@@ -94,14 +137,16 @@ function applyContentSecurityPolicy() {
         'Content-Security-Policy': [
           [
             "default-src 'self'",
-            // Metro's dev bundle and React Native Web's runtime style
-            // injection both need these; the packaged build is stricter only
-            // in that it has no dev server to reach.
-            `script-src 'self' ${DEV_URL ? "'unsafe-eval'" : ''}`,
+            // Metro's dev bundle needs eval; the packaged build does not, and
+            // does not get it.
+            `script-src 'self'${DEV_URL ? " 'unsafe-eval'" : ''}`,
+            // react-native-web injects styles at runtime.
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob:",
             "font-src 'self' data:",
-            `connect-src 'self' ${ALLOWED_CONNECT_HOSTS.join(' ')} ${DEV_URL ?? ''}`,
+            // wa-sqlite runs in a worker instantiated from a blob URL.
+            "worker-src 'self' blob:",
+            `connect-src 'self' ${ALLOWED_CONNECT_HOSTS.join(' ')} ${DEV_URL ?? ''}`.trim(),
             "frame-ancestors 'none'",
           ].join('; '),
         ],
@@ -146,15 +191,16 @@ function missingBuildPage() {
 <body><main>
   <h1>The web build is missing</h1>
   <p>This shell renders the Expo web export. Build it first:</p>
-  <p><code>npm run dist -w @fluentflow/desktop</code></p>
+  <p><code>npm run dist</code></p>
   <p>Or develop against the Metro dev server:</p>
-  <p><code>npm run mobile</code> then <code>npm run dev -w @fluentflow/desktop</code></p>
+  <p><code>npm run mobile</code> in the repository root, then <code>npm run dev</code> here.</p>
 </main></body></html>`;
 
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
 app.whenReady().then(() => {
+  registerProtocolHandler();
   applyContentSecurityPolicy();
   Menu.setApplicationMenu(buildMenu());
   createWindow();
