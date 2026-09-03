@@ -223,6 +223,10 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
       ) : null}
       <TextInput
         ref={ref}
+        // The visible label is a sibling `Text`, which a screen reader has no
+        // way to associate with this input — without this the field is
+        // announced as an unnamed text box.
+        accessibilityLabel={props.accessibilityLabel ?? label}
         placeholderTextColor={theme.colors.textFaint}
         style={[
           theme.typography.body,

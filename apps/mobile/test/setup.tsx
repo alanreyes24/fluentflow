@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from 'react';
 import { render, type RenderOptions } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { Deck } from '@fluentflow/core';
 import { AppContext, type AppState, type AuthUser } from '../src/state/app';
 import { I18nProvider } from '../src/i18n';
@@ -156,6 +157,16 @@ beforeEach(async () => {
 
 const IDLE_SYNC: SyncStatus = { state: 'idle', pending: 0, lastSyncedAt: null, error: null };
 
+/**
+ * A phone-shaped frame with a notch, matching what `app/_layout.tsx` provides
+ * through `SafeAreaProvider`. Without it, any screen calling
+ * `useSafeAreaInsets` throws rather than rendering.
+ */
+const TEST_METRICS = {
+  frame: { x: 0, y: 0, width: 390, height: 844 },
+  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+};
+
 export const TEST_USER: AuthUser = {
   id: 'test-user',
   email: 'learner@example.com',
@@ -211,11 +222,13 @@ export async function renderScreen(ui: ReactElement, options: HarnessOptions = {
 
   function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <I18nProvider>
-        <ThemeProvider>
-          <AppContext.Provider value={state}>{children}</AppContext.Provider>
-        </ThemeProvider>
-      </I18nProvider>
+      <SafeAreaProvider initialMetrics={TEST_METRICS}>
+        <I18nProvider>
+          <ThemeProvider>
+            <AppContext.Provider value={state}>{children}</AppContext.Provider>
+          </ThemeProvider>
+        </I18nProvider>
+      </SafeAreaProvider>
     );
   }
 
