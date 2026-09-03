@@ -28,3 +28,4 @@ packages/core/test/.fixtures/
 # Build output and evidence from scripts/verify-web.mjs
 .web-export/
 .web-export-shots/
+.desktop-shots/

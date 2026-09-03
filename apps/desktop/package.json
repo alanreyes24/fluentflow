@@ -10,7 +10,8 @@
     "dev": "cross-env FLUENTFLOW_DEV_URL=http://localhost:8081 electron .",
     "dist": "npm run build:web && electron-builder",
     "dist:win": "npm run build:web && electron-builder --win",
-    "dist:mac": "npm run build:web && electron-builder --mac"
+    "dist:mac": "npm run build:web && electron-builder --mac",
+    "dist:win:unsigned": "npm run build:web && electron-builder --win -c.win.signAndEditExecutable=false"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
@@ -30,7 +31,8 @@
     },
     "win": {
       "target": [
-        "nsis"
+        "nsis",
+        "portable"
       ]
     },
     "mac": {
@@ -44,6 +46,16 @@
         "AppImage"
       ],
       "category": "Education"
-    }
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "FluentFlow-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "FluentFlow-${version}-portable.${ext}"
+    },
+    "asar": false
   }
 }
