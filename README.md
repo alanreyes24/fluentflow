@@ -113,6 +113,11 @@ npm run desktop       # builds the web export, then packages with electron-build
 download and nobody working on the mobile app should pay for it on every
 `npm install`.
 
+That packages installers, which is slow and not how you would try a change out.
+See [Building the desktop app](#building-the-desktop-app): `npm run desktop:refresh`
+pushes a new build into an app you already have in about 30 seconds, with no
+installer and nothing downloaded.
+
 ## Design notes
 
 The decisions that took the most thought, and are the ones to argue with:
@@ -271,7 +276,39 @@ npm run desktop           # installs Electron, builds, packages for Windows
 npm run verify:desktop    # launches the packaged app and drives it
 ```
 
-Two Windows-specific notes, both learned the hard way:
+That writes two 110 MB installers and takes minutes. It is the wrong loop for
+trying a change out.
+
+### Testing a new version without downloading one
+
+A packaged FluentFlow is 370 MB on disk, and 367 MB of that is the Electron
+runtime — the same bytes in every version. What actually changes is
+`resources/app`: the web export, `main.js` and `preload.js`, about 3 MB
+together. So a new version is a file copy, not a download.
+
+```
+npm run desktop:pack               # once: builds dist/win-unpacked, no installer
+npm run desktop:refresh            # each version after: rebuild and push, ~30 s
+npm run desktop:refresh -- --run   # ...and launch it
+```
+
+`refresh` updates every packaged FluentFlow it can find — the unpacked build in
+`dist/`, and an installed copy under `%LOCALAPPDATA%/Programs/FluentFlow` — so
+the entry on the Start menu can be kept current without ever downloading
+anything. This works only because `asar: false` is set: the app files sit loose
+on disk instead of sealed inside an archive. It refuses to write into a copy
+that is currently running, and it cannot update the portable exe at all, which
+unpacks itself into a temporary directory on every launch.
+
+An Electron version bump still needs a real rebuild. Nothing else does.
+
+For UI work there is a faster loop again: `npm run web` in one terminal and
+`npm run desktop:dev` in another points the shell at the Metro dev server, and a
+save shows up in the window straight away. That is not the packaged code path,
+though — the `app://` scheme and the production CSP only exist in a real build —
+so confirm anything shell-shaped with `refresh` before believing it.
+
+### Two Windows-specific notes, both learned the hard way
 
 **The build skips the executable resource edit.** electron-builder fetches a
 signing toolchain whose archive contains macOS symlinks, and Windows refuses to
@@ -284,4 +321,7 @@ metadata stamped into the exe.
 among them — export it for their own child processes, and any Electron binary
 that inherits it runs as plain Node: no window, no `protocol`, and an immediate
 exit with status 0. It imitates a broken build convincingly enough to send you
-looking at asar and code signing first. `verify-desktop.mjs` strips it.
+looking at asar and code signing first. Every script here strips it before
+spawning Electron — that is the whole reason `apps/desktop/scripts/launch.mjs`
+exists — so `npm start`, `desktop:refresh --run` and the verification scripts are
+immune to it. A bare `npx electron .` is not.

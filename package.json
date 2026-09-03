@@ -17,6 +17,9 @@
     "mobile": "npm run start -w @fluentflow/mobile",
     "web": "npm run web -w @fluentflow/mobile",
     "desktop": "npm --prefix apps/desktop install && npm --prefix apps/desktop run dist:win:unsigned",
+    "desktop:pack": "npm --prefix apps/desktop install && npm --prefix apps/desktop run pack",
+    "desktop:refresh": "node scripts/refresh-desktop.mjs",
+    "desktop:dev": "npm --prefix apps/desktop run dev",
     "prepare-model": "node scripts/prepare-model.mjs",
     "verify:web": "node scripts/verify-web.mjs",
     "verify:desktop": "node scripts/verify-desktop.mjs"

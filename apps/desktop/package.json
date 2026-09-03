@@ -6,8 +6,9 @@
   "main": "main.js",
   "scripts": {
     "build:web": "cd ../mobile && npx expo export --platform web --output-dir ../desktop/web --clear",
-    "start": "electron .",
-    "dev": "cross-env FLUENTFLOW_DEV_URL=http://localhost:8081 electron .",
+    "start": "node scripts/launch.mjs",
+    "dev": "cross-env FLUENTFLOW_DEV_URL=http://localhost:8081 node scripts/launch.mjs",
+    "pack": "npm run build:web && electron-builder --win --dir -c.win.signAndEditExecutable=false",
     "dist": "npm run build:web && electron-builder",
     "dist:win": "npm run build:web && electron-builder --win",
     "dist:mac": "npm run build:web && electron-builder --mac",
