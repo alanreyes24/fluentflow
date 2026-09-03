@@ -45,7 +45,7 @@ async function main() {
       'No desktop install found to refresh.\n' +
         '\n' +
         'Build one first — this is local, nothing is downloaded:\n' +
-        '  npm run desktop:pack        # dist/win-unpacked, about a minute\n' +
+        '  npm run desktop:pack        # dist/win-unpacked, a minute or two\n' +
         '\n' +
         'Or install FluentFlow-Setup-0.1.0.exe once, and refresh that from then on.',
     );
