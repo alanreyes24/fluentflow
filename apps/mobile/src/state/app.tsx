@@ -79,7 +79,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        opened = await openDatabaseAsync(DATABASE_NAME);
+        opened = await openDatabase();
         await migrate(opened);
         if (cancelled) return;
         const repo = new Repository(opened);
@@ -92,8 +92,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     })();
 
+    // Closing the database before the document goes away.
+    //
+    // React's cleanup does not run when a page is navigated away from or
+    // reloaded, and on the web expo-sqlite keeps the connection in a worker
+    // that outlives the document. Left open, the next page finds the virtual
+    // file system half-initialised and fails with "Invalid VFS state" — so
+    // refreshing mid-session showed "FluentFlow could not start", and only a
+    // second refresh recovered.
+    //
+    // `pagehide` rather than `beforeunload`: it fires for the back/forward
+    // cache and on mobile Safari, where `beforeunload` is unreliable.
+    const closeBeforeUnload = () => {
+      void opened?.closeAsync();
+    };
+    globalThis.addEventListener?.('pagehide', closeBeforeUnload);
+
     return () => {
       cancelled = true;
+      globalThis.removeEventListener?.('pagehide', closeBeforeUnload);
       void opened?.closeAsync();
     };
   }, []);
@@ -237,6 +254,92 @@ export function useRepository(): Repository {
   const { repository } = useApp();
   if (!repository) throw new Error('The database is not open yet.');
   return repository;
+}
+
+const OPEN_RETRY_ATTEMPTS = 12;
+const OPEN_RETRY_DELAY_MS = 100;
+const RELOAD_MARKER = 'fluentflow.storageReload';
+
+/**
+ * Open the database, working around a reload that raced the previous page.
+ *
+ * On the web, expo-sqlite is wa-sqlite over the origin-private file system,
+ * which allows exactly one access handle per file. Reloading mid-session
+ * starts the new document before the old one's worker has let go, and the open
+ * fails one of two ways:
+ *
+ *  - `NoModificationAllowedError` — the handle is still held. It is released
+ *    within a few hundred milliseconds, so waiting is enough.
+ *  - `Invalid VFS state` — wa-sqlite's own module state is now unusable, and
+ *    no amount of retrying inside this document will clear it. A fresh
+ *    document always works.
+ *
+ * So: retry the first, and reload once for the second. The marker keeps that
+ * from becoming a loop — if a reload does not fix it, the error is real and
+ * the user sees it.
+ */
+async function openDatabase(): Promise<SQLiteDatabase> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < OPEN_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const database = await openDatabaseAsync(DATABASE_NAME);
+      clearReloadMarker();
+      return database;
+    } catch (cause) {
+      lastError = cause;
+      if (isVfsCorruptError(cause) && reloadOnce()) {
+        // The reload is already scheduled; hold until the document goes away
+        // rather than racing it with another attempt.
+        await delay(10_000);
+      }
+      if (!isLockedError(cause)) throw cause;
+      await delay(OPEN_RETRY_DELAY_MS);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+function isLockedError(cause: unknown): boolean {
+  const name = (cause as { name?: string } | null)?.name ?? '';
+  return name === 'NoModificationAllowedError' || /access handle/i.test(messageOf(cause));
+}
+
+function isVfsCorruptError(cause: unknown): boolean {
+  return /invalid vfs state/i.test(messageOf(cause));
+}
+
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+/** @returns whether a reload was actually started. */
+function reloadOnce(): boolean {
+  try {
+    const storage = globalThis.sessionStorage;
+    const location = globalThis.location;
+    if (!storage || !location?.reload || storage.getItem(RELOAD_MARKER)) return false;
+    storage.setItem(RELOAD_MARKER, '1');
+    location.reload();
+    return true;
+  } catch {
+    // No sessionStorage (a private window, or a native build): fall through to
+    // reporting the error rather than reloading blind.
+    return false;
+  }
+}
+
+function clearReloadMarker(): void {
+  try {
+    globalThis.sessionStorage?.removeItem(RELOAD_MARKER);
+  } catch {
+    // Nothing to clean up if storage is unavailable.
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**

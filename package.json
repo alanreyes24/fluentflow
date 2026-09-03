@@ -17,7 +17,8 @@
     "mobile": "npm run start -w @fluentflow/mobile",
     "web": "npm run web -w @fluentflow/mobile",
     "desktop": "npm --prefix apps/desktop install && npm --prefix apps/desktop run dist",
-    "prepare-model": "node scripts/prepare-model.mjs"
+    "prepare-model": "node scripts/prepare-model.mjs",
+    "verify:web": "node scripts/verify-web.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -26,5 +27,8 @@
     "react-native": "0.86.3",
     "react": "19.2.3",
     "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^24.43.1"
   }
 }
