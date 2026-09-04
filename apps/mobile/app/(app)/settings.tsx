@@ -4,13 +4,27 @@ import { router } from 'expo-router';
 import { LANGUAGE_NAMES, SUPPORTED_LANGUAGES, type LanguageCode } from '@fluentflow/core';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
+import { DAILY_GOAL_OPTIONS, usePreferences } from '../../src/state/preferences';
 import { modelStatus, type ModelStatus } from '../../src/ai/model';
 import { modelSizeBytes } from '../../src/ai/assets';
-import { Button, Label, Row, Screen, Spacer, Surface } from '../../src/ui/components';
+import {
+  Button,
+  Chip,
+  column,
+  Divider,
+  Label,
+  Row,
+  Screen,
+  SectionHeader,
+  SegmentedControl,
+  Spacer,
+  Surface,
+} from '../../src/ui/components';
 import { useTheme, useThemeContext, type ThemePreference } from '../../src/ui/theme';
 
 /**
- * Settings: interface language, appearance, model status and the account.
+ * Settings: study goal, interface language, appearance, model status and the
+ * account.
  *
  * The model section exists because "why are my examples generic?" is the
  * question this app will be asked most, and the answer is nearly always one of
@@ -20,6 +34,7 @@ export default function SettingsScreen() {
   const { t, language, setLanguage } = useI18n();
   const theme = useTheme();
   const { preference, setPreference } = useThemeContext();
+  const { dailyGoal, setDailyGoal } = usePreferences();
   const { user, sync, syncNow, signOut, cloudAvailable, examples, repository } = useApp();
 
   const [model, setModel] = useState<ModelStatus | null>(null);
@@ -31,41 +46,45 @@ export default function SettingsScreen() {
     void modelSizeBytes().then(setModelSize);
   }, []);
 
-  const themeOptions: { value: ThemePreference; label: string }[] = [
-    { value: 'system', label: t('themeSystem') },
-    { value: 'light', label: t('themeLight') },
-    { value: 'dark', label: t('themeDark') },
-  ];
-
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={[styles.content, column.narrow]}>
+        <Section title={t('dailyGoal')}>
+          <SegmentedControl<string>
+            options={DAILY_GOAL_OPTIONS.map((goal) => ({
+              value: String(goal),
+              label: t('goalPerDay', { count: goal }),
+            }))}
+            value={String(dailyGoal)}
+            onChange={(next) => setDailyGoal(Number(next))}
+          />
+          <Spacer size={theme.spacing.sm} />
+          <Label variant="caption" tone="faint">
+            {t('dailyGoalHint')}
+          </Label>
+        </Section>
+
         <Section title={t('interfaceLanguage')}>
-          <Row gap={theme.spacing.sm}>
-            {SUPPORTED_LANGUAGES.map((code: LanguageCode) => (
-              <Button
-                key={code}
-                label={LANGUAGE_NAMES[code]}
-                variant={language === code ? 'primary' : 'secondary'}
-                onPress={() => setLanguage(code)}
-                style={styles.grow}
-              />
-            ))}
-          </Row>
+          <SegmentedControl<LanguageCode>
+            options={SUPPORTED_LANGUAGES.map((code: LanguageCode) => ({
+              value: code,
+              label: LANGUAGE_NAMES[code],
+            }))}
+            value={language}
+            onChange={setLanguage}
+          />
         </Section>
 
         <Section title={t('appearance')}>
-          <Row gap={theme.spacing.sm}>
-            {themeOptions.map((option) => (
-              <Button
-                key={option.value}
-                label={option.label}
-                variant={preference === option.value ? 'primary' : 'secondary'}
-                onPress={() => setPreference(option.value)}
-                style={styles.grow}
-              />
-            ))}
-          </Row>
+          <SegmentedControl<ThemePreference>
+            options={[
+              { value: 'system', label: t('themeSystem') },
+              { value: 'light', label: t('themeLight') },
+              { value: 'dark', label: t('themeDark') },
+            ]}
+            value={preference}
+            onChange={setPreference}
+          />
         </Section>
 
         <Section title={t('aiSection')}>
@@ -97,6 +116,8 @@ export default function SettingsScreen() {
           )}
 
           <Spacer size={theme.spacing.sm} />
+          <Divider />
+          <Spacer size={theme.spacing.sm} />
           <Button
             label="Clear cached examples"
             variant="ghost"
@@ -122,7 +143,21 @@ export default function SettingsScreen() {
         </Section>
 
         <Section title={t('account')}>
-          <Label variant="body">{user?.email ?? t('workOffline')}</Label>
+          <Row justify="space-between" gap={theme.spacing.sm}>
+            <Label variant="body" numberOfLines={1} style={styles.grow}>
+              {user?.email ?? t('workOffline')}
+            </Label>
+            <Chip
+              label={cloudAvailable && !user?.anonymous ? t('synced') : t('offline')}
+              color={
+                cloudAvailable && !user?.anonymous ? theme.colors.accent : theme.colors.textMuted
+              }
+              background={
+                cloudAvailable && !user?.anonymous ? theme.colors.accentSoft : undefined
+              }
+            />
+          </Row>
+
           {cloudAvailable && !user?.anonymous ? (
             <>
               <Label variant="caption" tone="faint">
@@ -157,20 +192,22 @@ export default function SettingsScreen() {
             }}
           />
         </Section>
+
+        <Label variant="caption" tone="faint" align="center">
+          {t('appName')}
+        </Label>
       </ScrollView>
     </Screen>
   );
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  const theme = useTheme();
   return (
     <View style={styles.section}>
-      <Label variant="caption" tone="faint" style={styles.sectionTitle}>
-        {title}
-      </Label>
-      <Spacer size={theme.spacing.sm} />
-      <Surface style={styles.card}>{children}</Surface>
+      <SectionHeader title={title} />
+      <Surface elevation="low" style={styles.card}>
+        {children}
+      </Surface>
     </View>
   );
 }
@@ -185,7 +222,6 @@ function formatBytes(bytes: number): string {
 const styles = StyleSheet.create({
   content: { padding: 16 },
   section: { marginBottom: 24 },
-  sectionTitle: { textTransform: 'uppercase', letterSpacing: 0.6 },
   card: { gap: 4 },
   grow: { flex: 1 },
   dot: { width: 8, height: 8, borderRadius: 4 },

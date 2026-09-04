@@ -84,14 +84,83 @@ describe('DecksScreen', () => {
     expect(mockRouter.push).toHaveBeenCalled();
   });
 
-  it('routes to import and settings', async () => {
+  it('routes to import, statistics and settings', async () => {
     await renderScreen(<DecksScreen />, { repository, decks: [] });
 
     await fireEvent.press(screen.getByRole('button', { name: 'Import from Anki' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/import');
 
+    await fireEvent.press(screen.getByRole('button', { name: 'Statistics' }));
+    expect(mockRouter.push).toHaveBeenCalledWith('/(app)/stats');
+
     await fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/settings');
+  });
+
+  /**
+   * The panel above the list.
+   *
+   * It exists to answer "what should I do right now" before any deck name is
+   * read, so what is asserted is that its four numbers come from the review
+   * log and the cards rather than from anywhere convenient.
+   */
+  describe('today', () => {
+    /** Local noon `days` ago, well clear of either midnight. */
+    function daysAgo(days: number): Date {
+      const date = new Date();
+      date.setHours(12, 0, 0, 0);
+      date.setDate(date.getDate() - days);
+      return date;
+    }
+
+    async function seedStreak() {
+      const deck = await repository.createDeck(TEST_USER.id, 'Spanish', 'es');
+      const studied = await repository.addCard(TEST_USER.id, deck, 'hablar', 'to speak');
+      await repository.addCard(TEST_USER.id, deck, 'comer', 'to eat');
+      await repository.rateCard(studied, 'good', daysAgo(1));
+      await repository.rateCard(studied, 'good', new Date());
+      const [stored] = await repository.listDecks(TEST_USER.id);
+      return stored!;
+    }
+
+    it('counts yesterday and today as a two-day streak', async () => {
+      const deck = await seedStreak();
+      await renderScreen(<DecksScreen />, { repository, decks: [deck] });
+
+      await screen.findByLabelText('2 day streak');
+      expect(screen.getByText('Kept up today')).toBeTruthy();
+    });
+
+    it('separates what is due from what has been reviewed today', async () => {
+      const deck = await seedStreak();
+      await renderScreen(<DecksScreen />, { repository, decks: [deck] });
+
+      // One card was rated twice and is scheduled days out; the other is new.
+      await waitFor(() => expect(screen.getByLabelText('Due today: 1')).toBeTruthy());
+      expect(screen.getByLabelText('Reviewed: 1')).toBeTruthy();
+      expect(screen.getByLabelText('Cards: 2')).toBeTruthy();
+    });
+
+    it('opens the deck with the most cards waiting', async () => {
+      const deck = await seedStreak();
+      await renderScreen(<DecksScreen />, { repository, decks: [deck] });
+
+      const study = await screen.findByRole('button', { name: 'Study · Spanish' });
+      await fireEvent.press(study);
+
+      expect(mockRouter.push).toHaveBeenCalledWith({
+        pathname: '/(app)/study/[deckId]',
+        params: { deckId: deck.id },
+      });
+    });
+
+    it('stays out of the way when there are no decks at all', async () => {
+      await renderScreen(<DecksScreen />, { repository, decks: [] });
+
+      await screen.findByText('No decks yet');
+      // A panel of zeroes is noise on a first launch.
+      expect(screen.queryByText('Day streak')).toBeNull();
+    });
   });
 });
 

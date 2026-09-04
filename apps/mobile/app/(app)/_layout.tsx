@@ -32,6 +32,7 @@ export default function AppLayout() {
       <Stack.Screen name="deck/[id]" options={{ title: t('cards') }} />
       <Stack.Screen name="study/[deckId]" options={{ title: t('study') }} />
       <Stack.Screen name="import" options={{ title: t('importDeck') }} />
+      <Stack.Screen name="stats" options={{ title: t('statistics') }} />
       <Stack.Screen name="settings" options={{ title: t('settings') }} />
     </Stack>
   );

@@ -24,8 +24,10 @@ describe('language packs', () => {
   it.each(['es', 'bs'] as const)('%s does not leave English text in place', (code) => {
     const pack = LANGUAGE_PACKS[code];
     // A handful of strings are legitimately identical across languages: proper
-    // nouns and single-token placeholders. Everything else should differ.
-    const shared = new Set(['appName', 'email']);
+    // nouns, single-token placeholders, and the SI-style abbreviations on the
+    // rating buttons — "min" and "d" are the same in all three, while the
+    // longer units (mo / mj, y / a / g) are not and are still checked.
+    const shared = new Set(['appName', 'email', 'intervalMinutes', 'intervalDays']);
     const untranslated = keys.filter((key) => !shared.has(key) && pack[key] === en[key]);
     expect(untranslated).toEqual([]);
   });

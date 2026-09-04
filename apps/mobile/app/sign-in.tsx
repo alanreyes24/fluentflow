@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../src/i18n';
 import { useApp } from '../src/state/app';
-import { Button, Field, Label, Screen, Spacer, Surface } from '../src/ui/components';
+import { Button, column, Field, Label, Screen, Spacer, Surface } from '../src/ui/components';
 import { useTheme } from '../src/ui/theme';
 
 /**
@@ -57,11 +57,23 @@ export default function SignInScreen() {
         <ScrollView
           contentContainerStyle={[
             styles.content,
+            column.narrow,
             { paddingTop: insets.top + theme.spacing.xxl, paddingBottom: insets.bottom + theme.spacing.lg },
           ]}
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>
+            <View
+              style={[
+                styles.mark,
+                { backgroundColor: theme.colors.accentSoft, borderRadius: theme.radius.pill },
+              ]}
+            >
+              <Label variant="heading" tone="accent">
+                FF
+              </Label>
+            </View>
+            <Spacer size={theme.spacing.md} />
             <Label variant="title">{t('appName')}</Label>
             <Label variant="body" tone="muted">
               {mode === 'signIn' ? t('signIn') : t('signUp')}
@@ -71,7 +83,7 @@ export default function SignInScreen() {
           <Spacer size={theme.spacing.xl} />
 
           {cloudAvailable ? (
-            <Surface style={styles.form}>
+            <Surface elevation="low" style={styles.form}>
               <Field
                 label={t('email')}
                 value={email}
@@ -116,7 +128,7 @@ export default function SignInScreen() {
               />
             </Surface>
           ) : (
-            <Surface style={styles.form}>
+            <Surface tone="accent" style={styles.form}>
               <Label variant="body" tone="muted">
                 {t('offlineAccountNote')}
               </Label>
@@ -125,11 +137,21 @@ export default function SignInScreen() {
 
           <Spacer size={theme.spacing.lg} />
 
-          <Button label={t('workOffline')} variant="secondary" onPress={goOffline} />
-          <Spacer size={theme.spacing.sm} />
-          <Label variant="caption" tone="faint" align="center">
-            {t('offlineAccountNote')}
-          </Label>
+          <Button
+            label={t('workOffline')}
+            variant={cloudAvailable ? 'secondary' : 'primary'}
+            onPress={goOffline}
+          />
+          {/* Only once: with Firebase unconfigured the note is already the
+              whole card above, and saying it twice read as a warning. */}
+          {cloudAvailable ? (
+            <>
+              <Spacer size={theme.spacing.sm} />
+              <Label variant="caption" tone="faint" align="center">
+                {t('offlineAccountNote')}
+              </Label>
+            </>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>
@@ -170,6 +192,7 @@ function friendlyAuthError(cause: unknown, fallback: string): string {
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   content: { paddingHorizontal: 24, flexGrow: 1, justifyContent: 'center' },
-  header: { gap: 4 },
+  header: { gap: 4, alignItems: 'center' },
+  mark: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
   form: { gap: 16 },
 });

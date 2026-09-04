@@ -127,6 +127,44 @@ describe('StudyScreen', () => {
     expect(screen.getByText(/1 reviewed/)).toBeTruthy();
   });
 
+  it('previews the interval each rating would schedule', async () => {
+    await seed([['hablar', 'to speak']]);
+    await show();
+
+    await screen.findByText('hablar');
+    await reveal();
+    await screen.findByText('to speak');
+
+    // A brand-new card: Again re-queues in ten minutes, and the three passing
+    // grades all start the ladder at one day. The preview runs the same
+    // `review` the button will, so this cannot drift from the scheduler.
+    expect(screen.getByText('10 min')).toBeTruthy();
+    expect(screen.getAllByText('1 d')).toHaveLength(3);
+  });
+
+  it('summarises the session once the queue runs out', async () => {
+    await seed([
+      ['hablar', 'to speak'],
+      ['comer', 'to eat'],
+    ]);
+    await show();
+
+    await screen.findByText('hablar');
+    await reveal();
+    await screen.findByText('to speak');
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+
+    await screen.findByText('comer');
+    await reveal();
+    await screen.findByText('to eat');
+    await fireEvent.press(screen.getByRole('button', { name: 'Again' }));
+
+    await screen.findByText('Nothing left to review');
+    expect(screen.getByLabelText('Reviews: 2')).toBeTruthy();
+    expect(screen.getByLabelText('Again: 1')).toBeTruthy();
+    expect(screen.getByLabelText('Accuracy: 50%')).toBeTruthy();
+  });
+
   it('offers nothing to review when the queue is empty', async () => {
     await show();
     await screen.findByText('Nothing left to review');

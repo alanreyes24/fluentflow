@@ -1,21 +1,42 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Animated, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import {
+  Animated,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { RATINGS, type Card, type Deck, type RatingName } from '@fluentflow/core';
+import {
+  LAPSE_MINUTES,
+  RATINGS,
+  RATING_NAMES,
+  review,
+  type Card,
+  type Deck,
+  type RatingName,
+} from '@fluentflow/core';
 import { useI18n } from '../../../src/i18n';
 import { useApp } from '../../../src/state/app';
 import type { ExampleResult } from '../../../src/ai/service';
 import {
   Button,
+  column,
   EmptyState,
   Label,
   Loading,
+  Meter,
   Row,
   Screen,
   Spacer,
+  StatTile,
   StatusDot,
   Surface,
 } from '../../../src/ui/components';
+import { formatInterval } from '../../../src/ui/format';
 import { useCardGestures } from '../../../src/ui/useCardGestures';
 import { useTheme } from '../../../src/ui/theme';
 
@@ -33,6 +54,10 @@ import { useTheme } from '../../../src/ui/theme';
  *  3. Rating writes to SQLite synchronously from the UI's point of view, then
  *     advances. Sync happens on its own schedule; a review is never waiting on
  *     the network.
+ *
+ * Each rating button carries the interval it would schedule, computed by the
+ * same `review` the button will actually run. Anki users expect it, and it is
+ * the difference between grading honestly and guessing which button is safe.
  */
 export default function StudyScreen() {
   const { deckId, ahead } = useLocalSearchParams<{ deckId: string; ahead?: string }>();
@@ -49,6 +74,7 @@ export default function StudyScreen() {
   const [examples, setExamples] = useState<ExampleResult | null>(null);
   const [generating, setGenerating] = useState(false);
   const [reviewed, setReviewed] = useState(0);
+  const [lapses, setLapses] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const card = queue[index] ?? null;
@@ -97,6 +123,7 @@ export default function StudyScreen() {
       void (async () => {
         await repository.rateCard(card, rating);
         setReviewed((count) => count + 1);
+        if (rating === 'again') setLapses((count) => count + 1);
         setRevealed(false);
         setExamples(null);
         setIndex((current) => current + 1);
@@ -122,6 +149,23 @@ export default function StudyScreen() {
     cardWidth: width,
   });
 
+  /**
+   * What each button would schedule, from the card's current state. Computed
+   * with the same function the rating runs, so a preview cannot drift from the
+   * scheduler behind it.
+   */
+  const intervals = useMemo(() => {
+    if (!card) return null;
+    const state = {
+      interval: card.interval,
+      easeFactor: card.easeFactor,
+      repetitions: card.repetitions,
+    };
+    return Object.fromEntries(
+      RATING_NAMES.map((rating) => [rating, review(state, rating).interval]),
+    ) as Record<RatingName, number>;
+  }, [card]);
+
   if (loading) {
     return (
       <Screen>
@@ -133,35 +177,58 @@ export default function StudyScreen() {
   if (!card) {
     return (
       <Screen>
-        <EmptyState
-          title={t('sessionComplete')}
-          hint={
-            reviewed > 0
-              ? `${t('reviewedToday', { count: reviewed })} · ${t('sessionCompleteHint')}`
-              : t('sessionCompleteHint')
-          }
-          action={<Button label={t('decks')} onPress={() => router.back()} />}
-        />
+        <View style={[styles.done, column.wide]}>
+          <EmptyState
+            icon={reviewed > 0 ? '✅' : '🌙'}
+            title={t('sessionComplete')}
+            hint={
+              reviewed > 0
+                ? `${t('reviewedToday', { count: reviewed })} · ${t('sessionCompleteHint')}`
+                : t('sessionCompleteHint')
+            }
+            action={<Button label={t('decks')} onPress={() => router.back()} />}
+          />
+
+          {reviewed > 0 ? (
+            <Surface elevation="low" style={styles.doneCard}>
+              <Row gap={theme.spacing.md} justify="space-between" align="flex-start">
+                <StatTile value={String(reviewed)} label={t('reviews')} />
+                <StatTile value={String(lapses)} label={t('againLabel')} />
+                <StatTile
+                  value={`${Math.round(((reviewed - lapses) / reviewed) * 100)}%`}
+                  label={t('sessionAccuracy')}
+                  tone="accent"
+                />
+              </Row>
+            </Surface>
+          ) : null}
+        </View>
       </Screen>
     );
   }
 
   return (
     <Screen>
-      <View style={styles.progressRow}>
-        <Label variant="caption" tone="faint">
-          {index + 1} / {queue.length}
-        </Label>
-        <Row gap={6}>
-          <StatusDot status={card.status} />
+      <View style={[styles.progress, column.wide]}>
+        <Row justify="space-between" gap={theme.spacing.sm}>
           <Label variant="caption" tone="faint">
-            {t(statusKey(card.status))}
+            {index + 1} / {queue.length}
           </Label>
+          <Row gap={6}>
+            <StatusDot status={card.status} />
+            <Label variant="caption" tone="faint">
+              {t(statusKey(card.status))}
+            </Label>
+          </Row>
         </Row>
+        <Spacer size={theme.spacing.sm} />
+        {/* The queue has a length and a position; a bar says both without
+            asking anyone to read two numbers mid-session. */}
+        <Meter value={index / Math.max(queue.length, 1)} height={4} />
       </View>
 
       <Animated.View
-        style={[styles.cardWrap, { transform: [{ translateX: gestures.translateX }] }]}
+        style={[styles.cardWrap, column.wide, { transform: [{ translateX: gestures.translateX }] }]}
         {...gestures.handlers}
       >
         <Pressable
@@ -171,7 +238,7 @@ export default function StudyScreen() {
           disabled={revealed}
           style={styles.flex}
         >
-          <Surface raised style={styles.card}>
+          <Surface raised elevation="high" style={styles.card}>
             <ScrollView contentContainerStyle={styles.cardContent}>
               <Label variant="cardFront" align="center" selectable>
                 {card.front}
@@ -204,14 +271,19 @@ export default function StudyScreen() {
         </Pressable>
       </Animated.View>
 
-      <View style={styles.controls}>
+      <View style={[styles.controls, column.wide]}>
         {revealed ? (
           <>
-            <Row gap={theme.spacing.sm}>
-              <RatingButton rating="again" color={theme.colors.again} onPress={rate} />
-              <RatingButton rating="hard" color={theme.colors.hard} onPress={rate} />
-              <RatingButton rating="good" color={theme.colors.good} onPress={rate} />
-              <RatingButton rating="easy" color={theme.colors.easy} onPress={rate} />
+            <Row gap={theme.spacing.sm} align="stretch">
+              {RATING_NAMES.map((rating) => (
+                <RatingButton
+                  key={rating}
+                  rating={rating}
+                  color={theme.colors[rating]}
+                  interval={intervals?.[rating] ?? 0}
+                  onPress={rate}
+                />
+              ))}
             </Row>
             {Platform.OS === 'web' ? (
               <>
@@ -230,26 +302,55 @@ export default function StudyScreen() {
   );
 }
 
+/**
+ * A rating button, with the interval it would schedule under the label.
+ *
+ * Hand-rolled rather than the shared `Button` because it stacks two lines and
+ * has to keep its accessible name to the rating alone — a screen reader
+ * announcing "3 Good 6 d" is worse than one announcing "Good".
+ */
 function RatingButton({
   rating,
   color,
+  interval,
   onPress,
 }: {
   rating: RatingName;
   color: string;
+  interval: number;
   onPress: (rating: RatingName) => void;
 }) {
   const { t } = useI18n();
+  const theme = useTheme();
   const label = t(`${rating}Label` as 'againLabel');
 
   return (
-    <Button
-      label={Platform.OS === 'web' ? `${RATINGS[rating]}  ${label}` : label}
-      color={color}
-      onPress={() => onPress(rating)}
-      style={styles.flex}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
       accessibilityHint={`Rate this card ${label}`}
-    />
+      onPress={() => onPress(rating)}
+      style={({ pressed }) => [
+        styles.rating,
+        {
+          backgroundColor: color,
+          borderRadius: theme.radius.md,
+          opacity: pressed ? 0.82 : 1,
+          transform: [{ scale: pressed ? 0.97 : 1 }],
+        },
+      ]}
+    >
+      <Text
+        numberOfLines={1}
+        style={[theme.typography.label, { color: theme.colors.accentText }]}
+      >
+        {/* The keyboard shortcut is only true where there is a keyboard. */}
+        {Platform.OS === 'web' ? `${RATINGS[rating]}  ${label}` : label}
+      </Text>
+      <Text style={[theme.typography.caption, styles.ratingInterval, { color: theme.colors.accentText }]}>
+        {formatInterval(interval, LAPSE_MINUTES, t)}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -283,7 +384,7 @@ function ExampleBlock({
   return (
     <View style={styles.examples}>
       <Row gap={theme.spacing.sm}>
-        <Label variant="caption" tone="faint" style={styles.examplesLabel}>
+        <Label variant="overline" tone="faint" style={styles.flex}>
           {isFallback ? t('examplesOffline') : t('examples')}
         </Label>
         <Pressable
@@ -299,9 +400,11 @@ function ExampleBlock({
       </Row>
 
       {result.examples.map((example) => (
-        <Label key={example} variant="body" selectable style={styles.example}>
-          {example}
-        </Label>
+        <Surface key={example} tone="sunken" style={styles.example}>
+          <Label variant="body" selectable>
+            {example}
+          </Label>
+        </Surface>
       ))}
 
       {isFallback ? (
@@ -319,19 +422,23 @@ function statusKey(status: Card['status']): 'statusNew' | 'statusLearning' | 'st
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  progressRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
+  progress: { paddingHorizontal: 16, paddingVertical: 10 },
   cardWrap: { flex: 1, paddingHorizontal: 16 },
   card: { flex: 1, justifyContent: 'center', padding: 24 },
   cardContent: { flexGrow: 1, justifyContent: 'center' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 24 },
   examples: { gap: 8 },
-  examplesLabel: { textTransform: 'uppercase', letterSpacing: 0.6, flex: 1 },
-  example: {},
+  example: { paddingVertical: 10, paddingHorizontal: 12 },
   controls: { padding: 16 },
+  rating: {
+    flex: 1,
+    minHeight: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    gap: 1,
+  },
+  ratingInterval: { opacity: 0.75 },
+  done: { flex: 1, justifyContent: 'center', padding: 16 },
+  doneCard: { marginTop: 8 },
 });

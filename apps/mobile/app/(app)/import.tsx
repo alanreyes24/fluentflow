@@ -13,11 +13,11 @@ import { useApp } from '../../src/state/app';
 import { importApkg, pickApkg, type PickedFile } from '../../src/anki/import';
 import {
   Button,
-  Field,
+  column,
   Label,
   Loading,
-  Row,
   Screen,
+  SegmentedControl,
   Spacer,
   Surface,
 } from '../../src/ui/components';
@@ -77,8 +77,8 @@ export default function ImportScreen() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Surface>
+      <ScrollView contentContainerStyle={[styles.content, column.narrow]}>
+        <Surface tone="accent">
           <Label variant="body" tone="muted">
             {t('importHint')}
           </Label>
@@ -96,35 +96,42 @@ export default function ImportScreen() {
         {file ? (
           <>
             <Spacer size={theme.spacing.md} />
-            <Surface style={styles.options}>
-              <Field
-                label={t('importOverride')}
-                value={language ? LANGUAGE_NAMES[language] : 'Detect automatically'}
-                editable={false}
-              />
-              <Row gap={theme.spacing.sm}>
-                <Button
-                  label="Auto"
-                  variant={language === null ? 'primary' : 'secondary'}
-                  onPress={() => setLanguage(null)}
-                  style={styles.grow}
+            <Surface elevation="low" style={styles.options}>
+              <View style={styles.option}>
+                <Label variant="overline" tone="muted">
+                  {t('importOverride')}
+                </Label>
+                {/* "Detect" is a real choice rather than a blank: the importer
+                    reads the language off the cards and says which it picked,
+                    so overriding it should be the deliberate act. */}
+                <SegmentedControl<string>
+                  options={[
+                    { value: AUTO, label: t('importDetect') },
+                    ...TARGET_LANGUAGES.map((code) => ({
+                      value: code,
+                      label: LANGUAGE_NAMES[code],
+                    })),
+                  ]}
+                  value={language ?? AUTO}
+                  onChange={(next) =>
+                    setLanguage(next === AUTO ? null : (next as TargetLanguage))
+                  }
                 />
-                {TARGET_LANGUAGES.map((code) => (
-                  <Button
-                    key={code}
-                    label={LANGUAGE_NAMES[code]}
-                    variant={language === code ? 'primary' : 'secondary'}
-                    onPress={() => setLanguage(code)}
-                    style={styles.grow}
-                  />
-                ))}
-              </Row>
+              </View>
 
-              <Button
-                label={flatten ? 'Subdecks: merged into one' : 'Subdecks: kept separate'}
-                variant="ghost"
-                onPress={() => setFlatten(!flatten)}
-              />
+              <View style={styles.option}>
+                <Label variant="overline" tone="muted">
+                  {t('importSubdecks')}
+                </Label>
+                <SegmentedControl<string>
+                  options={[
+                    { value: 'keep', label: t('importKeepSeparate') },
+                    { value: 'merge', label: t('importMerge') },
+                  ]}
+                  value={flatten ? 'merge' : 'keep'}
+                  onChange={(next) => setFlatten(next === 'merge')}
+                />
+              </View>
             </Surface>
 
             <Spacer size={theme.spacing.md} />
@@ -180,7 +187,7 @@ export default function ImportScreen() {
 
               {summary.siblingCardsMerged > 0 ? (
                 <Label variant="caption" tone="faint">
-                  {summary.siblingCardsMerged} reverse or sibling card(s) merged into their notes.
+                  {t('importSiblingsMerged', { count: summary.siblingCardsMerged })}
                 </Label>
               ) : null}
 
@@ -209,10 +216,13 @@ function describeError(cause: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Sentinel for "let the importer decide", which is not a language code. */
+const AUTO = 'auto';
+
 const styles = StyleSheet.create({
   content: { padding: 16 },
   options: { gap: 16 },
-  grow: { flex: 1 },
+  option: { gap: 6 },
   notice: { gap: 2 },
   spacer: { height: 48 },
 });
