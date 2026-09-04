@@ -1,17 +1,25 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import {
+  EMPTY_RATING_COUNTS,
+  RATING_NAMES,
+  collectionSummary,
   createCard,
   createDeck,
   deckProgress,
   dueCards,
+  forecast,
   recomputeCardCounts,
   reviewCard,
   softDelete,
   touch,
   type Card,
+  type CollectionSummary,
+  type DayCount,
   type Deck,
   type DeckProgress,
+  type RatingCounts,
   type RatingName,
+  type StudyDay,
   type TargetLanguage,
 } from '@fluentflow/core';
 
@@ -31,6 +39,16 @@ export interface ExampleCacheEntry {
   examples: string[];
   source: string;
   createdAt: string;
+}
+
+/** Everything the statistics screen needs, gathered in one pass. */
+export interface StudyStats {
+  /** Every day with at least one review, oldest first. */
+  days: StudyDay[];
+  ratings: RatingCounts;
+  forecast: DayCount[];
+  collection: CollectionSummary;
+  decks: { deck: Deck; progress: DeckProgress }[];
 }
 
 export class Repository {
@@ -217,6 +235,82 @@ export class Repository {
       since.toISOString(),
     );
     return row?.count ?? 0;
+  }
+
+  // --- statistics ----------------------------------------------------------
+
+  /**
+   * Review activity, one row per day the learner actually studied.
+   *
+   * Grouped rather than fetched row by row: a year of daily study is a few
+   * hundred rows this way and tens of thousands the other, and nothing above
+   * this needs an individual review.
+   */
+  async reviewDays(userId: string, now: Date = new Date()): Promise<StudyDay[]> {
+    const rows = await this.db.getAllAsync<{ day: string; reviews: number; lapses: number }>(
+      `SELECT date(reviewedAt, ?2) AS day,
+              COUNT(*) AS reviews,
+              SUM(CASE WHEN rating = 'again' THEN 1 ELSE 0 END) AS lapses
+       FROM review_log
+       WHERE userId = ?1
+       GROUP BY day
+       ORDER BY day`,
+      userId,
+      localDayModifier(now),
+    );
+    return rows.map((row) => ({ day: row.day, reviews: row.reviews, lapses: row.lapses ?? 0 }));
+  }
+
+  /** How each button was pressed, for the ratings breakdown. */
+  async ratingCounts(userId: string, since?: Date): Promise<RatingCounts> {
+    const rows = since
+      ? await this.db.getAllAsync<{ rating: string; count: number }>(
+          `SELECT rating, COUNT(*) AS count FROM review_log
+           WHERE userId = ? AND reviewedAt >= ? GROUP BY rating`,
+          userId,
+          since.toISOString(),
+        )
+      : await this.db.getAllAsync<{ rating: string; count: number }>(
+          'SELECT rating, COUNT(*) AS count FROM review_log WHERE userId = ? GROUP BY rating',
+          userId,
+        );
+
+    const counts: RatingCounts = { ...EMPTY_RATING_COUNTS };
+    for (const row of rows) {
+      const rating = RATING_NAMES.find((name) => name === row.rating);
+      if (rating) counts[rating] = row.count;
+    }
+    return counts;
+  }
+
+  /**
+   * Everything the statistics screen reads, in one pass.
+   *
+   * The windowing is left to the caller: `days` is the whole history, and the
+   * core helpers slice it. Deciding here would mean a second round trip every
+   * time the range selector moved.
+   */
+  async studyStats(userId: string, now: Date = new Date(), horizonDays = 14): Promise<StudyStats> {
+    const [days, ratings, cards, decks] = await Promise.all([
+      this.reviewDays(userId, now),
+      this.ratingCounts(userId),
+      this.listAllCards(userId),
+      this.listDecks(userId),
+    ]);
+
+    return {
+      days,
+      ratings,
+      forecast: forecast(cards, { days: horizonDays, now }),
+      collection: collectionSummary(cards, decks.length, now),
+      decks: decks.map((deck) => ({
+        deck,
+        progress: deckProgress(
+          cards.filter((card) => card.deckId === deck.id),
+          now,
+        ),
+      })),
+    };
   }
 
   /** Recalculate a deck's card count from the cards actually present. */
@@ -534,4 +628,26 @@ function parseJsonArray(value: string): string[] {
 /** Cache key normalisation, so "Hablar " and "hablar" share one entry. */
 function normaliseWord(word: string): string {
   return word.trim().toLowerCase();
+}
+
+/**
+ * A SQLite date modifier that shifts a UTC timestamp onto the device's local
+ * day, e.g. `-480 minutes` in California.
+ *
+ * The obvious spelling is SQLite's own `localtime` modifier, and it is not
+ * used here on purpose: it needs the platform's timezone database, which the
+ * wasm build behind expo-sqlite on the web does not reliably carry — the same
+ * query would then bucket by UTC on the web and by local time on a phone, and
+ * a streak would disagree with itself across a user's own devices. Passing the
+ * offset explicitly makes every target agree.
+ *
+ * Historical rows are bucketed with today's offset, so the hour either side of
+ * a daylight-saving change can land on the neighbouring day. Anki accepts the
+ * same imprecision with its fixed day cutoff, and the alternative — a timezone
+ * database in the bundle — is not worth 400 kB to move one review.
+ */
+function localDayModifier(now: Date): string {
+  // `getTimezoneOffset` is minutes to add to local time to reach UTC, so the
+  // modifier that goes the other way is its negation.
+  return `${-now.getTimezoneOffset()} minutes`;
 }
