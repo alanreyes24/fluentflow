@@ -154,6 +154,13 @@ async function run(browser, crashes, app) {
     'the keyboard shortcut rates the card',
     await hasText(page, 'nothing left to review', 8000),
   );
+  // Counted in the session's own state, not read back from the database — so
+  // this says the summary renders, not that the rating was persisted. What it
+  // was written to is covered by the reload check in the web walkthrough.
+  check(
+    'the session summary counts what was reviewed',
+    await hasText(page, 'accuracy', 5000),
+  );
   await shoot(page, '04-session-complete');
 
   // --- nothing broke -------------------------------------------------------

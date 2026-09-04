@@ -7,7 +7,7 @@ with example sentences generated on the device rather than by an API, Anki
 ```
 npm install
 npm run build          # build the shared core package
-npm test               # 163 tests
+npm test               # 207 tests
 npm run verify         # end-to-end check of the success criteria
 npm run verify:web     # the same criteria, driven through Chrome
 npm run server         # sync API on :8787 (no Firebase project needed)
@@ -26,7 +26,7 @@ sentences until a model is installed. Both are covered below.
 ## Layout
 
 ```
-packages/core      domain logic, no platform dependencies — 81 tests
+packages/core      domain logic, no platform dependencies — 106 tests
 apps/server        Express + Firestore sync API and Anki import — 17 tests
 apps/mobile        Expo app (iOS, Android, web)
 apps/desktop       Electron shell for Windows and macOS
@@ -52,12 +52,13 @@ misread:
 | `.apkg` import | Complete for schema 11 and 18; zstd exports rejected with a fix |
 | Local SQLite | Complete: migrations, indexes, soft deletes, review log |
 | Sync | Complete: LWW, offline queue, real-time listeners, tombstones |
+| Statistics | Complete: streaks, retention, study calendar, forecast, per-deck mastery |
 | Localisation | Complete: English, Spanish, Bosnian UI packs |
 | AI pipeline | Complete: prompting, parsing, validation, budget, fallback |
 | AI **weights** | **Not bundled.** `npm run prepare-model` fetches and converts them |
 | iOS / Android / web | Expo, standard |
 | Windows / macOS | Electron around the web export, not native RN |
-| The views | 65 render tests; the web and desktop builds walked through by a browser |
+| The views | 84 render tests; the web and desktop builds walked through by a browser |
 
 All three platform bundles build: `npx expo export --platform web` and
 `--platform ios --platform android` both complete, the latter through Hermes.
@@ -80,6 +81,36 @@ web; desktop would otherwise mean the out-of-tree `react-native-windows` and
 `react-native-macos` forks and a second native project to maintain.
 [apps/desktop](apps/desktop) wraps the web export in Electron instead, which
 gives a real installable app from one codebase and gives up the native model.
+
+## Statistics and the streak
+
+Every rating writes a row to `review_log`, and the statistics screen is that
+table read back — the streak, the retention, the calendar and the rating split
+are all counted, never estimated. The maths lives in
+[packages/core/src/stats.ts](packages/core/src/stats.ts) as pure functions over
+day-keyed rows, so a streak can be argued with in a unit test rather than by
+changing the system clock.
+
+Three decisions in there are worth stating, because each has a wrong answer
+that looks right:
+
+- **Days are local, not UTC.** A review at half past eleven at night belongs to
+  the day the learner had. The grouping happens in SQL, but with an offset the
+  repository passes in rather than SQLite's own `localtime` modifier — that
+  modifier needs a timezone database the wasm build on the web does not
+  reliably carry, so the same query would bucket by UTC in the browser and by
+  local time on a phone, and a streak would disagree with itself across one
+  person's devices.
+- **A streak survives an untouched today.** It counts back from today, or from
+  yesterday if today is still empty, and reports `atRisk` when it did the
+  latter. The alternative resets every streak at midnight and shows the user a
+  zero over breakfast.
+- **Retention is defined as 1 for an empty history.** "You have forgotten
+  nothing" is truer on a first launch than "you have failed everything".
+
+The charts are plain views — bars, a meter and a contribution grid built from
+flexbox. `react-native-svg` would add a native module to a project whose whole
+desktop story depends on not having one, to draw rectangles.
 
 ## Running it
 
@@ -197,10 +228,10 @@ fails on the second.
 ## Testing
 
 ```
-npm test              # 163 unit and integration tests
+npm test              # 207 unit and integration tests
 npm run verify        # 26 checks end-to-end against the real server
-npm run verify:web    # 18 checks driving the web build through Chrome
-npm run verify:desktop  # 13 checks driving the packaged Windows app
+npm run verify:web    # 22 checks driving the web build through Chrome
+npm run verify:desktop  # 14 checks driving the packaged Windows app
 ```
 
 `npm run verify` is the one to run when judging whether the *logic* works. It
@@ -211,12 +242,13 @@ and back, and checks that conflicting edits converge.
 `npm run verify:web` is the one to run when judging whether the *app* works. It
 builds the web export, serves it, and walks Chrome through the brief: continue
 without an account, create a Spanish deck, add cards, reveal, rate with the
-keyboard, reload, and switch the interface to Bosnian. `verify:desktop` does the
+keyboard, reload, read the statistics those reviews produced, and switch the
+interface to Bosnian. `verify:desktop` does the
 same against the packaged executable, which is how the `app://` scheme, the
 content security policy and SQLite-outside-a-browser get exercised. Both leave
 screenshots behind as evidence.
 
-The 65 view tests run under jest-expo in two projects, iOS and web, rather than
+The 84 view tests run under jest-expo in two projects, iOS and web, rather than
 one with a mocked `Platform`. Keyboard shortcuts only bind on web and the rating
 buttons only show their number prefix there, so running the same components
 under both presets tests the real branch instead of the mock. The repository
@@ -250,7 +282,7 @@ see
 ## Known gaps
 
 - **iOS and Android have never been run on a device.** Both bundles export, and
-  the views are covered by 65 render tests plus a browser walkthrough of the
+  the views are covered by 84 render tests plus a browser walkthrough of the
   same components under react-native-web, but nothing here has launched them on
   a phone or a simulator. The native paths that differ from the web — the real
   SQLite backend, the document picker, ONNX Runtime — are unexercised.

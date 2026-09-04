@@ -209,7 +209,39 @@ async function run(page, baseUrl) {
     await shoot(page, '05-after-reload');
   }
 
-  // --- 8. The interface follows the language choice -------------------------
+  // --- 8. The statistics those reviews just produced ------------------------
+  // The streak is the one number a user will argue with, and it is computed
+  // from local calendar days — worth watching it appear in a real browser,
+  // where the timezone is the machine's rather than a test's.
+  await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle2' });
+  await resumeOfflineSession(page);
+
+  if (await hasText(page, 'Spanish Verbs', 15000)) {
+    await shoot(page, '06-decks');
+    await clickLabel(page, 'Statistics');
+    const statsReady = await hasText(page, 'Day streak', 10000);
+    check('the statistics screen opens from the deck list', statsReady);
+
+    if (statsReady) {
+      const stats = await bodyText(page);
+      check(
+        'the streak counts the day the review was made',
+        /kept up today/i.test(stats),
+        stats.match(/Best \d+/)?.[0],
+      );
+      check(
+        'retention and the rating split are reported',
+        /retention/i.test(stats) && /how you rated/i.test(stats),
+      );
+      check(
+        'the study calendar is drawn',
+        await hasSelector(page, '[aria-label^="Study calendar"]'),
+      );
+      await shoot(page, '07-statistics');
+    }
+  }
+
+  // --- 9. The interface follows the language choice -------------------------
   // A deep link is served the app rather than a 404 — that is the SPA
   // fallback working. It then lands on sign-in, because an account-less
   // session lives in memory and a cold load has no one signed in. That is the
@@ -228,7 +260,7 @@ async function run(page, baseUrl) {
   if (settingsReady) {
     await clickLabel(page, 'Bosanski');
     check('choosing Bosnian re-renders the interface', await hasText(page, 'Jezik sučelja', 5000));
-    await shoot(page, '06-bosnian');
+    await shoot(page, '08-bosnian');
 
     await clickLabel(page, 'Español');
     check(
@@ -238,7 +270,7 @@ async function run(page, baseUrl) {
     await clickLabel(page, 'English');
   }
 
-  // --- 9. Nothing threw along the way --------------------------------------
+  // --- 10. Nothing threw along the way -------------------------------------
   const fatal = consoleErrors.filter(isFatal);
   check(
     'the app logged no errors during the walkthrough',
