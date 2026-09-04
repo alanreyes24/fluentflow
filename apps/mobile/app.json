@@ -7,7 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "fluentflow",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "platforms": ["ios", "android", "web"],
     "ios": {
       "supportsTablet": true,
@@ -15,7 +14,6 @@
     },
     "android": {
       "package": "com.fluentflow.app",
-      "edgeToEdgeEnabled": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1f6f5c"

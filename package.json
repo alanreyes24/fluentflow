@@ -22,6 +22,7 @@
     "desktop:dev": "npm --prefix apps/desktop run dev",
     "prepare-model": "node scripts/prepare-model.mjs",
     "icons": "node scripts/make-icons.mjs",
+    "sample-deck": "npm run build -w @fluentflow/core && node scripts/make-sample-deck.mjs",
     "verify:web": "node scripts/verify-web.mjs",
     "verify:desktop": "node scripts/verify-desktop.mjs"
   },

@@ -153,14 +153,26 @@ implementation that is tested and a native implementation that is not:
 | Auth persistence | [src/firebase/client.ts:59](../apps/mobile/src/firebase/client.ts#L59) | web uses `browserLocalPersistence`, native uses a hand-written AsyncStorage adapter. Getting this wrong signs the user out on every cold start. |
 | Connectivity | [src/state/app.tsx:157](../apps/mobile/src/state/app.tsx#L157) | NetInfo reports differently on a real radio than in a browser tab. |
 | Model assets | [src/ai/assets.ts](../apps/mobile/src/ai/assets.ts) | `expo-asset` unpacking a ~620 MB file out of the bundle on first launch, onto a device with finite storage. |
-| ONNX Runtime | [src/ai/model.ts](../apps/mobile/src/ai/model.ts) | not installed at all. Metro substitutes a stub when it is absent ([metro.config.js:49](../apps/mobile/metro.config.js#L49)), so the decode loop has never met a real graph. |
+| ONNX Runtime | [src/ai/model.ts](../apps/mobile/src/ai/model.ts) | not installed at all. Metro substitutes a stub when it is absent ([metro.config.js](../apps/mobile/metro.config.js)), so the decode loop has never met a real graph. |
 
 iOS is the only target where the AI pipeline can be more than a fallback, and it
 is the target with the least evidence behind it.
 
-**Order of work.** `expo prebuild`, then a
-simulator run walking the same brief the web build is walked through. Then
-import, sync and auth exercised on a real device. Then `eas.json` and a
+**Order of work.** The cheapest device time first: Expo Go on a physical
+iPhone, following [device-checklist.md](device-checklist.md). That needs no
+Apple Developer account, no Mac and no cloud build, and it reaches three of the
+six rows above - SQLite, `.apkg` import and connectivity - plus touch gestures,
+safe-area insets and Hermes, none of which are in that table and none of which
+have ever run. Auth persistence is not reachable either way until a Firebase
+project exists to persist against. `npm run sample-deck` writes the `.apkg`
+that makes the import row testable at all.
+
+The project is ready for that run: `npx expo-doctor` passes 21/21, and
+`npx expo export --platform ios` completes through Hermes with the current
+interface. What Expo Go cannot show is the icon and splash - it substitutes its
+own - so those stay unverified until a development build.
+
+After that: `expo prebuild`, then `eas.json` and a
 development build with `onnxruntime-react-native` installed, which is the first
 time the decoder in `model.ts` would execute. Then an Apple Developer account
 and TestFlight.
@@ -194,7 +206,9 @@ Every claim above is meant to be re-verifiable rather than trusted:
 | Windows runs and works | `npm run verify:desktop`, 14 checks, rewrites `.desktop-shots/` |
 | Web runs and works | `npm run verify:web`, 22 checks |
 | The logic is correct across devices | `npm run verify`, 26 checks against the real server |
-| Test counts | `npm test`, 207 unit and integration tests |
+| Test counts | `npm test`, 210 unit and integration tests |
+| The project is ready for a device | `npx expo-doctor`, 21/21 |
+| The iOS bundle still builds | `npx expo export --platform ios`, completes through Hermes |
 | iOS has never been prebuilt | `ls apps/mobile/ios`, no such directory |
 | No EAS config | `ls apps/mobile/eas.json`, no such file |
 | Icon and splash are configured | `grep -E "icon\|splash" apps/mobile/app.json`, and `ls apps/mobile/assets/*.png` |

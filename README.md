@@ -7,7 +7,7 @@ with example sentences generated on the device rather than by an API, Anki
 ```
 npm install
 npm run build          # build the shared core package
-npm test               # 207 tests
+npm test               # 210 tests
 npm run verify         # end-to-end check of the success criteria
 npm run verify:web     # the same criteria, driven through Chrome
 npm run server         # sync API on :8787 (no Firebase project needed)
@@ -26,12 +26,12 @@ sentences until a model is installed. Both are covered below.
 ## Layout
 
 ```
-packages/core      domain logic, no platform dependencies — 106 tests
+packages/core      domain logic, no platform dependencies — 109 tests
 apps/server        Express + Firestore sync API and Anki import — 17 tests
 apps/mobile        Expo app (iOS, Android, web)
 apps/desktop       Electron shell for Windows and macOS
 scripts            model preparation, icon generation, end-to-end verification
-docs               where each platform stands
+docs               where each platform stands, and how to walk it on a phone
 ```
 
 `packages/core` holds everything that is neither UI nor I/O: SM-2 scheduling,
@@ -66,7 +66,11 @@ The web and Windows builds are also driven end to end by a real browser — see
 Testing — so what is claimed below has been watched running, not only compiled.
 
 Where each platform actually stands — built, run, verified, shippable — and what
-is left on each, is in [docs/platform-status.md](docs/platform-status.md).
+is left on each, is in [docs/platform-status.md](docs/platform-status.md). iOS
+and Android build but have never run on hardware;
+[docs/device-checklist.md](docs/device-checklist.md) is the walkthrough for
+changing that with Expo Go, and `npm run sample-deck` writes the Anki archive it
+needs.
 
 The AI integration is real code — a greedy decoder over an ONNX graph with KV
 cache reuse, and a Llama-style BPE tokenizer with byte fallback, both written
@@ -228,7 +232,7 @@ fails on the second.
 ## Testing
 
 ```
-npm test              # 207 unit and integration tests
+npm test              # 210 unit and integration tests
 npm run verify        # 26 checks end-to-end against the real server
 npm run verify:web    # 22 checks driving the web build through Chrome
 npm run verify:desktop  # 14 checks driving the packaged Windows app
