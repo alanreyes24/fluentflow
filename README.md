@@ -30,7 +30,7 @@ packages/core      domain logic, no platform dependencies — 106 tests
 apps/server        Express + Firestore sync API and Anki import — 17 tests
 apps/mobile        Expo app (iOS, Android, web)
 apps/desktop       Electron shell for Windows and macOS
-scripts            model preparation, end-to-end verification
+scripts            model preparation, icon generation, end-to-end verification
 docs               where each platform stands
 ```
 
