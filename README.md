@@ -31,6 +31,7 @@ apps/server        Express + Firestore sync API and Anki import — 17 tests
 apps/mobile        Expo app (iOS, Android, web)
 apps/desktop       Electron shell for Windows and macOS
 scripts            model preparation, end-to-end verification
+docs               where each platform stands
 ```
 
 `packages/core` holds everything that is neither UI nor I/O: SM-2 scheduling,
@@ -62,6 +63,9 @@ All three platform bundles build: `npx expo export --platform web` and
 `--platform ios --platform android` both complete, the latter through Hermes.
 The web and Windows builds are also driven end to end by a real browser — see
 Testing — so what is claimed below has been watched running, not only compiled.
+
+Where each platform actually stands — built, run, verified, shippable — and what
+is left on each, is in [docs/platform-status.md](docs/platform-status.md).
 
 The AI integration is real code — a greedy decoder over an ONNX graph with KV
 cache reuse, and a Llama-style BPE tokenizer with byte fallback, both written
