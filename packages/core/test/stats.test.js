@@ -6,6 +6,7 @@ import {
   createCard,
   dayKey,
   dayRange,
+  dayToDate,
   daysBetween,
   fillDays,
   forecast,
@@ -15,6 +16,7 @@ import {
   startOfWeek,
   studyStreak,
   summariseReviews,
+  weekday,
 } from '../dist/index.js';
 
 /**
@@ -55,6 +57,33 @@ test('a day range is inclusive at both ends', () => {
   ]);
   assert.deepEqual(dayRange('2026-09-01', '2026-09-01'), ['2026-09-01']);
   assert.deepEqual(dayRange('2026-09-02', '2026-09-01'), []);
+});
+
+test('a day key becomes a local date, not a UTC one', () => {
+  // The guard is against `new Date('2026-09-03T12:00:00')`, which is specified
+  // to mean local time but is not reliably read that way by Hermes. Reading it
+  // as UTC would move the date by one for anyone west of Greenwich, and the
+  // statistics screen labels its chart axis from this.
+  const date = dayToDate('2026-09-03');
+
+  assert.equal(date.getFullYear(), 2026);
+  assert.equal(date.getMonth(), 8); // September, zero-based
+  assert.equal(date.getDate(), 3);
+  // Midday, so adding days cannot fall through a daylight-saving boundary.
+  assert.equal(date.getHours(), 12);
+});
+
+test('a day key round-trips through a date', () => {
+  for (const day of ['2026-01-01', '2026-03-29', '2026-11-01', '2024-02-29']) {
+    assert.equal(dayKey(dayToDate(day)), day);
+  }
+});
+
+test('weekday reads the local day of the week', () => {
+  // 2026-09-03 is a Thursday: 4 with Sunday as 0.
+  assert.equal(weekday('2026-09-03'), 4);
+  assert.equal(weekday('2026-08-30'), 0); // Sunday
+  assert.equal(weekday('2026-08-31'), 1); // Monday
 });
 
 test('a week starts on Monday by default', () => {

@@ -5,11 +5,13 @@ import {
   LANGUAGE_NAMES,
   RATING_NAMES,
   dayKey,
+  dayToDate,
   fillDays,
   heatmap,
   recentWindow,
   studyStreak,
   summariseReviews,
+  weekday,
   type RatingName,
   type StudyDay,
 } from '@fluentflow/core';
@@ -331,11 +333,15 @@ function derive(stats: StudyStats, range: Range, today: string, initials: string
  * seven letters differ per language, and the app already owns a translation
  * table. Hermes ships a full ICU now, but a chart axis is not worth depending
  * on it for.
+ *
+ * The day itself is turned into a weekday by core rather than here. Both of
+ * these once parsed `${day}T12:00:00` with `new Date`, which is specified to
+ * mean local time and is not reliably read that way by Hermes — on a phone
+ * west of Greenwich every label would have been a day out.
  */
 function weekdayInitial(day: string, initials: string): string {
-  const date = new Date(`${day}T12:00:00`);
   // Monday first, matching the calendar grid.
-  return initials[(date.getDay() + 6) % 7] ?? '';
+  return initials[(weekday(day) + 6) % 7] ?? '';
 }
 
 function dayOfMonth(day: string): string {
@@ -343,7 +349,7 @@ function dayOfMonth(day: string): string {
 }
 
 function formatDay(day: string): string {
-  return new Date(`${day}T12:00:00`).toLocaleDateString();
+  return dayToDate(day).toLocaleDateString();
 }
 
 function format1(value: number): string {

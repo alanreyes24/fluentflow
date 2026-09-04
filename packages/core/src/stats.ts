@@ -80,24 +80,34 @@ export function dayKey(date: Date = new Date()): DayKey {
 }
 
 /**
- * Midday rather than midnight, deliberately: adding a day to a midnight local
- * date lands on 23:00 the day before across a spring-forward boundary, and the
- * streak then skips a day. Noon leaves twelve hours of slack either way.
+ * A day key back to a `Date`, at local midday.
+ *
+ * Two reasons it is built from components rather than parsed from a string.
+ *
+ * Midday rather than midnight: adding a day to a midnight local date lands on
+ * 23:00 the day before across a spring-forward boundary, and the streak then
+ * skips a day. Noon leaves twelve hours of slack either way.
+ *
+ * Components rather than `new Date("2026-09-03T12:00:00")`: a date-time with no
+ * offset is specified to parse as local time, but Hermes has historically been
+ * unreliable with anything short of a full ISO string, and reading it as UTC
+ * would shift every weekday label and date by one for anyone west of
+ * Greenwich. The constructor has no such ambiguity to get wrong.
  */
-function parseDay(day: DayKey): Date {
+export function dayToDate(day: DayKey): Date {
   const [year, month, date] = day.split('-').map(Number);
   return new Date(year ?? 1970, (month ?? 1) - 1, date ?? 1, 12);
 }
 
 export function addDays(day: DayKey, delta: number): DayKey {
-  const date = parseDay(day);
+  const date = dayToDate(day);
   date.setDate(date.getDate() + delta);
   return dayKey(date);
 }
 
 /** Whole days from `from` to `to`, negative when `to` is the earlier one. */
 export function daysBetween(from: DayKey, to: DayKey): number {
-  const ms = parseDay(to).getTime() - parseDay(from).getTime();
+  const ms = dayToDate(to).getTime() - dayToDate(from).getTime();
   return Math.round(ms / 86_400_000);
 }
 
@@ -113,7 +123,7 @@ export function dayRange(from: DayKey, to: DayKey): DayKey[] {
 
 /** Day of the week, 0 = Sunday, matching `Date.getDay`. */
 export function weekday(day: DayKey): number {
-  return parseDay(day).getDay();
+  return dayToDate(day).getDay();
 }
 
 /** The start of `day`'s week. `weekStartsOn` is 1 (Monday) by default. */
