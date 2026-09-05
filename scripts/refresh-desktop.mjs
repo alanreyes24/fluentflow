@@ -15,9 +15,13 @@
  *   node scripts/refresh-desktop.mjs --run        # ...and launch it
  *   node scripts/refresh-desktop.mjs --skip-build # push the existing export again
  *
+ * On macOS the payload sits in `Contents/Resources/app` inside the bundle, and
+ * writing there breaks the bundle's code signature, so the app is re-signed ad
+ * hoc afterwards. See `resign` below.
+ *
  * The portable .exe is the one thing this cannot update: it unpacks itself into
  * a temporary directory on every launch, so it always carries its own copy.
- * Install the setup .exe once, or use dist/win-unpacked, and refresh that.
+ * Install the setup .exe once, or use the unpacked build, and refresh that.
  */
 
 import { spawn } from 'node:child_process';
@@ -30,8 +34,14 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DESKTOP = join(ROOT, 'apps', 'desktop');
 const EXPORT_DIR = join(DESKTOP, 'web');
 
-/** The files that differ between versions. Everything else is the runtime. */
-const PAYLOAD = ['main.js', 'preload.js', 'web'];
+/**
+ * The files that differ between versions. Everything else is the runtime.
+ *
+ * `node_modules` is deliberately not here: it holds the ONNX Runtime binaries,
+ * which are 88 MB and change only when a dependency does. A dependency change
+ * needs a real rebuild anyway.
+ */
+const PAYLOAD = ['main.js', 'preload.js', 'ai.js', 'dictionary.js', 'web'];
 
 const options = {
   run: process.argv.includes('--run'),
@@ -45,9 +55,10 @@ async function main() {
       'No desktop install found to refresh.\n' +
         '\n' +
         'Build one first — this is local, nothing is downloaded:\n' +
-        '  npm run desktop:pack        # dist/win-unpacked, a minute or two\n' +
+        '  npm run desktop:pack        # an unpacked build, a minute or two\n' +
         '\n' +
-        'Or install FluentFlow-Setup-0.1.0.exe once, and refresh that from then on.',
+        'Or install FluentFlow once (the .exe on Windows, the .dmg on macOS)\n' +
+        'and refresh that from then on.',
     );
     process.exitCode = 1;
     return;
@@ -87,6 +98,7 @@ async function main() {
       await cp(join(DESKTOP, entry), destination, { recursive: true });
     }
     stampVersion(target.appDir, version);
+    if (target.bundle) await resign(target.dir);
     console.log(`  updated ${target.label} → ${target.appDir}`);
   }
 
@@ -106,30 +118,71 @@ async function main() {
  * the build in the repo first, then a per-user install, then per-machine.
  */
 function findInstalls() {
+  const dist = join(DESKTOP, 'dist');
+  const home = process.env.HOME ?? '';
+
   const candidates = [
-    { label: 'local build', dir: join(DESKTOP, 'dist', 'win-unpacked') },
-    { label: 'installed (per-user)', dir: join(process.env.LOCALAPPDATA ?? '', 'Programs', 'FluentFlow') },
-    { label: 'installed (all users)', dir: join(process.env.ProgramFiles ?? '', 'FluentFlow') },
-    { label: 'local build', dir: join(DESKTOP, 'dist', 'mac', 'FluentFlow.app', 'Contents') },
-    { label: 'local build', dir: join(DESKTOP, 'dist', 'linux-unpacked') },
-  ];
+    { label: 'local build', dir: join(dist, 'win-unpacked') },
+    // electron-builder names the macOS directory after the architecture it
+    // built for, and drops the suffix when that is the only one.
+    { label: 'local build', dir: join(dist, 'mac-arm64', 'FluentFlow.app') },
+    { label: 'local build', dir: join(dist, 'mac', 'FluentFlow.app') },
+    { label: 'local build', dir: join(dist, 'mac-universal', 'FluentFlow.app') },
+    { label: 'local build', dir: join(dist, 'linux-unpacked') },
+    process.env.LOCALAPPDATA
+      ? { label: 'installed (per-user)', dir: join(process.env.LOCALAPPDATA, 'Programs', 'FluentFlow') }
+      : null,
+    process.env.ProgramFiles
+      ? { label: 'installed (all users)', dir: join(process.env.ProgramFiles, 'FluentFlow') }
+      : null,
+    { label: 'installed (Applications)', dir: '/Applications/FluentFlow.app' },
+    home ? { label: 'installed (~/Applications)', dir: join(home, 'Applications', 'FluentFlow.app') } : null,
+  ].filter(Boolean);
 
   return candidates
-    .map((candidate) => ({
-      ...candidate,
-      appDir: join(candidate.dir, 'resources', 'app'),
-      executable: findExecutable(candidate.dir),
-    }))
+    .map((candidate) => {
+      const bundle = candidate.dir.endsWith('.app');
+      return {
+        ...candidate,
+        bundle,
+        // A macOS app is a bundle: the same payload, one level deeper.
+        appDir: bundle
+          ? join(candidate.dir, 'Contents', 'Resources', 'app')
+          : join(candidate.dir, 'resources', 'app'),
+        executable: findExecutable(candidate.dir, bundle),
+      };
+    })
     .filter((candidate) => existsSync(candidate.appDir));
 }
 
-function findExecutable(dir) {
-  const names = [
-    join(dir, 'FluentFlow.exe'),
-    join(dir, 'MacOS', 'FluentFlow'),
-    join(dir, 'fluentflow'),
-  ];
+function findExecutable(dir, bundle) {
+  const names = bundle
+    ? [join(dir, 'Contents', 'MacOS', 'FluentFlow')]
+    : [join(dir, 'FluentFlow.exe'), join(dir, 'fluentflow')];
   return names.find((path) => existsSync(path)) ?? null;
+}
+
+/**
+ * Re-seal a macOS bundle after writing into it.
+ *
+ * `Contents/Resources` is covered by the bundle's code signature, so replacing
+ * the web export leaves the seal describing files that are no longer there and
+ * `codesign --verify` fails with "a sealed resource is missing or invalid".
+ *
+ * A locally built copy still launches in that state — these builds are ad-hoc
+ * signed and never went through quarantine, and nothing re-checks the seal on
+ * launch. It is a properly signed build, or one that has been downloaded and
+ * quarantined, that Gatekeeper turns away. Re-signing takes about a second and
+ * leaves the bundle in the state packaging left it in, so it is not worth
+ * being clever about which builds could get away without it.
+ */
+async function resign(bundle) {
+  try {
+    await runCommand('codesign', ['--force', '--sign', '-', bundle]);
+  } catch (error) {
+    console.error(`  (could not re-sign ${bundle}: ${error.message})`);
+    console.error('  The app still runs; its signature no longer verifies.');
+  }
 }
 
 /**
@@ -154,6 +207,7 @@ function stampVersion(appDir, version) {
  * be refreshed anyway — must not block an install that is sitting idle.
  */
 async function runningInstances() {
+  if (process.platform === 'darwin') return runningOnMac();
   if (process.platform !== 'win32') return [];
   const script =
     "Get-CimInstance Win32_Process -Filter \"Name='FluentFlow.exe'\" | " +
@@ -173,6 +227,27 @@ async function runningInstances() {
         .map((line) => {
           const [pid, ...rest] = line.split('|');
           return { pid, path: rest.join('|') };
+        });
+      done(found);
+    });
+    probe.on('error', () => done([]));
+  });
+}
+
+/** The same question on macOS, where `ps` already reports the full path. */
+async function runningOnMac() {
+  return new Promise((done) => {
+    const probe = spawn('ps', ['-axo', 'pid=,comm='], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let output = '';
+    probe.stdout.on('data', (chunk) => (output += chunk));
+    probe.on('close', () => {
+      const found = output
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.includes('FluentFlow'))
+        .map((line) => {
+          const [pid, ...rest] = line.split(/\s+/);
+          return { pid, path: rest.join(' ') };
         });
       done(found);
     });

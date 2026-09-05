@@ -238,7 +238,43 @@ async function run(page, baseUrl) {
     await clickLabel(page, 'English');
   }
 
-  // --- 9. Nothing threw along the way --------------------------------------
+  // --- 9. A pasted word list becomes a deck --------------------------------
+  // The other way cards get created. Everything above types them in one pair
+  // at a time; this is the path someone with a vocabulary list in front of
+  // them actually takes.
+  await page.goto(`${baseUrl}/decks`, { waitUntil: 'networkidle2' });
+  await resumeOfflineSession(page);
+  await waitForText(page, 'Spanish Verbs');
+
+  await clickLabel(page, 'Paste a word list');
+  await typeInto(page, 'Your list', 'hvala - thank you\nmolim - please\nkuća - house\nnot a card');
+  const previewed = await hasText(page, '3 cards ready', 8000);
+  check('the paste is turned into cards before anything is written', previewed);
+  // The fourth line has no separator. It is named, with its line number,
+  // rather than being dropped quietly or guessed at.
+  check(
+    'the line it could not read is reported, not silently dropped',
+    await hasText(page, '1 line(s) skipped', 5000),
+  );
+  await shoot(page, '07-paste');
+
+  await typeInto(page, 'Deck name', 'From a list');
+  await clickLabel(page, 'Create cards');
+  const imported = await hasText(page, 'Import complete', 10000);
+  check('a deck is created from the pasted list', imported, `3 cards, ${await oneLine(page)}`);
+  // Nothing in the deck name says Bosnian: the language comes from the words.
+  check(
+    'the deck language is detected from the words themselves',
+    await hasText(page, 'Bosanski', 5000),
+  );
+
+  if (imported) {
+    await clickLabel(page, 'Decks');
+    check('the pasted cards are in the deck', await hasText(page, 'hvala', 10000));
+    await shoot(page, '08-pasted-deck');
+  }
+
+  // --- 10. Nothing threw along the way -------------------------------------
   const fatal = consoleErrors.filter(isFatal);
   check(
     'the app logged no errors during the walkthrough',
@@ -285,12 +321,46 @@ async function clickLabelPrefix(page, prefix) {
  * mouse through the browser exercises the same path a person does.
  */
 async function clickSelector(page, selector) {
-  await page.waitForSelector(selector, { visible: true, timeout: 15000 });
-  const matches = await page.$$(selector);
-  // The last match, where a label is shared: the later element is the explicit
-  // control rather than a container that wraps it.
-  await matches[matches.length - 1].click();
+  const handle = await visibleMatch(page, selector);
+  await handle.click();
   await settle(page);
+}
+
+/**
+ * The last *visible* element matching a selector.
+ *
+ * Visibility is the part that matters. expo-router keeps the screens under the
+ * current one mounted, so a label used on two screens matches twice — and
+ * `waitForSelector(visible: true)` checks the first match, which is the one on
+ * the screen underneath and never becomes visible. That reads as a missing
+ * button on a screen that is showing it.
+ *
+ * Among the visible matches the last wins, which is the explicit control
+ * rather than a container that wraps it.
+ */
+async function visibleMatch(page, selector, timeout = 20000) {
+  const onScreen = (node) => {
+    const box = node.getBoundingClientRect();
+    return box.width > 0 && box.height > 0;
+  };
+
+  await page.waitForFunction(
+    (sel) =>
+      [...document.querySelectorAll(sel)].some((node) => {
+        const box = node.getBoundingClientRect();
+        return box.width > 0 && box.height > 0;
+      }),
+    { timeout },
+    selector,
+  );
+
+  const matches = await page.$$(selector);
+  let last = null;
+  for (const handle of matches) {
+    if (await handle.evaluate(onScreen)) last = handle;
+  }
+  if (!last) throw new Error(`No visible element matches ${selector}`);
+  return last;
 }
 
 /** Click the deepest element whose text matches, for controls with no label. */
@@ -324,8 +394,7 @@ async function clickText(page, pattern) {
 
 async function typeInto(page, label, value) {
   const selector = `input[aria-label="${label}"], textarea[aria-label="${label}"]`;
-  await page.waitForSelector(selector, { visible: true, timeout: 15000 });
-  const handle = await page.$(selector);
+  const handle = await visibleMatch(page, selector);
   await handle.click({ clickCount: 3 });
   await handle.type(value, { delay: 8 });
   await settle(page);

@@ -25,6 +25,10 @@ apps/mobile/assets/models/*
 # Test scratch
 packages/core/test/.fixtures/
 
+# Model weights fetched by scripts/fetch-desktop-model.mjs, and any local
+# copies kept for testing. Gigabytes; never in git.
+.model-cache/
+
 # Build output and evidence from scripts/verify-web.mjs
 .web-export/
 .web-export-shots/

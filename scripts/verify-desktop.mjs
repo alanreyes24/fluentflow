@@ -9,8 +9,10 @@
  * scheme, the SPA fallback behind it, the content security policy, and whether
  * SQLite works at all outside a browser tab.
  *
- *   node scripts/verify-desktop.mjs            # uses dist/win-unpacked
+ *   node scripts/verify-desktop.mjs            # uses the build in apps/desktop/dist
  *   node scripts/verify-desktop.mjs --headed   # leave the window up at the end
+ *   FLUENTFLOW_APP=/Applications/FluentFlow.app node scripts/verify-desktop.mjs
+ *   FLUENTFLOW_DICTIONARY_DIR=<dir> node scripts/verify-desktop.mjs   # + lookup
  */
 
 import { spawn } from 'node:child_process';
@@ -31,7 +33,7 @@ const checks = [];
 async function main() {
   const executable = findExecutable();
   if (!executable) {
-    console.error('No packaged app found. Run: npm run desktop:win');
+    console.error('No packaged app found. Run: npm run desktop:pack');
     process.exitCode = 1;
     return;
   }
@@ -63,8 +65,8 @@ async function main() {
   const crashes = [];
   app.stderr.on('data', (chunk) => {
     const line = String(chunk);
-    // Electron writes a lot of GPU and DevTools chatter to stderr on Windows;
-    // only genuine failures matter here.
+    // Electron writes a lot of GPU and DevTools chatter to stderr — on macOS
+    // it also logs IMK and CoreText noise; only genuine failures matter here.
     if (/FATAL|Uncaught|Error:/i.test(line)) crashes.push(line.trim());
   });
 
@@ -113,6 +115,44 @@ async function run(browser, crashes, app) {
   await waitForText(page, 'No decks yet');
   check('an account-less session reaches the deck list', true);
 
+  // --- the window buttons are not sitting on top of the app ----------------
+  //
+  // The shell hides the native title bar, so macOS paints close, minimise and
+  // zoom over the top-left of the page — at coordinates the page cannot query.
+  // A screenshot cannot catch this (the buttons are not part of the page) and
+  // neither can any assertion about text, so it is checked as geometry: is
+  // anything the app draws inside the rectangle those buttons occupy?
+  //
+  // The numbers come from `trafficLightPosition` in main.js and have to stay
+  // in step with TITLE_BAR_HEIGHT and WINDOW_BUTTONS_WIDTH in ui/shell.ts.
+  const collisions = await underWindowButtons(page);
+  check('nothing is drawn under the window buttons', collisions.length === 0, collisions[0]);
+
+  // Again with the window dragged narrow. Below the sidebar's breakpoint the
+  // app falls back to the phone's navigation stack, whose back arrow sits
+  // exactly where the window buttons are — so the wide layout being clear
+  // says nothing about this one.
+  await page.setViewport({ width: 700, height: 800 });
+  await delay(300);
+  const narrowCollisions = await underWindowButtons(page);
+  check(
+    'nothing is drawn under them once the window is dragged narrow',
+    narrowCollisions.length === 0,
+    narrowCollisions[0],
+  );
+  await page.setViewport({ width: 1100, height: 800 });
+  await delay(300);
+
+  // With the title bar hidden the window has no handle until the page gives it
+  // one, and a window that cannot be moved is a worse bug than an overlap.
+  const draggable = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-drag-region]')].some((node) => {
+      const box = node.getBoundingClientRect();
+      return box.width > 100 && box.height >= 20;
+    }),
+  );
+  check('the window has a region to drag it by', draggable);
+
   await clickLabel(page, 'New deck');
   await typeInto(page, 'Deck name', 'Bosnian Basics');
   // Pick the target language explicitly. The form defaults to Spanish, and a
@@ -156,6 +196,128 @@ async function run(browser, crashes, app) {
   );
   await shoot(page, '04-session-complete');
 
+  // --- a pasted word list becomes cards ------------------------------------
+  // The second way cards get made, exercised in the packaged shell because it
+  // writes to the same SQLite database the study flow just read from.
+  await clickLabel(page, 'Decks');
+  await waitForText(page, 'zdravo');
+
+  await clickLabel(page, 'Paste a word list');
+  await typeInto(page, 'Your list', 'hvala - thank you\nmolim - please\nnot a card');
+  check(
+    'a pasted list is turned into cards before anything is written',
+    await hasText(page, '2 cards ready', 8000),
+  );
+  check(
+    'the line it could not read is reported, not silently dropped',
+    await hasText(page, '1 line(s) skipped', 5000),
+  );
+  await shoot(page, '05-paste');
+
+  await clickLabel(page, 'Add to this deck');
+  const added = await hasText(page, 'Import complete', 10000);
+  check('the pasted cards are written to the deck', added);
+
+  if (added) {
+    await clickLabel(page, 'Decks');
+    check('the deck lists what was pasted into it', await hasText(page, 'hvala', 10000));
+    await shoot(page, '06-pasted-cards');
+  }
+
+  // --- a word list with no meanings, and the model that fills it in --------
+  // The interesting half of text import: a paste that is just words. It must
+  // never become one card with the rest of the list on its back, and whatever
+  // the model says about those words has to be reviewable before it is written.
+  await clickLabel(page, 'Paste a word list');
+  // Bosnian words, because the deck is Bosnian: the lookup uses the deck's
+  // language, and pasting Spanish here would send everything to the model and
+  // quietly prove nothing about the dictionary.
+  await typeInto(page, 'Your list', 'knjiga\nprijatelj\nljubav');
+
+  check(
+    'a bare word list is read as words, not as one card',
+    await hasText(page, '3 cards ready', 8000) && await hasText(page, 'One word per line', 2000),
+  );
+  check(
+    'words with no meaning are counted, and nothing can be imported yet',
+    await hasText(page, '3 words with no meaning yet', 5000),
+  );
+  await shoot(page, '07-word-list');
+
+  if (lookupInstalled()) {
+    await clickLabel(page, 'Look up the meanings');
+    // The dictionary answers in milliseconds; anything it misses goes to the
+    // model, which has a gigabyte of weights to load first.
+    const reviewed = await hasText(page, 'Check these before importing', 180000);
+    check('the meanings are filled in', reviewed);
+
+    if (reviewed) {
+      const shown = await bodyText(page);
+      const summary = shown.match(
+        /(\d+) from the dictionary, (\d+) from the model, (\d+) not found/,
+      );
+      const [, fromDictionary, fromModel] = summary ?? [];
+
+      check('every meaning says which source answered it', Boolean(summary), summary?.[0]);
+      // The point of the whole arrangement: ordinary words come from the
+      // dictionary and the model is never asked. A run where the model
+      // answered these would mean the dictionary was not consulted at all.
+      check(
+        'the dictionary answered all three, and the model was not needed',
+        fromDictionary === '3' && fromModel === '0',
+        summary?.[0],
+      );
+      check(
+        'dictionary meanings are not flagged for review',
+        !shown.includes('model — check this'),
+      );
+      // The glosses themselves, so a dictionary that loaded but returned
+      // nothing useful cannot pass this. They live in input values, which are
+      // not part of innerText — reading the page text would always find them
+      // empty and the check would pass or fail for the wrong reason.
+      const glosses = await Promise.all(
+        ['knjiga', 'prijatelj', 'ljubav'].map((word) => fieldValue(page, word)),
+      );
+      check(
+        'the meanings are the dictionary\'s',
+        /book/i.test(glosses[0] ?? '') &&
+          /friend/i.test(glosses[1] ?? '') &&
+          /love/i.test(glosses[2] ?? ''),
+        glosses.join(' · '),
+      );
+      // The page is long by this point and the review list is below the fold;
+      // a screenshot of the top proves nothing about it.
+      await scrollTo(page, 'Check these before importing');
+      await shoot(page, '08-review');
+
+      // Every answer is a draft in an editable field. Correcting one is the
+      // whole point: a model guess written straight into a deck teaches the
+      // wrong word, and even a dictionary gloss may not be the wording wanted.
+      await typeInto(page, 'ljubav', 'love');
+
+      await clickLabel(page, 'Add to this deck');
+      const added = await hasText(page, 'Import complete', 15000);
+      check('the reviewed meanings are imported', added);
+
+      if (added) {
+        await clickLabel(page, 'Decks');
+        await waitForText(page, 'knjiga');
+        const listed = await bodyText(page);
+        check(
+          'the cards carry the reviewed meanings',
+          listed.includes('love') && /book/i.test(listed),
+          listed.match(/knjiga[\s\S]{0,40}/)?.[0]?.replace(/\s+/g, ' '),
+        );
+        await shoot(page, '09-looked-up-deck');
+      }
+    }
+  } else {
+    check(
+      'with nothing installed the app says so rather than offering to look up',
+      await hasText(page, 'No dictionary or model installed', 8000),
+    );
+  }
+
   // --- nothing broke -------------------------------------------------------
   const blocked = consoleErrors.filter((message) => /Content Security Policy/i.test(message));
   check('the content security policy does not block the app', blocked.length === 0, blocked[0]);
@@ -167,11 +329,45 @@ async function run(browser, crashes, app) {
 
 // --- helpers ----------------------------------------------------------------
 
+/**
+ * Is there anything for the app to look words up in?
+ *
+ * Neither the dictionaries nor the model weights are in the repository, so
+ * these checks are conditional: with either installed the flow is driven,
+ * with neither the app is checked for saying so. Point
+ * FLUENTFLOW_DICTIONARY_DIR and/or FLUENTFLOW_MODEL_DIR at them — the app
+ * reads the same variables.
+ */
+function lookupInstalled() {
+  const dictionaries = process.env.FLUENTFLOW_DICTIONARY_DIR;
+  const model = process.env.FLUENTFLOW_MODEL_DIR;
+  return Boolean(
+    (dictionaries && existsSync(join(dictionaries, 'bs-en.sqlite3'))) ||
+      (model && existsSync(join(model, 'model.onnx'))),
+  );
+}
+
 function findExecutable() {
+  // An explicit path, for checking a copy that is not in dist/ — the app out
+  // of a mounted .dmg, or an installed one.
+  if (process.env.FLUENTFLOW_APP) {
+    const given = process.env.FLUENTFLOW_APP;
+    const inside = given.endsWith('.app')
+      ? join(given, 'Contents', 'MacOS', 'FluentFlow')
+      : given;
+    return existsSync(inside) ? inside : null;
+  }
+
+  const dist = join(ROOT, 'apps', 'desktop', 'dist');
+  // electron-builder names the macOS directory after the architecture it built
+  // for, so all three spellings are worth looking for.
+  const macApp = (directory) => join(dist, directory, 'FluentFlow.app', 'Contents', 'MacOS', 'FluentFlow');
   const candidates = [
-    join(ROOT, 'apps', 'desktop', 'dist', 'win-unpacked', 'FluentFlow.exe'),
-    join(ROOT, 'apps', 'desktop', 'dist', 'mac', 'FluentFlow.app', 'Contents', 'MacOS', 'FluentFlow'),
-    join(ROOT, 'apps', 'desktop', 'dist', 'linux-unpacked', 'fluentflow'),
+    join(dist, 'win-unpacked', 'FluentFlow.exe'),
+    macApp('mac-arm64'),
+    macApp('mac'),
+    macApp('mac-universal'),
+    join(dist, 'linux-unpacked', 'fluentflow'),
   ];
   return candidates.find((path) => existsSync(path)) ?? null;
 }
@@ -194,11 +390,42 @@ async function connectWhenReady(attempts = 40) {
 }
 
 async function clickLabel(page, label) {
-  const selector = `[aria-label="${label}"]`;
-  await page.waitForSelector(selector, { visible: true, timeout: 20000 });
-  const matches = await page.$$(selector);
-  await matches[matches.length - 1].click();
+  const handle = await visibleMatch(page, `[aria-label="${label}"]`);
+  await handle.click();
   await delay(250);
+}
+
+/**
+ * The last *visible* element matching a selector.
+ *
+ * expo-router keeps the screens under the current one mounted, so a label used
+ * on two screens matches twice — and `waitForSelector(visible: true)` checks
+ * the first match, which belongs to the screen underneath and never becomes
+ * visible. That reads as a missing button on a screen that is showing it.
+ */
+async function visibleMatch(page, selector, timeout = 20000) {
+  const onScreen = (node) => {
+    const box = node.getBoundingClientRect();
+    return box.width > 0 && box.height > 0;
+  };
+
+  await page.waitForFunction(
+    (sel) =>
+      [...document.querySelectorAll(sel)].some((node) => {
+        const box = node.getBoundingClientRect();
+        return box.width > 0 && box.height > 0;
+      }),
+    { timeout },
+    selector,
+  );
+
+  const matches = await page.$$(selector);
+  let last = null;
+  for (const handle of matches) {
+    if (await handle.evaluate(onScreen)) last = handle;
+  }
+  if (!last) throw new Error(`No visible element matches ${selector}`);
+  return last;
 }
 
 async function clickText(page, pattern) {
@@ -227,11 +454,61 @@ async function clickText(page, pattern) {
 
 async function typeInto(page, label, value) {
   const selector = `input[aria-label="${label}"], textarea[aria-label="${label}"]`;
-  await page.waitForSelector(selector, { visible: true, timeout: 20000 });
-  const handle = await page.$(selector);
+  const handle = await visibleMatch(page, selector);
   await handle.click({ clickCount: 3 });
   await handle.type(value, { delay: 8 });
   await delay(150);
+}
+
+/** Bring an element with the given text into view, for a screenshot. */
+async function scrollTo(page, text) {
+  await page.evaluate((needle) => {
+    const node = [...document.querySelectorAll('div,span')].find((candidate) =>
+      (candidate.textContent ?? '').trim().startsWith(needle),
+    );
+    node?.scrollIntoView({ block: 'start' });
+  }, text);
+  await delay(400);
+}
+
+/** The current value of a labelled input, which innerText never shows. */
+async function fieldValue(page, label) {
+  return page.evaluate((name) => {
+    const node = document.querySelector(
+      `input[aria-label="${name}"], textarea[aria-label="${name}"]`,
+    );
+    return node ? node.value : null;
+  }, label);
+}
+
+/**
+ * Anything the app paints inside the window buttons' rectangle.
+ *
+ * The numbers come from `trafficLightPosition` in main.js and have to stay in
+ * step with TITLE_BAR_HEIGHT and WINDOW_BUTTONS_WIDTH in ui/shell.ts.
+ */
+function underWindowButtons(page) {
+  return page.evaluate(
+    (zone) => {
+      const hits = [];
+      for (const node of document.querySelectorAll('*')) {
+        // Leaves only: a container that merely encloses the corner is not
+        // something the user can see or press.
+        if (node.children.length > 0) continue;
+        const text = (node.textContent ?? '').trim();
+        const control = node.getAttribute('role') === 'button' || node.tagName === 'INPUT';
+        if (!text && !control) continue;
+
+        const box = node.getBoundingClientRect();
+        if (box.width === 0 || box.height === 0) continue;
+        if (box.left < zone.width && box.top < zone.height) {
+          hits.push(`"${text.slice(0, 30)}" at ${Math.round(box.left)},${Math.round(box.top)}`);
+        }
+      }
+      return hits;
+    },
+    { width: 82, height: 44 },
+  );
 }
 
 function bodyText(page) {
