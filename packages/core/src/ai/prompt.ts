@@ -9,7 +9,7 @@ import { LANGUAGE_NAMES_EN, type TargetLanguage } from '../types.js';
  * own wrapper around one shared instruction.
  */
 
-export type ModelFamily = 'tinyllama' | 'phi2' | 'raw';
+export type ModelFamily = 'tinyllama' | 'phi2' | 'qwen' | 'raw';
 
 export interface ExamplePromptInput {
   word: string;
@@ -58,6 +58,12 @@ export function buildPrompt(input: ExamplePromptInput, family: ModelFamily = 'ti
         `<|user|>\n${instruction}</s>\n` +
         '<|assistant|>\n'
       );
+    case 'qwen':
+      return (
+        `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n` +
+        `<|im_start|>user\n${instruction}<|im_end|>\n` +
+        '<|im_start|>assistant\n'
+      );
     case 'phi2':
       return `Instruct: ${instruction}\nOutput:`;
     case 'raw':
@@ -71,6 +77,7 @@ export function buildPrompt(input: ExamplePromptInput, family: ModelFamily = 'ti
  */
 export const STOP_SEQUENCES: Record<ModelFamily, string[]> = {
   tinyllama: ['</s>', '<|user|>', '<|system|>'],
+  qwen: ['<|im_end|>', '<|im_start|>', '<|endoftext|>'],
   phi2: ['Instruct:', '\nOutput:', '<|endoftext|>'],
   raw: ['\n\n'],
 };

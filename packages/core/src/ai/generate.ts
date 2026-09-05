@@ -20,6 +20,8 @@ export interface InferenceRequest {
   stop: string[];
   maxTokens: number;
   signal?: AbortSignal;
+  /** Prepend the model's BOS token. Chat templates supply their own opener. */
+  addBos?: boolean;
 }
 
 /** Runs the bundled model. Implemented per platform (ONNX Runtime, llama.cpp). */
