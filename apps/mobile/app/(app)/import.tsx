@@ -20,6 +20,7 @@ import {
   Screen,
   Spacer,
   Surface,
+  useContentStyle,
 } from '../../src/ui/components';
 import { useTheme } from '../../src/ui/theme';
 
@@ -34,6 +35,7 @@ import { useTheme } from '../../src/ui/theme';
 export default function ImportScreen() {
   const { t } = useI18n();
   const theme = useTheme();
+  const content = useContentStyle();
   const { repository, user, refreshDecks, syncNow } = useApp();
 
   const [file, setFile] = useState<PickedFile | null>(null);
@@ -77,7 +79,7 @@ export default function ImportScreen() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={content}>
         <Surface>
           <Label variant="body" tone="muted">
             {t('importHint')}
@@ -210,7 +212,6 @@ function describeError(cause: unknown, fallback: string): string {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 16 },
   options: { gap: 16 },
   grow: { flex: 1 },
   notice: { gap: 2 },

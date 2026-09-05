@@ -31,7 +31,7 @@ export const en = {
   createDeck: 'Create deck',
   deleteDeck: 'Delete deck',
   noDecksYet: 'No decks yet',
-  noDecksHint: 'Create a deck or import one from Anki to get started.',
+  noDecksHint: 'Create a deck, paste a word list, or import one from Anki.',
   cardCount: '{count} cards',
   dueCount: '{count} due',
 
@@ -79,6 +79,33 @@ export const en = {
   importDone: 'Import complete',
   importHint: 'Export a deck from Anki Desktop with File › Export › Anki Deck Package.',
   importOverride: 'Import as',
+
+  // Text import
+  pasteText: 'Paste a word list',
+  pasteHint:
+    'One card per line: "word - meaning". A tab, comma, colon or pipe works too, and so does a blank line between cards written on two lines.',
+  pasteLabel: 'Your list',
+  pastePreview: '{count} cards ready',
+  pasteFormat: 'Separator: {format}',
+  pasteSkippedLines: '{count} line(s) skipped',
+  pasteDuplicates: '{count} already in the deck',
+  pasteWordFirst: 'Reading: word first',
+  pasteMeaningFirst: 'Reading: meaning first',
+  pasteEmpty: 'Nothing to import yet',
+  createCards: 'Create cards',
+  addToDeck: 'Add to this deck',
+  aiTranslate: 'Look up the meanings',
+  aiTranslating: 'Looking up… {done} of {total}',
+  aiReviewTitle: 'Check these before importing',
+  aiReviewHint:
+    'Dictionary entries are reliable. The ones marked "model" are guesses and some will be wrong — edit anything that is off, and clear anything you do not want.',
+  aiNoAnswer: 'no meaning found — type one',
+  aiUnavailable: 'No dictionary or model installed',
+  aiWordsNeedMeanings: '{count} words with no meaning yet',
+  aiFromDictionary: 'dictionary',
+  aiFromModel: 'model — check this',
+  aiFromNothing: 'not found',
+  aiSummary: '{dictionary} from the dictionary, {model} from the model, {missing} not found',
 
   // Sync
   synced: 'Synced',
@@ -138,7 +165,7 @@ const es: Strings = {
   createDeck: 'Crear mazo',
   deleteDeck: 'Eliminar mazo',
   noDecksYet: 'Todavía no hay mazos',
-  noDecksHint: 'Crea un mazo o importa uno de Anki para empezar.',
+  noDecksHint: 'Crea un mazo, pega una lista de palabras o importa uno de Anki.',
   cardCount: '{count} tarjetas',
   dueCount: '{count} pendientes',
 
@@ -182,6 +209,33 @@ const es: Strings = {
   importDone: 'Importación completa',
   importHint: 'Exporta un mazo desde Anki Desktop con Archivo › Exportar › Paquete de mazo de Anki.',
   importOverride: 'Importar como',
+
+  // Text import
+  pasteText: 'Pegar una lista',
+  pasteHint:
+    'Una tarjeta por línea: «palabra - significado». También sirve una tabulación, una coma, dos puntos o una barra vertical, o una línea en blanco entre tarjetas escritas en dos líneas.',
+  pasteLabel: 'Tu lista',
+  pastePreview: '{count} tarjetas listas',
+  pasteFormat: 'Separador: {format}',
+  pasteSkippedLines: '{count} línea(s) omitidas',
+  pasteDuplicates: '{count} ya en el mazo',
+  pasteWordFirst: 'Lectura: palabra primero',
+  pasteMeaningFirst: 'Lectura: significado primero',
+  pasteEmpty: 'Todavía no hay nada que importar',
+  createCards: 'Crear tarjetas',
+  addToDeck: 'Añadir a este mazo',
+  aiTranslate: 'Buscar los significados',
+  aiTranslating: 'Buscando… {done} de {total}',
+  aiReviewTitle: 'Revisa esto antes de importar',
+  aiReviewHint:
+    'Las entradas del diccionario son fiables. Las marcadas «modelo» son conjeturas y algunas estarán mal: corrige lo que no cuadre y borra lo que no quieras.',
+  aiNoAnswer: 'sin significado — escribe uno',
+  aiUnavailable: 'Sin diccionario ni modelo',
+  aiWordsNeedMeanings: '{count} palabras todavía sin significado',
+  aiFromDictionary: 'diccionario',
+  aiFromModel: 'modelo — revísalo',
+  aiFromNothing: 'no encontrado',
+  aiSummary: '{dictionary} del diccionario, {model} del modelo, {missing} sin encontrar',
 
   synced: 'Sincronizado',
   syncing: 'Sincronizando…',
@@ -230,7 +284,7 @@ const bs: Strings = {
   createDeck: 'Napravi špil',
   deleteDeck: 'Obriši špil',
   noDecksYet: 'Još nema špilova',
-  noDecksHint: 'Napravite špil ili uvezite jedan iz Ankija.',
+  noDecksHint: 'Napravite špil, zalijepite listu riječi ili uvezite jedan iz Ankija.',
   cardCount: '{count} kartica',
   dueCount: '{count} na redu',
 
@@ -274,6 +328,33 @@ const bs: Strings = {
   importDone: 'Uvoz završen',
   importHint: 'Izvezite špil iz Anki Desktopa: Datoteka › Izvoz › Anki Deck Package.',
   importOverride: 'Uvezi kao',
+
+  // Text import
+  pasteText: 'Zalijepi listu riječi',
+  pasteHint:
+    'Jedna kartica po redu: „riječ - značenje“. Može i tabulator, zarez, dvotačka ili uspravna crta, a prazan red razdvaja kartice napisane u dva reda.',
+  pasteLabel: 'Tvoja lista',
+  pastePreview: '{count} kartica spremno',
+  pasteFormat: 'Razdjelnik: {format}',
+  pasteSkippedLines: '{count} red(ova) preskočeno',
+  pasteDuplicates: '{count} već u špilu',
+  pasteWordFirst: 'Čitanje: prvo riječ',
+  pasteMeaningFirst: 'Čitanje: prvo značenje',
+  pasteEmpty: 'Još nema šta uvesti',
+  createCards: 'Napravi kartice',
+  addToDeck: 'Dodaj u ovaj špil',
+  aiTranslate: 'Potraži značenja',
+  aiTranslating: 'Tražim… {done} od {total}',
+  aiReviewTitle: 'Provjeri ovo prije uvoza',
+  aiReviewHint:
+    'Unosi iz rječnika su pouzdani. Oni označeni s „model" su nagađanja i neka će biti pogrešna — ispravi što ne valja i obriši što ne želiš.',
+  aiNoAnswer: 'nema značenja — upiši ga',
+  aiUnavailable: 'Nema rječnika ni modela',
+  aiWordsNeedMeanings: '{count} riječi još bez značenja',
+  aiFromDictionary: 'rječnik',
+  aiFromModel: 'model — provjeri',
+  aiFromNothing: 'nije nađeno',
+  aiSummary: '{dictionary} iz rječnika, {model} od modela, {missing} nije nađeno',
 
   synced: 'Sinhronizovano',
   syncing: 'Sinhronizujem…',
