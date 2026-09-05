@@ -1,6 +1,7 @@
 import {
   BpeTokenizer,
-  decodeGreedy,
+  EXAMPLE_SAMPLING,
+  decode,
   shapeFromConfig,
   tokenizerDataFromHuggingFace,
   type InferenceRequest,
@@ -9,6 +10,7 @@ import {
   type OrtLikeSession,
 } from '@fluentflow/core';
 import { loadModelAssets, type ModelAssets } from './assets';
+import { exampleBridgeAvailable, lookupSources } from './desktop';
 
 /**
  * On-device text generation with ONNX Runtime.
@@ -72,6 +74,10 @@ export interface ModelStatus {
   reason?: string;
   modelPath?: string;
   vocabSize?: number;
+  /** The model's own name, when the host can say. Desktop only. */
+  name?: string;
+  /** Where the answer came from, so the settings screen can be specific. */
+  host?: 'device' | 'desktop';
 }
 
 let ortModule: OrtModule | null | undefined;
@@ -138,7 +144,29 @@ export function modelSession(): Promise<LoadedModel | null> {
   return sessionPromise;
 }
 
+/**
+ * What model this build can actually reach, whoever is hosting it.
+ *
+ * The desktop shell is asked first, and the order matters for what the settings
+ * screen tells the user. In Electron the in-process check below is always going
+ * to say "onnxruntime-react-native is not installed", which is true and useless:
+ * it is a native mobile module and never could be installed there, while a
+ * model is very likely loaded and working one process away. Answering with the
+ * shell's status is what makes "why are my examples generic?" get a real answer
+ * on the desktop — usually "no model in ~/Library/…, run npm run fetch-model".
+ */
 export async function modelStatus(): Promise<ModelStatus> {
+  if (exampleBridgeAvailable()) {
+    const { model } = await lookupSources();
+    return {
+      available: model.available,
+      reason: model.reason,
+      name: model.name,
+      modelPath: model.dir,
+      host: 'desktop',
+    };
+  }
+
   const ort = loadOrt();
   if (!ort) {
     return {
@@ -161,6 +189,7 @@ export async function modelStatus(): Promise<ModelStatus> {
     available: true,
     modelPath: model.assets.modelPath,
     vocabSize: model.tokenizer.vocabSize,
+    host: 'device',
   };
 }
 
@@ -179,11 +208,14 @@ async function generate(model: LoadedModel, request: InferenceRequest): Promise<
   const ort = loadOrt();
   if (!ort) throw new Error('ONNX Runtime went away mid-request.');
 
-  return decodeGreedy(ort as unknown as OrtLike, session as unknown as OrtLikeSession, tokenizer, shape, {
+  return decode(ort as unknown as OrtLike, session as unknown as OrtLikeSession, tokenizer, shape, {
     ...request,
     // Example generation asks for a JSON array and has what it needs the
     // moment the bracket closes.
     stopOnJsonArray: true,
+    // Decoded greedily the model writes one sentence twice, so a card asking
+    // for two examples gets one. See EXAMPLE_SAMPLING in core.
+    ...EXAMPLE_SAMPLING,
   });
 }
 

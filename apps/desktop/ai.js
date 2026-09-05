@@ -1,24 +1,32 @@
 'use strict';
 
 /**
- * Filling in the meanings a pasted word list does not carry.
+ * The on-device model, and the two jobs it does.
  *
- * Two sources, in order: the bilingual dictionary, then the model for whatever
- * the dictionary did not have. The ordering is not a detail — on the same
- * twelve Spanish words the dictionary got all twelve right in 2 ms and the
- * model got about seven in 21 seconds — so the model's job here is the long
- * tail and nothing else. `resolveMeanings` in core is where that policy lives.
+ *  - `resolve` fills in the meanings a pasted word list does not carry.
+ *  - `examples` writes sentences showing a word in use, for a card reveal.
  *
- * The renderer is the Expo web export, and its inference path
- * (`onnxruntime-react-native`) is a native *mobile* module that cannot load
- * here — which is why the desktop build has always fallen back to written
- * example sentences. `onnxruntime-node` can load here, in the main process,
- * where there is a real Node runtime and no content security policy in the way.
+ * They want opposite things from the same model, which is why they are tuned
+ * separately. Translation is a lookup the model is bad at: on twelve Spanish
+ * words the bilingual dictionary got all twelve right in 2 ms and the model got
+ * about seven in 21 seconds, so there the model is the long tail behind the
+ * dictionary and every answer it gives is marked for review. Generation has no
+ * dictionary to lose to — no lookup table contains a sentence — and the model
+ * is good at it, so there it is the only source and its output is used directly.
+ * What keeps that honest is validation, not trust: core rejects a sentence that
+ * does not contain the word it was meant to demonstrate.
  *
- * So the model runs in main and the renderer asks for translations over IPC.
- * That also keeps a 1 GB session and a decode loop off the UI thread: a
- * long paste is a minute of work, and doing it in the renderer would freeze
- * the window for the duration.
+ * Both run here, in the main process, rather than in the renderer. The renderer
+ * is the Expo web export and its inference path (`onnxruntime-react-native`) is
+ * a native *mobile* module that cannot load here — which is why the desktop
+ * build used to fall back to carrier sentences on every reveal.
+ * `onnxruntime-node` does load here, where there is a real Node runtime and no
+ * content security policy in the way.
+ *
+ * It also keeps a 1 GB session and a decode loop off the UI thread. Both jobs
+ * are seconds of work — a long paste is a minute of it — and in the renderer
+ * that would freeze the window for the duration instead of leaving the rating
+ * buttons live while the sentences arrive.
  *
  * The decode loop and the prompting are `@fluentflow/core`'s, the same code the
  * phone runs. Only the runtime and the file paths differ.
@@ -135,7 +143,7 @@ async function resolve(words, language, onProgress) {
     const model = await load();
     family = model.family;
     infer = (request) =>
-      model.core.decodeGreedy(model.ort, model.session, model.tokenizer, model.shape, request);
+      model.core.decode(model.ort, model.session, model.tokenizer, model.shape, request);
   }
 
   return core.resolveMeanings(words, language, {
@@ -144,6 +152,83 @@ async function resolve(words, language, onProgress) {
     family,
     onProgress,
   });
+}
+
+/**
+ * How long a card reveal may spend generating example sentences.
+ *
+ * Far longer than the phone's two seconds, and deliberately so. On the phone
+ * the budget protects the UI thread; here the model runs in the main process,
+ * so the window stays interactive and the rating buttons work while it thinks —
+ * the study screen shows "Writing examples…" and does not wait for it.
+ *
+ * The number comes from measurement, not taste: Qwen2.5-1.5B q4f16 on an
+ * M-series Mac took 3.5–6.2 s to write two sentences, and the retry doubles the
+ * worst case. Thirty seconds leaves room for a slower machine without leaving a
+ * stuck request running until the user gives up on the app instead.
+ */
+const EXAMPLE_BUDGET_MS = 30000;
+
+/**
+ * Two sentences of Spanish run to about 50 tokens, and the decode stops on the
+ * closing bracket anyway. The headroom is for the retry, which asks for three.
+ */
+const EXAMPLE_MAX_TOKENS = 128;
+
+/**
+ * Write example sentences showing the word in use.
+ *
+ * This is the other half of what the model is here for, and the one the
+ * renderer could never do for itself. `onnxruntime-react-native` is a native
+ * mobile module, so the renderer's own inference path is dead on the desktop —
+ * which is why every reveal fell back to a carrier sentence that quotes the
+ * word rather than using it. The pipeline, the prompting and the validation are
+ * all `@fluentflow/core`'s, the same code the phone runs.
+ *
+ * The session is loaded before the budget starts. Creating it takes about three
+ * seconds for a graph this size, and charging the first card of a session for
+ * that would spend most of its budget before a single token was generated.
+ *
+ * @param request `{ word, meaning, language, count }`
+ * @returns a `GenerateExamplesResult`: sentences, and which source wrote them
+ */
+async function examples(request) {
+  const core = await import('@fluentflow/core');
+  const { word, meaning, language, count = 2 } = request ?? {};
+
+  const state = status();
+  if (!state.available) {
+    // Not an error: core answers with carrier sentences, and the UI labels
+    // them. A missing model is a thing to install, not a thing to crash on.
+    return core.generateExamples({ word, meaning, language, count }, { infer: null });
+  }
+
+  const model = await load();
+
+  return core.generateExamples(
+    { word, meaning, language, count },
+    {
+      infer: (inferenceRequest) =>
+        model.core.decode(model.ort, model.session, model.tokenizer, model.shape, {
+          ...inferenceRequest,
+          // The answer is a JSON array and is complete the moment the bracket
+          // closes; without this the model spends its remaining tokens writing
+          // a cheerful paragraph about what it just wrote.
+          stopOnJsonArray: true,
+          // Not a flourish: decoded greedily this model writes the same
+          // sentence into both slots of the array, so "two examples" arrives as
+          // one. See EXAMPLE_SAMPLING in core.
+          ...core.EXAMPLE_SAMPLING,
+        }),
+      family: model.family,
+      budgetMs: EXAMPLE_BUDGET_MS,
+      maxTokens: EXAMPLE_MAX_TOKENS,
+      // Worth the second inference here, where there is budget for it. Between
+      // the sampling above and core asking for a different number of sentences
+      // on the retry, a second attempt is a genuinely second answer.
+      retryOnParseFailure: true,
+    },
+  );
 }
 
 /** Drop the session, so a newly fetched model is picked up without a restart. */
@@ -156,4 +241,4 @@ function sources() {
   return { model: status(), dictionary: dictionary.status() };
 }
 
-module.exports = { status, sources, resolve, unload, modelDir };
+module.exports = { status, sources, resolve, examples, unload, modelDir };

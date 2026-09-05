@@ -205,6 +205,55 @@ test('a failed parse can be retried once before falling back', async () => {
   assert.equal(result.attempts, 2);
 });
 
+test('a retry asks a different question, because a greedy decode repeats itself', async () => {
+  const asked = [];
+  await generateExamples(
+    { word: 'hablar', language: 'es' },
+    {
+      retryOnParseFailure: true,
+      infer: async (request) => {
+        asked.push(request.prompt);
+        return 'nothing usable here';
+      },
+    },
+  );
+
+  assert.equal(asked.length, 2);
+  assert.notEqual(asked[0], asked[1], 'the second attempt must not repeat the first prompt');
+  assert.match(asked[0], /Generate 2 simple/);
+  assert.match(asked[1], /Generate 3 simple/);
+});
+
+test('the same sentence twice counts as one example and triggers the retry', async () => {
+  let call = 0;
+  const result = await generateExamples(
+    { word: 'hablar', language: 'es' },
+    {
+      retryOnParseFailure: true,
+      infer: async () =>
+        ++call === 1
+          ? '["Ella habla espanol.", "Ella habla espanol."]'
+          : '["Ella habla espanol.", "Hablamos todos los dias."]',
+    },
+  );
+
+  assert.equal(call, 2);
+  assert.equal(result.source, 'model');
+  assert.equal(result.examples.length, 2);
+  assert.notEqual(result.examples[0], result.examples[1]);
+});
+
+test('one real sentence ships as a model result rather than two carrier phrases', async () => {
+  const result = await generateExamples(
+    { word: 'hablar', meaning: 'to speak', language: 'es' },
+    { infer: async () => '["Ella habla espanol todos los dias."]' },
+  );
+
+  assert.equal(result.source, 'model');
+  assert.deepEqual(result.examples, ['Ella habla espanol todos los dias.']);
+  assert.match(result.error, /only 1 of 2/);
+});
+
 test('inference that blows the time budget is abandoned for the fallback', async () => {
   const started = Date.now();
   const result = await generateExamples(

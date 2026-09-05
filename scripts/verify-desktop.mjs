@@ -178,16 +178,43 @@ async function run(browser, crashes, app) {
   await clickLabel(page, 'Show answer');
   await waitForText(page, 'Again');
   const revealed = (await bodyText(page)).toLowerCase();
-  check('revealing shows the meaning and its examples', revealed.includes('hello'));
-  check('example sentences are generated', await hasText(page, 'examples', 15000));
-  // The deck's language, not the interface's, decides what the examples are
-  // written in — the two are deliberately separate.
-  check(
-    'the examples are in the deck language',
-    (await bodyText(page)).includes('znači'),
-    'Bosnian fallback for a Bosnian deck',
-  );
+  check('revealing shows the meaning', revealed.includes('hello'));
+
+  // Wait for the generation to finish rather than for the word "examples":
+  // the spinner reads "Writing examples…", so a substring check matches the
+  // card mid-generation and reads the section before anything is in it.
+  const usesModel = modelInstalled();
+  const settled = await textGone(page, 'Writing examples', usesModel ? 120000 : 20000);
+  check('example generation finishes', settled);
+
+  const shown = (await bodyText(page)).toLowerCase();
+  const offline = shown.includes('offline examples');
+  const sentences = await exampleSentences(page, 'zdrav');
   await shoot(page, '03-study');
+
+  if (usesModel) {
+    // The point of running the model in the main process: on the desktop the
+    // renderer cannot load one, so before that bridge existed every reveal
+    // landed in the branch below no matter what was installed.
+    check('the examples came from the model, not the offline frames', !offline, shown.slice(0, 120));
+    check(
+      'the model wrote two different sentences using the word',
+      sentences.length >= 2 && sentences[0] !== sentences[1],
+      sentences.join(' | ') || 'none found',
+    );
+  } else {
+    check(
+      'with no model installed the examples are labelled offline, not passed off',
+      offline,
+    );
+    // The deck's language, not the interface's, decides what the examples are
+    // written in — the two are deliberately separate.
+    check(
+      'the examples are in the deck language',
+      shown.includes('znači'),
+      'Bosnian fallback for a Bosnian deck',
+    );
+  }
 
   await page.keyboard.press('3');
   check(
@@ -259,27 +286,45 @@ async function run(browser, crashes, app) {
       const [, fromDictionary, fromModel] = summary ?? [];
 
       check('every meaning says which source answered it', Boolean(summary), summary?.[0]);
-      // The point of the whole arrangement: ordinary words come from the
-      // dictionary and the model is never asked. A run where the model
-      // answered these would mean the dictionary was not consulted at all.
-      check(
-        'the dictionary answered all three, and the model was not needed',
-        fromDictionary === '3' && fromModel === '0',
-        summary?.[0],
-      );
-      check(
-        'dictionary meanings are not flagged for review',
-        !shown.includes('model — check this'),
-      );
-      // The glosses themselves, so a dictionary that loaded but returned
-      // nothing useful cannot pass this. They live in input values, which are
-      // not part of innerText — reading the page text would always find them
-      // empty and the check would pass or fail for the wrong reason.
+
+      if (dictionaryInstalled()) {
+        // The point of the whole arrangement: ordinary words come from the
+        // dictionary and the model is never asked. A run where the model
+        // answered these would mean the dictionary was not consulted at all.
+        check(
+          'the dictionary answered all three, and the model was not needed',
+          fromDictionary === '3' && fromModel === '0',
+          summary?.[0],
+        );
+        check(
+          'dictionary meanings are not flagged for review',
+          !shown.includes('model — check this'),
+        );
+      } else {
+        // The other half of the same policy. With no dictionary installed every
+        // word falls to the model, and every one of those answers has to arrive
+        // marked as a draft — this is the arrangement that caught "lodazal" as
+        // "lodestar" before it became a card.
+        check(
+          'with no dictionary the model answers, and says that it did',
+          fromDictionary === '0' && fromModel === '3',
+          summary?.[0],
+        );
+        check(
+          'every model meaning is flagged for review before import',
+          shown.includes('model — check this'),
+        );
+      }
+
+      // The glosses themselves, so a source that answered but returned nothing
+      // useful cannot pass this. They live in input values, which are not part
+      // of innerText — reading the page text would always find them empty and
+      // the check would pass or fail for the wrong reason.
       const glosses = await Promise.all(
         ['knjiga', 'prijatelj', 'ljubav'].map((word) => fieldValue(page, word)),
       );
       check(
-        'the meanings are the dictionary\'s',
+        'the meanings that came back are the right ones',
         /book/i.test(glosses[0] ?? '') &&
           /friend/i.test(glosses[1] ?? '') &&
           /love/i.test(glosses[2] ?? ''),
@@ -318,6 +363,32 @@ async function run(browser, crashes, app) {
     );
   }
 
+  // --- the settings screen's answer about the model ------------------------
+  //
+  // "Why are my examples generic?" is the question this app gets asked most,
+  // and settings is where it is answered. On the desktop the in-process check
+  // can only ever report that `onnxruntime-react-native` is not installed —
+  // true, useless, and wrong about whether examples work — so the screen asks
+  // the shell instead. This is that answer, in the packaged app.
+  await clickLabel(page, 'Settings');
+  await waitForText(page, 'On-device examples');
+  const settings = await bodyText(page);
+
+  check(
+    modelInstalled()
+      ? 'settings reports the model the shell actually loaded'
+      : 'settings says the model is missing, and where to get one',
+    modelInstalled()
+      ? settings.includes('Model ready') && /Qwen/i.test(settings)
+      : settings.includes('Model not installed') && /fetch-model/i.test(settings),
+    settings.match(/Model (ready|not installed)[\s\S]{0,90}/)?.[0]?.replace(/\s+/g, ' '),
+  );
+  check(
+    'settings does not blame the native module the desktop could never load',
+    !settings.includes('onnxruntime-react-native'),
+  );
+  await shoot(page, '10-settings');
+
   // --- nothing broke -------------------------------------------------------
   const blocked = consoleErrors.filter((message) => /Content Security Policy/i.test(message));
   check('the content security policy does not block the app', blocked.length === 0, blocked[0]);
@@ -339,12 +410,25 @@ async function run(browser, crashes, app) {
  * reads the same variables.
  */
 function lookupInstalled() {
+  return dictionaryInstalled() || modelInstalled();
+}
+
+/** Is there a bilingual dictionary for the deck's language? */
+function dictionaryInstalled() {
   const dictionaries = process.env.FLUENTFLOW_DICTIONARY_DIR;
+  return Boolean(dictionaries && existsSync(join(dictionaries, 'bs-en.sqlite3')));
+}
+
+/**
+ * Is there a model for the reveal to write examples with?
+ *
+ * Its own question, not a synonym for {@link lookupInstalled}: a dictionary
+ * fills in meanings but cannot write a sentence, so a run with a dictionary and
+ * no model should still expect the offline frames on a card reveal.
+ */
+function modelInstalled() {
   const model = process.env.FLUENTFLOW_MODEL_DIR;
-  return Boolean(
-    (dictionaries && existsSync(join(dictionaries, 'bs-en.sqlite3'))) ||
-      (model && existsSync(join(model, 'model.onnx'))),
-  );
+  return Boolean(model && existsSync(join(model, 'model.onnx')));
 }
 
 function findExecutable() {
@@ -528,6 +612,42 @@ async function hasText(page, text, timeout) {
     await page.waitForFunction(
       (needle) => document.body.innerText.toLowerCase().includes(needle),
       { timeout },
+      text.toLowerCase(),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The example sentences on the revealed card.
+ *
+ * Read as lines that use the word and are long enough to be a sentence, which
+ * is the same thing core validates before accepting them. Matching on a stem
+ * rather than the whole word is deliberate: Bosnian declines, so a sentence
+ * demonstrating `zdravo` may well contain `zdrava`, and requiring the exact
+ * form would fail the check for the one reason it should pass.
+ */
+async function exampleSentences(page, stem) {
+  const text = await bodyText(page);
+  const pattern = new RegExp(stem, 'i');
+  return [
+    ...new Set(
+      text
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => pattern.test(line) && line.split(/\s+/).length >= 3),
+    ),
+  ];
+}
+
+/** Wait for text to disappear — a spinner finishing, rather than appearing. */
+async function textGone(page, text, timeout) {
+  try {
+    await page.waitForFunction(
+      (needle) => !document.body.innerText.toLowerCase().includes(needle),
+      { timeout, polling: 500 },
       text.toLowerCase(),
     );
     return true;

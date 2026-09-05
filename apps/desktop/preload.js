@@ -20,8 +20,9 @@ const { contextBridge, ipcRenderer } = require('electron');
  *
  * Inference needs a native module and a gigabyte of weights, neither of which
  * belongs in a page that renders user-supplied deck content. What crosses the
- * bridge is three functions and no filesystem, no `require`, and no way to name
- * a path — the renderer asks for words to be translated and gets words back.
+ * bridge is four functions and no filesystem, no `require`, and no way to name
+ * a path — the renderer asks for words to be translated, or for a sentence
+ * using one, and gets text back.
  */
 contextBridge.exposeInMainWorld('fluentflowDesktop', {
   platform: process.platform,
@@ -37,6 +38,15 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
      * @returns `{ ok: true, meanings }` or `{ ok: false, error }`
      */
     resolve: (words, language) => ipcRenderer.invoke('ai:resolve', { words, language }),
+
+    /**
+     * Write example sentences showing a word in use, for a card reveal.
+     *
+     * @returns `{ ok: true, result }` with core's `GenerateExamplesResult`, or
+     *          `{ ok: false, error }`. A missing model is not a failure: it
+     *          comes back as `ok` with `source: 'fallback'`.
+     */
+    examples: (request) => ipcRenderer.invoke('ai:examples', request),
 
     /** Progress for a long list. Returns an unsubscribe function. */
     onProgress: (listener) => {

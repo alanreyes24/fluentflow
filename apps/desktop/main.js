@@ -7,9 +7,10 @@
  * those need the out-of-tree `react-native-windows` / `react-native-macos`
  * forks, which are not Expo-managed and would mean maintaining a second native
  * project. Wrapping the web export in Electron gets a real desktop app from the
- * same codebase, at the cost of the on-device ONNX model: `onnxruntime-react-
- * native` is a native mobile module, so the desktop build falls back to written
- * example sentences.
+ * same codebase. The on-device model survives that move, but not in the
+ * renderer: `onnxruntime-react-native` is a native mobile module and cannot
+ * load in the web export, so inference runs in this process behind the IPC
+ * handlers at the bottom of the file. See ai.js for what runs there and why.
  *
  * The export is served over a custom `app://` scheme rather than loaded from
  * `file://`. That is not cosmetic:
@@ -217,7 +218,7 @@ function missingBuildPage() {
  * module, so both stay on this side of the bridge and the renderer asks for
  * results.
  *
- * Both handlers answer with a plain object rather than throwing across the
+ * Every handler answers with a plain object rather than throwing across the
  * bridge, because an IPC rejection reaches the renderer as a string with the
  * main-process stack glued to the front of it.
  */
@@ -243,6 +244,20 @@ function registerAiHandlers() {
     }
   });
 
+  ipcMain.handle('ai:examples', async (_event, request) => {
+    const { word, meaning, language, count } = request ?? {};
+    if (typeof word !== 'string' || !word.trim()) {
+      return { ok: false, error: 'No word to write examples for.' };
+    }
+
+    try {
+      return { ok: true, result: await ai.examples({ word, meaning, language, count }) };
+    } catch (error) {
+      // A reveal must not break because the model did. The renderer turns this
+      // into the same carrier sentences it would show with no model installed.
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+  });
 }
 
 app.whenReady().then(() => {

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 /**
- * Download the model the desktop app translates with.
+ * Download the model the desktop app runs.
+ *
+ * It does two jobs once installed: filling in the meanings a pasted word list
+ * does not carry, and writing the two example sentences a card reveal shows.
  *
  * `prepare-model.mjs` is the other way to get a model, and it is a different
  * job: it shells out to Python, Optimum and torch to export and quantise a
@@ -18,6 +21,12 @@
  * trustworthy enough to write a card unreviewed, which is why the app treats
  * every translation as a draft — but ten out of fourteen is worth reviewing and
  * five is not.
+ *
+ * Example sentences say the same thing more plainly. Asked to use `lodazal` in
+ * a sentence the 0.5B wrote about "el loderazal", a word it had just invented,
+ * and defined `comer` instead of using it; the 1.5B wrote "El campo estaba
+ * lleno de lodazal". Being smaller does not help either: the 0.5B's only
+ * unquantised export is 1.9 GB, larger than the 1.5B at 4-bit.
  */
 
 import { createWriteStream } from 'node:fs';
@@ -150,7 +159,7 @@ async function main() {
   await download(`${base}/config.json`, join(options.dir, 'config.json'), 'config.json');
   await download(`${base}/${model.graph}`, join(options.dir, 'model.onnx'), 'model.onnx');
 
-  console.log('\nDone. Restart FluentFlow and paste a word list.');
+  console.log('\nDone. Restart FluentFlow, then paste a word list or reveal a card.');
 }
 
 await main();

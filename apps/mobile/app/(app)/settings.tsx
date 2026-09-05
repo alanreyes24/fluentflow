@@ -90,8 +90,7 @@ export default function SettingsScreen() {
                 <Label variant="body">{t('aiModelReady')}</Label>
               </Row>
               <Label variant="caption" tone="faint">
-                {model.vocabSize?.toLocaleString()} tokens
-                {modelSize ? ` · ${formatBytes(modelSize)}` : ''}
+                {modelDetail(model, modelSize)}
               </Label>
             </>
           ) : (
@@ -188,6 +187,29 @@ function formatBytes(bytes: number): string {
   return megabytes >= 1024
     ? `${(megabytes / 1024).toFixed(1)} GB`
     : `${Math.round(megabytes)} MB`;
+}
+
+/**
+ * The line under "Model ready".
+ *
+ * The two hosts know different things about the model they loaded, and neither
+ * knows the other's. In-process the tokenizer is right here, so the vocabulary
+ * size and the bundled weight size are both readable; through the desktop
+ * bridge nothing crosses but a name and a directory, because the session lives
+ * in another process. Rather than print a blank where the other's number would
+ * go, each says what it actually has.
+ */
+function modelDetail(model: ModelStatus, bundledBytes: number | null): string {
+  if (model.host === 'desktop') {
+    return [model.name, model.modelPath].filter(Boolean).join(' · ');
+  }
+
+  return [
+    model.vocabSize ? `${model.vocabSize.toLocaleString()} tokens` : null,
+    bundledBytes ? formatBytes(bundledBytes) : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 const styles = StyleSheet.create({

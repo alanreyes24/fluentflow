@@ -42,7 +42,11 @@ export interface GenerateExamplesDeps {
   /** Hard deadline for inference, in milliseconds. */
   budgetMs?: number;
   maxTokens?: number;
-  /** Retry once when the first response fails validation. */
+  /**
+   * Allow a second attempt when the first produced fewer usable sentences than
+   * were asked for. The retry asks a deliberately different question — see the
+   * loop below for why an identical one would be pointless.
+   */
   retryOnParseFailure?: boolean;
   now?: () => number;
 }
@@ -92,6 +96,8 @@ export async function generateExamples(
 
   let attempts = 0;
   let lastError = 'no usable output';
+  /** The best set of sentences any attempt has produced so far. */
+  let best: string[] = [];
 
   // Aborting makes the inference promise reject on its own, and that rejection
   // usually wins the race against the deadline's. The flag keeps the reported
@@ -109,8 +115,17 @@ export async function generateExamples(
   try {
     while (attempts < maxAttempts) {
       attempts++;
+
+      // Asking for one more sentence than is needed, rather than repeating the
+      // question. Core cannot see how the platform decodes, and a greedy
+      // backend returns the same tokens for the same prompt — so a retry that
+      // asks the identical question is a second inference for a guaranteed
+      // identical answer. A wider ask diverges either way, and it also covers
+      // the case the retry usually exists for: a model that wrote two sentences
+      // but only one usable one, or wrote the same sentence twice.
+      const ask = attempts === 1 ? count : count + 1;
       const prompt = buildPrompt(
-        { word: input.word, meaning: input.meaning, language: input.language, count },
+        { word: input.word, meaning: input.meaning, language: input.language, count: ask },
         family,
       );
 
@@ -127,12 +142,16 @@ export async function generateExamples(
       const parsed = parseExamples(raw, {
         word: input.word,
         language: input.language,
-        max: count,
+        max: ask,
       });
 
-      if (parsed.examples.length > 0) {
+      // `parseExamples` drops duplicates, so this counts distinct sentences —
+      // which is what was asked for. Two copies of one sentence is one example.
+      if (parsed.examples.length > best.length) best = parsed.examples;
+
+      if (best.length >= count) {
         return {
-          examples: parsed.examples.slice(0, count),
+          examples: best.slice(0, count),
           source: 'model',
           durationMs: now() - started,
           attempts,
@@ -151,6 +170,19 @@ export async function generateExamples(
         : String(error);
   } finally {
     controller.abort();
+  }
+
+  // Fewer sentences than asked for, but real ones. A single genuine usage beats
+  // two carrier phrases that quote the word instead of inflecting it, so a
+  // short result ships as a model result rather than being thrown away.
+  if (best.length > 0) {
+    return {
+      examples: best,
+      source: 'model',
+      durationMs: now() - started,
+      attempts,
+      error: `only ${best.length} of ${count} sentences were usable`,
+    };
   }
 
   return {

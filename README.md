@@ -63,7 +63,7 @@ misread:
 | Localisation | Complete: English, Spanish, Bosnian UI packs |
 | AI pipeline | Complete: prompting, parsing, validation, budget, fallback |
 | AI **weights** | **Not bundled**, and now optional. `npm run fetch-desktop-model` |
-| Desktop inference | Real: `onnxruntime-node` in the main process, measured below |
+| Desktop inference | Real: `onnxruntime-node` in the main process — meanings *and* examples, measured below |
 | iOS / Android / web | Expo, standard |
 | Windows / macOS | Electron around the web export, not native RN; both packaged |
 | The views | 79 render tests; the web and desktop builds walked through by a browser |
@@ -74,11 +74,15 @@ The web build and both desktop builds are also driven end to end by a real
 browser — see Testing — so what is claimed below has been watched running, not
 only compiled.
 
-The AI integration is real code — a greedy decoder over an ONNX graph with KV
-cache reuse, and a Llama-style BPE tokenizer with byte fallback, both written
-here and the tokenizer unit-tested. What is not in the repository is the ~620 MB
-of quantised weights, and `onnxruntime-react-native` is an optional dependency
-because it is a native module that needs a development build. Until both are
+The AI integration is real code — a decoder over an ONNX graph with KV cache
+reuse, greedy or sampled depending on the job, and a Llama-style BPE tokenizer
+with byte fallback, both written here and the tokenizer unit-tested. What is not
+in the repository is the weights.
+
+On the desktop they are one `npm run fetch-desktop-model` away and inference
+runs in Electron's main process, so card reveals are generated. On a phone
+`onnxruntime-react-native` is an optional dependency — a native module needing a
+development build — and until it and the ~620 MB of quantised weights are both
 present, `generateExamples` uses its fallback and the UI says so. See
 [apps/mobile/assets/models/README.md](apps/mobile/assets/models/README.md).
 
@@ -86,7 +90,9 @@ Windows and macOS deserve the same directness. Expo targets iOS, Android and the
 web; desktop would otherwise mean the out-of-tree `react-native-windows` and
 `react-native-macos` forks and a second native project to maintain.
 [apps/desktop](apps/desktop) wraps the web export in Electron instead, which
-gives a real installable app from one codebase and gives up the native model.
+gives a real installable app from one codebase. The model survives the move by
+running in the main process rather than the renderer, which cannot load a native
+mobile module.
 The same shell now ships for both: a `.dmg` for macOS alongside the Windows
 installers, packaged and driven through the same 17-check walkthrough.
 
@@ -211,7 +217,7 @@ Both run in the Electron **main** process
 ([ai.js](apps/desktop/ai.js), [dictionary.js](apps/desktop/dictionary.js)): the
 renderer has a content security policy because it draws user-supplied deck
 content, `onnxruntime-node` is a native module, and a minute of decoding on the
-UI thread would freeze the window. The renderer gets three functions over
+UI thread would freeze the window. The renderer gets four functions over
 `contextBridge` and no filesystem. The policy — dictionary first, model for the
 rest, sources kept apart — is
 [packages/core/src/ai/resolve.ts](packages/core/src/ai/resolve.ts), with the
@@ -220,6 +226,68 @@ is [decode.ts](packages/core/src/ai/decode.ts), shared with the phone.
 
 Wiktionary is CC BY-SA. The attribution is written into a `meta` table in each
 dictionary file so it travels with the data.
+
+## Writing example sentences
+
+Revealing a card asks the model for two sentences using the word. Same model,
+same process, same decode loop as the lookup above — but almost every setting
+differs, because the two jobs are not the same job.
+
+```
+npm run fetch-desktop-model     # the same 1.2 GB, if it is not already there
+npm run desktop:pack
+```
+
+Measured on an M-series Mac with Qwen2.5-1.5B q4f16:
+
+| | Cost |
+| --- | --- |
+| Session creation, once per launch | 3.3 s |
+| Two sentences, per card | 5–7 s |
+| The same card again | 0 ms — cached by word in SQLite |
+
+The generation is charged once per *word*, not per card or per review: the
+result is written to `example_cache` and onto the card, so it syncs to the
+user's other devices and a word appearing in two decks is generated once.
+
+**Here the model has no competition, so it is the source rather than the
+fallback.** That is the reverse of the lookup, and not an inconsistency: no
+dictionary contains a sentence. What keeps it honest is the same validation
+either way — core rejects a candidate that does not contain the word it was
+meant to demonstrate, tolerating inflection, so a sentence about a word the
+model has quietly changed never reaches a card.
+
+**Asked greedily for two sentences, the model writes one sentence twice.** This
+is the finding that shaped the feature. Greedy decoding takes the
+highest-scoring token at every step, so both slots of the JSON array decode from
+nearly the same state and come out identical — `zdravo` returned
+`["Zdravo, kako ste?", "Zdravo, kako ste?"]` on every run, and asking for three
+produced three copies. Deduplication then leaves one example where two were
+asked for. Sampling is the fix, and it is also the only thing that makes the
+UI's Regenerate button able to return anything new.
+
+**The temperature was measured, not chosen.** 0.4, 0.55, 0.7 and 0.8 over the
+same five words: too low and the sampler collapses back toward greedy and
+repeats itself; 0.8 invented `amamorando`, which is not a Spanish word. 0.7 with
+top-k 40 gave two distinct sentences for all five and the most plausible
+Spanish. It lives in one constant, `EXAMPLE_SAMPLING` in
+[decode.ts](packages/core/src/ai/decode.ts), because the phone and the desktop
+run the same loop and two copies of a tuning number drift.
+
+Translation stays greedy at temperature 0. There is one right answer, and
+looking a word up twice should not give two meanings.
+
+**Spanish is good; Bosnian is noticeably weaker.** `La abeja construye su nido
+en la colina del jardín.` against `Naravno je da je knjiga prazanje za glasne
+ljudi.`, which is not a sentence. The model is the limit, not the pipeline —
+Bosnian is thin in a 1.5B model's training data for the same reason it was thin
+in the dictionaries. Worth knowing before trusting a Bosnian card.
+
+The budget is 30 s here rather than the phone's 2 s, and the difference is
+structural rather than generous: inference is in the main process, so the window
+stays interactive and the rating buttons work while it thinks. The session is
+loaded *before* the budget starts, so the first card of a session is not charged
+3.3 s of setup out of its own deadline.
 
 ## Design notes
 

@@ -5,7 +5,7 @@ import {
   parseTranslation,
   translateWords,
   meaningsFrom,
-  decodeGreedy,
+  decode,
   shapeFromConfig,
 } from '../dist/index.js';
 
@@ -144,7 +144,7 @@ test('a config without the fields that decide the cache shape is an error', () =
   assert.throws(() => shapeFromConfig({ num_hidden_layers: 24 }), /num_attention_heads/);
 });
 
-test('decodeGreedy feeds the cache forward and stops on the eos token', async () => {
+test('decode feeds the cache forward and stops on the eos token', async () => {
   const shape = { numLayers: 1, numKeyValueHeads: 1, headDim: 2 };
   const tokenizer = {
     eosId: 99,
@@ -171,7 +171,7 @@ test('decodeGreedy feeds the cache forward and stops on the eos token', async ()
     },
   };
 
-  const text = await decodeGreedy(runtime, session, tokenizer, shape, {
+  const text = await decode(runtime, session, tokenizer, shape, {
     prompt: 'anything', stop: [], maxTokens: 10,
   });
 
@@ -186,7 +186,65 @@ test('decodeGreedy feeds the cache forward and stops on the eos token', async ()
   assert.equal(calls[1]['past_key_values.0.key'].dims[2], 1);
 });
 
-test('decodeGreedy trims a stop sequence out of the text', async () => {
+/**
+ * A one-step decode over a fixed logit row, so what the sampler picks is the
+ * only thing under test.
+ */
+async function pickOnce(logits, request) {
+  const shape = { numLayers: 0, numKeyValueHeads: 1, headDim: 2 };
+  const tokenizer = { eosId: -1, encode: () => [1], decode: (ids) => ids.join(',') };
+  const runtime = { Tensor: class { constructor(t, d, dims) { this.data = d; this.dims = dims; } } };
+  const session = {
+    inputNames: ['input_ids', 'attention_mask'],
+    run: async () => ({ logits: { data: logits, dims: [1, 1, logits.length] } }),
+  };
+
+  return decode(runtime, session, tokenizer, shape, {
+    prompt: 'x',
+    stop: [],
+    maxTokens: 1,
+    ...request,
+  });
+}
+
+test('decoding is greedy by default, which is what a translation needs', async () => {
+  const logits = [1, 5, 2, 9, 3];
+  for (let attempt = 0; attempt < 5; attempt++) {
+    assert.equal(await pickOnce(logits), '3', 'the highest-scoring token, every time');
+  }
+});
+
+test('sampling can return something other than the top token', async () => {
+  // Two near-equal front runners: greedy can only ever answer 3.
+  const logits = [0, 0, 0, 10, 9.9];
+  const seen = new Set();
+  for (let seed = 0; seed < 30; seed++) {
+    seen.add(await pickOnce(logits, { temperature: 0.8, topK: 40, seed }));
+  }
+
+  assert.deepEqual([...seen].sort(), ['3', '4']);
+});
+
+test('a seeded sample is reproducible, so a decode can be repeated', async () => {
+  const logits = [1, 8, 3, 8.2, 7.5, 2];
+  const first = await pickOnce(logits, { temperature: 1, seed: 12345 });
+  const again = await pickOnce(logits, { temperature: 1, seed: 12345 });
+
+  assert.equal(first, again);
+});
+
+test('top-k keeps the sampler away from the tail of the vocabulary', async () => {
+  // One plausible token and a long tail of noise. With topK: 1 the tail must
+  // never be reachable, however many times it is asked.
+  const logits = new Array(500).fill(0.1);
+  logits[42] = 12;
+
+  for (let seed = 0; seed < 40; seed++) {
+    assert.equal(await pickOnce(logits, { temperature: 2, topK: 1, seed }), '42');
+  }
+});
+
+test('decode trims a stop sequence out of the text', async () => {
   const shape = { numLayers: 0, numKeyValueHeads: 1, headDim: 2 };
   const tokenizer = { eosId: -1, encode: () => [1], decode: (ids) => ids.map((i) => (i === 5 ? 'nest' : '\nmore')).join('') };
   const runtime = { Tensor: class { constructor(t, d, dims) { this.data = d; this.dims = dims; } } };
@@ -201,7 +259,7 @@ test('decodeGreedy trims a stop sequence out of the text', async () => {
     },
   };
 
-  const text = await decodeGreedy(runtime, session, tokenizer, shape, {
+  const text = await decode(runtime, session, tokenizer, shape, {
     prompt: 'x', stop: ['\n'], maxTokens: 5,
   });
 
