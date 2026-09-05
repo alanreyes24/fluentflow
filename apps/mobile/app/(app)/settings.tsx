@@ -6,7 +6,16 @@ import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
 import { modelStatus, type ModelStatus } from '../../src/ai/model';
 import { modelSizeBytes } from '../../src/ai/assets';
-import { Button, Label, Row, Screen, Spacer, Surface } from '../../src/ui/components';
+import {
+  Button,
+  Label,
+  Row,
+  Screen,
+  SectionLabel,
+  Spacer,
+  Surface,
+  useContentStyle,
+} from '../../src/ui/components';
 import { useTheme, useThemeContext, type ThemePreference } from '../../src/ui/theme';
 
 /**
@@ -21,6 +30,7 @@ export default function SettingsScreen() {
   const theme = useTheme();
   const { preference, setPreference } = useThemeContext();
   const { user, sync, syncNow, signOut, cloudAvailable, examples, repository } = useApp();
+  const content = useContentStyle();
 
   const [model, setModel] = useState<ModelStatus | null>(null);
   const [modelSize, setModelSize] = useState<number | null>(null);
@@ -39,7 +49,7 @@ export default function SettingsScreen() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={content}>
         <Section title={t('interfaceLanguage')}>
           <Row gap={theme.spacing.sm}>
             {SUPPORTED_LANGUAGES.map((code: LanguageCode) => (
@@ -166,9 +176,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   const theme = useTheme();
   return (
     <View style={styles.section}>
-      <Label variant="caption" tone="faint" style={styles.sectionTitle}>
-        {title}
-      </Label>
+      <SectionLabel>{title}</SectionLabel>
       <Spacer size={theme.spacing.sm} />
       <Surface style={styles.card}>{children}</Surface>
     </View>
@@ -183,9 +191,7 @@ function formatBytes(bytes: number): string {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 16 },
   section: { marginBottom: 24 },
-  sectionTitle: { textTransform: 'uppercase', letterSpacing: 0.6 },
   card: { gap: 4 },
   grow: { flex: 1 },
   dot: { width: 8, height: 8, borderRadius: 4 },

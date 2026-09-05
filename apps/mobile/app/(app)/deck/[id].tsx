@@ -13,17 +13,21 @@ import {
   ProgressBar,
   Row,
   Screen,
+  SectionLabel,
   Spacer,
   StatusDot,
   Surface,
+  useContentStyle,
 } from '../../../src/ui/components';
-import { useTheme } from '../../../src/ui/theme';
+import { useLayout, useTheme } from '../../../src/ui/theme';
 
 /** Deck detail: progress, the study entry point, and card management. */
 export default function DeckScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useI18n();
   const theme = useTheme();
+  const { wide } = useLayout();
+  const content = useContentStyle();
   const navigation = useNavigation();
   const { repository, user, refreshDecks } = useApp();
 
@@ -90,7 +94,7 @@ export default function DeckScreen() {
       <FlatList
         data={cards}
         keyExtractor={(card) => card.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={content}
         ListHeaderComponent={
           <View style={styles.header}>
             <Surface>
@@ -134,6 +138,7 @@ export default function DeckScreen() {
                 })
               }
               disabled={cards.length === 0}
+              style={wide ? styles.selfStart : undefined}
             />
 
             <Spacer size={theme.spacing.sm} />
@@ -149,13 +154,29 @@ export default function DeckScreen() {
                 }}
               />
             ) : (
-              <Button label={t('addCard')} variant="secondary" onPress={() => setAdding(true)} />
+              <Row gap={theme.spacing.sm}>
+                <Button
+                  label={t('addCard')}
+                  variant="secondary"
+                  onPress={() => setAdding(true)}
+                  style={styles.grow}
+                />
+                <Button
+                  label={t('pasteText')}
+                  variant="secondary"
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(app)/text-import',
+                      params: { deckId: deck.id },
+                    })
+                  }
+                  style={styles.grow}
+                />
+              </Row>
             )}
 
             <Spacer size={theme.spacing.md} />
-            <Label variant="caption" tone="faint" style={styles.sectionLabel}>
-              {t('cards')}
-            </Label>
+            <SectionLabel>{t('cards')}</SectionLabel>
           </View>
         }
         renderItem={({ item }) => (
@@ -173,8 +194,8 @@ export default function DeckScreen() {
         )}
         ItemSeparatorComponent={() => <Spacer size={theme.spacing.xs} />}
         ListFooterComponent={
-          <View style={styles.footer}>
-            <Button label={t('deleteDeck')} variant="ghost" onPress={removeDeck} />
+          <View style={[styles.footer, wide ? styles.selfStart : null]}>
+            <Button label={t('deleteDeck')} variant="ghostDanger" onPress={removeDeck} />
           </View>
         }
       />
@@ -295,9 +316,8 @@ function confirm(
 }
 
 const styles = StyleSheet.create({
-  list: { padding: 16 },
   header: {},
-  sectionLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  selfStart: { alignSelf: 'flex-start' },
   card: { paddingVertical: 12 },
   grow: { flex: 1 },
   form: { gap: 16 },

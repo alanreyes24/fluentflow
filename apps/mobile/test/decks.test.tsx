@@ -31,7 +31,7 @@ describe('DecksScreen', () => {
     await renderScreen(<DecksScreen />, { repository, decks: [] });
 
     await screen.findByText('No decks yet');
-    expect(screen.getByText('Create a deck or import one from Anki to get started.')).toBeTruthy();
+    expect(screen.getByText('Create a deck, paste a word list, or import one from Anki.')).toBeTruthy();
   });
 
   it('lists a deck with its language and card count', async () => {

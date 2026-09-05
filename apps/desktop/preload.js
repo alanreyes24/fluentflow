@@ -3,24 +3,46 @@
 /**
  * Preload script.
  *
- * The renderer needs nothing from Node — the app talks to Firestore over HTTPS
- * and keeps local state in IndexedDB via expo-sqlite's web backend. So this
- * exposes only what tells the UI it is running in the desktop shell, and
- * deliberately no filesystem or IPC surface.
+ * The renderer needs almost nothing from Node — the app talks to Firestore over
+ * HTTPS and keeps local state in IndexedDB via expo-sqlite's web backend. The
+ * exception is the on-device model: it needs a native module and a gigabyte of
+ * weights, so it runs in the main process and the renderer asks for results.
+ * Nothing else is exposed — no filesystem, no `require`, no arbitrary IPC.
  *
  * `contextBridge` rather than assigning to `window`: with contextIsolation on,
  * a direct assignment lands in the isolated world and the page never sees it.
  */
 
-const { contextBridge } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
+/**
+ * The one thing the renderer cannot do for itself: run the model.
+ *
+ * Inference needs a native module and a gigabyte of weights, neither of which
+ * belongs in a page that renders user-supplied deck content. What crosses the
+ * bridge is three functions and no filesystem, no `require`, and no way to name
+ * a path — the renderer asks for words to be translated and gets words back.
+ */
 contextBridge.exposeInMainWorld('fluentflowDesktop', {
   platform: process.platform,
   electronVersion: process.versions.electron,
-  /**
-   * The desktop build has no bundled model: onnxruntime-react-native is a
-   * native mobile module. The app reads this to explain in Settings why
-   * examples are falling back rather than showing a generic failure.
-   */
-  hasLocalModel: false,
+
+  ai: {
+    /** `{ dictionary, model }` — what is installed, each with its own status. */
+    status: () => ipcRenderer.invoke('ai:status'),
+
+    /**
+     * Find English meanings for words: dictionary first, model for the rest.
+     *
+     * @returns `{ ok: true, meanings }` or `{ ok: false, error }`
+     */
+    resolve: (words, language) => ipcRenderer.invoke('ai:resolve', { words, language }),
+
+    /** Progress for a long list. Returns an unsubscribe function. */
+    onProgress: (listener) => {
+      const handler = (_event, progress) => listener(progress);
+      ipcRenderer.on('ai:progress', handler);
+      return () => ipcRenderer.removeListener('ai:progress', handler);
+    },
+  },
 });

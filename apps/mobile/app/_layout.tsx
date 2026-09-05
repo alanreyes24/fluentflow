@@ -6,11 +6,17 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { I18nProvider, useI18n } from '../src/i18n';
 import { AppProvider, useApp } from '../src/state/app';
 import { ThemeProvider, useTheme } from '../src/ui/theme';
+import { installWindowDragRegions } from '../src/ui/shell';
 import { EmptyState, Label, Loading, Screen } from '../src/ui/components';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
   // The splash screen may already be hidden on a fast reload.
 });
+
+// The desktop shell hides the native title bar, which leaves the window with
+// no handle to drag by until the page declares one. Doing it here covers
+// sign-in as well as the app. A no-op everywhere but Electron.
+installWindowDragRegions();
 
 export default function RootLayout() {
   return (

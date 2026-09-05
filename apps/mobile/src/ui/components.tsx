@@ -1,4 +1,4 @@
-import { forwardRef } from 'react';
+import { forwardRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -10,7 +10,7 @@ import {
   type TextInputProps,
 } from 'react-native';
 import type { CardStatus, DeckProgress } from '@fluentflow/core';
-import { useTheme, type Theme } from './theme';
+import { layout, useLayout, useTheme, type Theme } from './theme';
 import type { TextStyleProp, ViewStyleProp } from './styles';
 
 /**
@@ -73,7 +73,7 @@ export function Label({
 interface ButtonProps {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'ghostDanger' | 'danger';
   disabled?: boolean;
   loading?: boolean;
   /** Overrides the variant's background, used by the rating buttons. */
@@ -93,23 +93,29 @@ export function Button({
   accessibilityHint,
 }: ButtonProps) {
   const theme = useTheme();
+  const { wide } = useLayout();
+  const [hovered, setHovered] = useState(false);
   const inactive = disabled || loading;
 
   const background =
     color ??
     {
       primary: theme.colors.accent,
-      secondary: theme.colors.surfaceRaised,
+      secondary: theme.colors.surface,
       ghost: 'transparent',
+      ghostDanger: 'transparent',
       danger: theme.colors.danger,
     }[variant];
 
-  const textColor =
-    variant === 'secondary'
-      ? theme.colors.text
-      : variant === 'ghost'
-        ? theme.colors.accent
-        : theme.colors.accentText;
+  // A destructive action drawn in the accent colour reads as the thing to
+  // press. `ghostDanger` exists because "Delete deck" was doing exactly that.
+  const textColor = {
+    primary: theme.colors.accentText,
+    secondary: theme.colors.text,
+    ghost: theme.colors.accent,
+    ghostDanger: theme.colors.danger,
+    danger: theme.colors.accentText,
+  }[variant];
 
   return (
     <Pressable
@@ -119,15 +125,23 @@ export function Button({
       accessibilityState={{ disabled: Boolean(inactive) }}
       disabled={inactive}
       onPress={onPress}
+      // Pointer events rather than Pressable's `hovered` state: that one is a
+      // react-native-web extension the shared types do not carry, and these
+      // are in React Native proper and simply never fire on a touch screen.
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
       style={({ pressed }) => [
         styles.button,
+        // A 48pt target is sized for a thumb. With a mouse it reads as
+        // oversized, and macOS controls are nowhere near it.
+        { minHeight: wide ? 38 : 48, paddingHorizontal: wide ? 16 : 20 },
         {
           backgroundColor: background,
           borderColor: variant === 'secondary' ? theme.colors.border : 'transparent',
           borderWidth: variant === 'secondary' ? StyleSheet.hairlineWidth : 0,
           // Opacity rather than a second palette entry: it reads correctly in
           // both themes and against the overridden rating colours.
-          opacity: inactive ? 0.45 : pressed ? 0.82 : 1,
+          opacity: inactive ? 0.45 : pressed ? 0.82 : hovered ? 0.9 : 1,
         },
         style,
       ]}
@@ -155,6 +169,65 @@ export function Screen({
     <View style={[styles.screen, { backgroundColor: theme.colors.background }, style]}>
       {children}
     </View>
+  );
+}
+
+/**
+ * The width text is actually set at, and the padding around it.
+ *
+ * Returned as a style object rather than a component because most screens are
+ * a `FlatList` or a `ScrollView`, and the thing that needs constraining is
+ * `contentContainerStyle` — wrapping the list in a narrow `View` instead would
+ * stop the scrollbar reaching the window edge.
+ *
+ * Passing `full` opts out of the measure for content that genuinely wants the
+ * pane: the flashcard, which is a stage rather than a paragraph.
+ */
+export function useContentStyle(options?: { full?: boolean; maxWidth?: number }): ViewStyleProp {
+  const theme = useTheme();
+  const { wide } = useLayout();
+
+  return {
+    padding: wide ? theme.spacing.lg : theme.spacing.md,
+    // Room to scroll the last row clear of the window edge.
+    paddingBottom: theme.spacing.xxl,
+    width: '100%',
+    maxWidth: options?.full ? undefined : (options?.maxWidth ?? layout.measure),
+    // Leading, not centred. The screen's title is drawn at the leading edge of
+    // the pane by the navigator, and a centred column below it lands about
+    // 70pt to its right — close enough to read as a mistake rather than as a
+    // choice.
+    alignSelf: 'flex-start',
+  };
+}
+
+/** The same column, for a screen that does not scroll. */
+export function Page({
+  children,
+  style,
+  full,
+  maxWidth,
+}: {
+  children: ReactNode;
+  style?: ViewStyleProp;
+  full?: boolean;
+  maxWidth?: number;
+}) {
+  const content = useContentStyle({ full, maxWidth });
+  return <View style={[styles.page, content, style]}>{children}</View>;
+}
+
+/**
+ * A heading over a group of rows.
+ *
+ * Small, uppercase and faint on purpose: it labels the group without competing
+ * with the content of it, which is the one job a section heading has.
+ */
+export function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <Label variant="caption" tone="faint" style={styles.sectionLabel}>
+      {children}
+    </Label>
   );
 }
 
@@ -347,11 +420,11 @@ export function Loading({ label }: { label?: string }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  page: { flex: 1 },
+  sectionLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
   surface: { borderWidth: StyleSheet.hairlineWidth, padding: 16 },
   row: { flexDirection: 'row', alignItems: 'center' },
   button: {
-    minHeight: 48,
-    paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,

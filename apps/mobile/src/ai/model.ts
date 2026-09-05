@@ -1,10 +1,25 @@
-import { BpeTokenizer, tokenizerDataFromHuggingFace, type InferenceRequest } from '@fluentflow/core';
+import {
+  BpeTokenizer,
+  decodeGreedy,
+  shapeFromConfig,
+  tokenizerDataFromHuggingFace,
+  type InferenceRequest,
+  type LlamaShape,
+  type OrtLike,
+  type OrtLikeSession,
+} from '@fluentflow/core';
 import { loadModelAssets, type ModelAssets } from './assets';
 
 /**
  * On-device text generation with ONNX Runtime.
  *
- * This is a greedy decoder over a decoder-only transformer exported by
+ * The decode loop itself is in `@fluentflow/core`: the desktop shell runs the
+ * same models through `onnxruntime-node`, and a second copy of a KV cache loop
+ * is a second place for it to be subtly wrong. What stays here is the part that
+ * is genuinely React Native — loading the optional native module and reading
+ * the model files off the device.
+ *
+ * The shared loop decodes greedily over a decoder-only transformer exported by
  * Optimum, which gives the conventional signature:
  *
  *   inputs   input_ids, attention_mask, position_ids,
@@ -49,18 +64,14 @@ interface OrtModule {
   ) => OrtTensor;
 }
 
+export type { LlamaShape };
+
 export interface ModelStatus {
   available: boolean;
   /** Why the model is unavailable, for the settings screen. */
   reason?: string;
   modelPath?: string;
   vocabSize?: number;
-}
-
-export interface LlamaShape {
-  numLayers: number;
-  numKeyValueHeads: number;
-  headDim: number;
 }
 
 let ortModule: OrtModule | null | undefined;
@@ -168,149 +179,20 @@ async function generate(model: LoadedModel, request: InferenceRequest): Promise<
   const ort = loadOrt();
   if (!ort) throw new Error('ONNX Runtime went away mid-request.');
 
-  const promptIds = tokenizer.encode(request.prompt, { addBos: true });
-  const generated: number[] = [];
-
-  let past = emptyCache(ort, shape);
-  let inputIds = promptIds;
-  let position = 0;
-  let text = '';
-
-  for (let step = 0; step < request.maxTokens; step++) {
-    if (request.signal?.aborted) break;
-
-    const totalLength = position + inputIds.length;
-    const feeds: Record<string, OrtTensor> = {
-      input_ids: bigIntTensor(ort, inputIds, [1, inputIds.length]),
-      attention_mask: bigIntTensor(ort, filled(totalLength, 1), [1, totalLength]),
-      ...past,
-    };
-
-    // Not every export declares position_ids; feeding an undeclared input is an
-    // error, so it is only added when the graph asks for it.
-    if (session.inputNames.includes('position_ids')) {
-      feeds.position_ids = bigIntTensor(
-        ort,
-        inputIds.map((_, index) => position + index),
-        [1, inputIds.length],
-      );
-    }
-
-    const outputs = await session.run(feeds);
-    const logits = outputs.logits;
-    if (!logits) throw new Error('The model produced no logits output.');
-
-    const next = argmaxLastToken(logits);
-    if (next === tokenizer.eosId) break;
-
-    generated.push(next);
-    text = tokenizer.decode(generated);
-
-    // Stopping on the decoded text rather than on token ids: a stop sequence
-    // like "</s>" or "Instruct:" can straddle a token boundary and would never
-    // match as a single id.
-    if (request.stop.some((stop) => text.includes(stop))) {
-      for (const stop of request.stop) {
-        const at = text.indexOf(stop);
-        if (at !== -1) text = text.slice(0, at);
-      }
-      break;
-    }
-
-    // A complete JSON array is all the caller wanted; continuing past it just
-    // spends budget on text that gets discarded.
-    if (text.includes(']')) break;
-
-    position += inputIds.length;
-    inputIds = [next];
-    past = presentToPast(outputs, shape);
-  }
-
-  return text;
-}
-
-// --- tensor plumbing --------------------------------------------------------
-
-function bigIntTensor(ort: OrtModule, values: number[], dims: readonly number[]): OrtTensor {
-  return new ort.Tensor('int64', BigInt64Array.from(values, BigInt), dims);
-}
-
-/** A zero-length cache, which is what the first forward pass expects. */
-function emptyCache(ort: OrtModule, shape: LlamaShape): Record<string, OrtTensor> {
-  const feeds: Record<string, OrtTensor> = {};
-  const dims = [1, shape.numKeyValueHeads, 0, shape.headDim] as const;
-  for (let layer = 0; layer < shape.numLayers; layer++) {
-    feeds[`past_key_values.${layer}.key`] = new ort.Tensor('float32', new Float32Array(0), dims);
-    feeds[`past_key_values.${layer}.value`] = new ort.Tensor('float32', new Float32Array(0), dims);
-  }
-  return feeds;
-}
-
-/** Rename this step's `present.*` outputs into the next step's `past_key_values.*`. */
-function presentToPast(
-  outputs: Record<string, OrtTensor>,
-  shape: LlamaShape,
-): Record<string, OrtTensor> {
-  const past: Record<string, OrtTensor> = {};
-  for (let layer = 0; layer < shape.numLayers; layer++) {
-    const key = outputs[`present.${layer}.key`];
-    const value = outputs[`present.${layer}.value`];
-    if (!key || !value) {
-      throw new Error(
-        `The model did not return a KV cache for layer ${layer}. ` +
-          'Export it with use_cache=True (see scripts/prepare-model.mjs).',
-      );
-    }
-    past[`past_key_values.${layer}.key`] = key;
-    past[`past_key_values.${layer}.value`] = value;
-  }
-  return past;
-}
-
-/** Greedy pick over the final position's logits. */
-function argmaxLastToken(logits: OrtTensor): number {
-  const vocabSize = logits.dims[logits.dims.length - 1] ?? 0;
-  const data = logits.data as ArrayLike<number>;
-  const offset = data.length - vocabSize;
-
-  let best = 0;
-  let bestScore = -Infinity;
-  for (let i = 0; i < vocabSize; i++) {
-    const score = Number(data[offset + i]);
-    if (score > bestScore) {
-      bestScore = score;
-      best = i;
-    }
-  }
-  return best;
-}
-
-function filled(length: number, value: number): number[] {
-  return Array.from({ length }, () => value);
+  return decodeGreedy(ort as unknown as OrtLike, session as unknown as OrtLikeSession, tokenizer, shape, {
+    ...request,
+    // Example generation asks for a JSON array and has what it needs the
+    // moment the bracket closes.
+    stopOnJsonArray: true,
+  });
 }
 
 /**
  * Read the cache geometry from the model's `config.json`.
  *
- * `num_key_value_heads` differs from `num_attention_heads` on models that use
- * grouped-query attention — TinyLlama has 32 attention heads but only 4 KV
- * heads — and using the wrong one produces a shape mismatch on the second
- * token, after the first pass has already succeeded.
+ * The rules live in core with the decode loop that depends on them; this is
+ * only where the file gets read on a device.
  */
 function shapeFrom(config: unknown): LlamaShape {
-  const c = (config ?? {}) as {
-    num_hidden_layers?: number;
-    num_attention_heads?: number;
-    num_key_value_heads?: number;
-    hidden_size?: number;
-    head_dim?: number;
-  };
-
-  const numLayers = c.num_hidden_layers ?? 22;
-  const numAttentionHeads = c.num_attention_heads ?? 32;
-  const numKeyValueHeads = c.num_key_value_heads ?? numAttentionHeads;
-  const hiddenSize = c.hidden_size ?? 2048;
-  const headDim = c.head_dim ?? Math.floor(hiddenSize / numAttentionHeads);
-
-  return { numLayers, numKeyValueHeads, headDim };
+  return shapeFromConfig(config);
 }

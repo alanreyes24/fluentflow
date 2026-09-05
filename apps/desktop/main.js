@@ -24,10 +24,11 @@
  * content.
  */
 
-const { app, BrowserWindow, Menu, net, protocol, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, net, protocol, shell, session } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { existsSync } = require('node:fs');
+const ai = require('./ai');
 
 /** Set to the Metro dev server URL to develop against live reload. */
 const DEV_URL = process.env.FLUENTFLOW_DEV_URL;
@@ -86,9 +87,17 @@ function createWindow() {
     minHeight: 520,
     // Matches the app's own light background so a cold start does not flash
     // white on a dark desktop.
-    backgroundColor: '#f6f5f2',
+    backgroundColor: '#fbfaf8',
     show: false,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    // `hidden` rather than `hiddenInset` so the page knows where the window
+    // buttons are. `hiddenInset` shifts them by an amount Electron documents
+    // only as "a fixed amount", which is not something a layout can be built
+    // against — and the layout has to be built against it, because macOS draws
+    // those three buttons over the top-left of the page whatever is there.
+    // `TITLE_BAR_HEIGHT` and `WINDOW_BUTTONS_WIDTH` in the app's ui/shell.ts
+    // are the other half of this pair.
+    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
+    trafficLightPosition: { x: 18, y: 15 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -199,9 +208,47 @@ function missingBuildPage() {
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
+/**
+ * Looking words up runs here, not in the renderer.
+ *
+ * The renderer is the web export: no Node, and a content security policy that
+ * exists because it renders user-supplied deck content. The dictionary is a
+ * 40 MB SQLite file and the model is a gigabyte of weights behind a native
+ * module, so both stay on this side of the bridge and the renderer asks for
+ * results.
+ *
+ * Both handlers answer with a plain object rather than throwing across the
+ * bridge, because an IPC rejection reaches the renderer as a string with the
+ * main-process stack glued to the front of it.
+ */
+function registerAiHandlers() {
+  ipcMain.handle('ai:status', () => ai.sources());
+
+  ipcMain.handle('ai:resolve', async (event, request) => {
+    const { words, language } = request ?? {};
+    if (!Array.isArray(words) || words.length === 0) {
+      return { ok: false, error: 'No words to look up.' };
+    }
+
+    try {
+      const meanings = await ai.resolve(words, language, (done, total) => {
+        // The window can go away mid-run; a long list outlives a closed window.
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('ai:progress', { done, total });
+        }
+      });
+      return { ok: true, meanings };
+    } catch (error) {
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+  });
+
+}
+
 app.whenReady().then(() => {
   registerProtocolHandler();
   applyContentSecurityPolicy();
+  registerAiHandlers();
   Menu.setApplicationMenu(buildMenu());
   createWindow();
 

@@ -8,11 +8,11 @@
     "build:web": "cd ../mobile && npx expo export --platform web --output-dir ../desktop/web --clear",
     "start": "node scripts/launch.mjs",
     "dev": "cross-env FLUENTFLOW_DEV_URL=http://localhost:8081 node scripts/launch.mjs",
-    "pack": "npm run build:web && electron-builder --win --dir -c.win.signAndEditExecutable=false",
+    "pack": "npm run build:web && electron-builder --dir",
     "dist": "npm run build:web && electron-builder",
     "dist:win": "npm run build:web && electron-builder --win",
     "dist:mac": "npm run build:web && electron-builder --mac",
-    "dist:win:unsigned": "npm run build:web && electron-builder --win -c.win.signAndEditExecutable=false"
+    "fetch-model": "node ../../scripts/fetch-desktop-model.mjs"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
@@ -22,10 +22,13 @@
   "build": {
     "appId": "com.fluentflow.desktop",
     "productName": "FluentFlow",
+    "afterPack": "scripts/after-pack.cjs",
     "files": [
-      "main.js",
-      "preload.js",
-      "web/**/*"
+      "*.js",
+      "web/**/*",
+      "node_modules/**/*",
+      "!node_modules/onnxruntime-node/bin/napi-v6/win32/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
     ],
     "extraMetadata": {
       "main": "main.js"
@@ -34,13 +37,17 @@
       "target": [
         "nsis",
         "portable"
-      ]
+      ],
+      "signAndEditExecutable": false
     },
     "mac": {
       "target": [
         "dmg"
       ],
-      "category": "public.app-category.education"
+      "category": "public.app-category.education",
+      "darkModeSupport": true,
+      "identity": null,
+      "artifactName": "FluentFlow-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -58,5 +65,12 @@
       "artifactName": "FluentFlow-${version}-portable.${ext}"
     },
     "asar": false
+  },
+  "dependencies": {
+    "@fluentflow/core": "file:../../packages/core",
+    "onnxruntime-node": "^1.29.0"
+  },
+  "allowScripts": {
+    "onnxruntime-node": false
   }
 }

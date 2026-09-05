@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { RATINGS, type Card, type Deck, type RatingName } from '@fluentflow/core';
@@ -17,7 +17,7 @@ import {
   Surface,
 } from '../../../src/ui/components';
 import { useCardGestures } from '../../../src/ui/useCardGestures';
-import { useTheme } from '../../../src/ui/theme';
+import { useLayout, useTheme } from '../../../src/ui/theme';
 
 /**
  * The study session.
@@ -40,6 +40,7 @@ export default function StudyScreen() {
   const theme = useTheme();
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
+  const { wide } = useLayout();
   const { repository, examples: exampleService, refreshDecks } = useApp();
 
   const [deck, setDeck] = useState<Deck | null>(null);
@@ -115,11 +116,13 @@ export default function StudyScreen() {
       .finally(() => setGenerating(false));
   }, [card, exampleService]);
 
+  const stageWidth = wide ? Math.min(width, STAGE_WIDTH) : width;
+
   const gestures = useCardGestures({
     onRate: rate,
     onReveal: reveal,
     enabled: revealed,
-    cardWidth: width,
+    cardWidth: stageWidth,
   });
 
   if (loading) {
@@ -148,83 +151,89 @@ export default function StudyScreen() {
 
   return (
     <Screen>
-      <View style={styles.progressRow}>
-        <Label variant="caption" tone="faint">
-          {index + 1} / {queue.length}
-        </Label>
-        <Row gap={6}>
-          <StatusDot status={card.status} />
+      <View style={[styles.stage, wide ? styles.stageWide : null]}>
+        <View style={styles.progressRow}>
           <Label variant="caption" tone="faint">
-            {t(statusKey(card.status))}
+            {index + 1} / {queue.length}
           </Label>
-        </Row>
-      </View>
+          <Row gap={6}>
+            <StatusDot status={card.status} />
+            <Label variant="caption" tone="faint">
+              {t(statusKey(card.status))}
+            </Label>
+          </Row>
+        </View>
 
-      <Animated.View
-        style={[styles.cardWrap, { transform: [{ translateX: gestures.translateX }] }]}
-        {...gestures.handlers}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={revealed ? card.back : t('showAnswer')}
-          onPress={reveal}
-          disabled={revealed}
-          style={styles.flex}
+        <Animated.View
+          style={[
+            styles.cardWrap,
+            wide ? styles.cardWrapWide : null,
+            { transform: [{ translateX: gestures.translateX }] },
+          ]}
+          {...gestures.handlers}
         >
-          <Surface raised style={styles.card}>
-            <ScrollView contentContainerStyle={styles.cardContent}>
-              <Label variant="cardFront" align="center" selectable>
-                {card.front}
-              </Label>
-
-              {revealed ? (
-                <>
-                  <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
-                  <Label variant="cardBack" align="center" tone="muted" selectable>
-                    {card.back}
-                  </Label>
-
-                  <Spacer size={theme.spacing.lg} />
-                  <ExampleBlock
-                    result={examples}
-                    generating={generating}
-                    onRegenerate={regenerate}
-                  />
-                </>
-              ) : (
-                <>
-                  <Spacer size={theme.spacing.lg} />
-                  <Label variant="caption" tone="faint" align="center">
-                    {t('showAnswer')}
-                  </Label>
-                </>
-              )}
-            </ScrollView>
-          </Surface>
-        </Pressable>
-      </Animated.View>
-
-      <View style={styles.controls}>
-        {revealed ? (
-          <>
-            <Row gap={theme.spacing.sm}>
-              <RatingButton rating="again" color={theme.colors.again} onPress={rate} />
-              <RatingButton rating="hard" color={theme.colors.hard} onPress={rate} />
-              <RatingButton rating="good" color={theme.colors.good} onPress={rate} />
-              <RatingButton rating="easy" color={theme.colors.easy} onPress={rate} />
-            </Row>
-            {Platform.OS === 'web' ? (
-              <>
-                <Spacer size={theme.spacing.sm} />
-                <Label variant="caption" tone="faint" align="center">
-                  {t('keyboardHint')}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={revealed ? card.back : t('showAnswer')}
+            onPress={reveal}
+            disabled={revealed}
+            style={styles.flex}
+          >
+            <Surface raised style={styles.card}>
+              <ScrollView contentContainerStyle={styles.cardContent}>
+                <Label variant="cardFront" align="center" selectable>
+                  {card.front}
                 </Label>
-              </>
-            ) : null}
-          </>
-        ) : (
-          <Button label={t('showAnswer')} onPress={reveal} />
-        )}
+
+                {revealed ? (
+                  <>
+                    <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+                    <Label variant="cardBack" align="center" tone="muted" selectable>
+                      {card.back}
+                    </Label>
+
+                    <Spacer size={theme.spacing.lg} />
+                    <ExampleBlock
+                      result={examples}
+                      generating={generating}
+                      onRegenerate={regenerate}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Spacer size={theme.spacing.lg} />
+                    <Label variant="caption" tone="faint" align="center">
+                      {t('showAnswer')}
+                    </Label>
+                  </>
+                )}
+              </ScrollView>
+            </Surface>
+          </Pressable>
+        </Animated.View>
+
+        <View style={styles.controls}>
+          {revealed ? (
+            <>
+              <Row gap={theme.spacing.sm}>
+                <RatingButton rating="again" color={theme.colors.again} onPress={rate} />
+                <RatingButton rating="hard" color={theme.colors.hard} onPress={rate} />
+                <RatingButton rating="good" color={theme.colors.good} onPress={rate} />
+                <RatingButton rating="easy" color={theme.colors.easy} onPress={rate} />
+              </Row>
+              {Platform.OS === 'web' ? (
+                <>
+                  <Spacer size={theme.spacing.sm} />
+                  <Label variant="caption" tone="faint" align="center">
+                    {t('keyboardHint')}
+                  </Label>
+                </>
+              ) : null}
+            </>
+          ) : (
+            <Button label={t('showAnswer')} onPress={reveal} />
+          )}
+        </View>
       </View>
     </Screen>
   );
@@ -317,8 +326,24 @@ function statusKey(status: Card['status']): 'statusNew' | 'statusLearning' | 'st
   return status === 'new' ? 'statusNew' : status === 'mastered' ? 'statusMastered' : 'statusLearning';
 }
 
+/**
+ * How wide the card is allowed to get.
+ *
+ * A flashcard is one word read at a glance; stretched across a 1100pt window
+ * it becomes a word adrift in an empty rectangle. This is about the width of
+ * a real index card held at arm's length.
+ */
+const STAGE_WIDTH = 620;
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  stage: { flex: 1 },
+  stageWide: {
+    width: '100%',
+    maxWidth: STAGE_WIDTH,
+    alignSelf: 'center',
+    paddingVertical: 8,
+  },
   progressRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -327,6 +352,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   cardWrap: { flex: 1, paddingHorizontal: 16 },
+  // Tall enough for a word, its meaning and two examples; short enough that a
+  // three-word card is not floating in half a window of nothing. Anything
+  // longer scrolls inside the card.
+  cardWrapWide: { maxHeight: 560, justifyContent: 'center' },
   card: { flex: 1, justifyContent: 'center', padding: 24 },
   cardContent: { flexGrow: 1, justifyContent: 'center' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 24 },

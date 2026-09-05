@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
-import { Link, router, useFocusEffect } from 'expo-router';
+import { Link, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   LANGUAGE_NAMES,
   TARGET_LANGUAGES,
@@ -20,22 +20,36 @@ import {
   Screen,
   Spacer,
   Surface,
+  useContentStyle,
 } from '../../src/ui/components';
-import { useTheme } from '../../src/ui/theme';
+import { useLayout, useTheme } from '../../src/ui/theme';
 
 /**
  * The deck list, and the home screen in practice.
  *
  * The due count is the only number that drives a decision here, so it gets the
  * accent treatment while totals stay muted.
+ *
+ * On a wide window the sidebar is already showing the decks and the actions
+ * that make them, so this screen stops repeating them and answers the question
+ * the sidebar cannot: how much is waiting, across everything.
  */
 export default function DecksScreen() {
   const { t } = useI18n();
   const theme = useTheme();
+  const { wide } = useLayout();
+  const content = useContentStyle();
+  const { new: startNew } = useLocalSearchParams<{ new?: string }>();
   const { decks, repository, user, refreshDecks } = useApp();
 
   const [progress, setProgress] = useState<Record<string, DeckProgress>>({});
   const [creating, setCreating] = useState(false);
+
+  // The sidebar's "New deck" opens the form that lives on this screen, so the
+  // intent arrives as a route parameter rather than as duplicated state.
+  useEffect(() => {
+    if (startNew === '1') setCreating(true);
+  }, [startNew]);
 
   const loadProgress = useCallback(async () => {
     if (!repository) return;
@@ -56,12 +70,23 @@ export default function DecksScreen() {
     }, [refreshDecks, loadProgress]),
   );
 
+  const totals = decks.reduce(
+    (sum, deck) => {
+      const deckProgress = progress[deck.id];
+      return {
+        due: sum.due + (deckProgress?.due ?? 0),
+        cards: sum.cards + deck.cardCount,
+      };
+    },
+    { due: 0, cards: 0 },
+  );
+
   return (
     <Screen>
       <FlatList
         data={decks}
         keyExtractor={(deck) => deck.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={content}
         ListHeaderComponent={
           creating ? (
             <NewDeckForm
@@ -74,16 +99,31 @@ export default function DecksScreen() {
                 router.push({ pathname: '/(app)/deck/[id]', params: { id: deck.id } });
               }}
             />
+          ) : wide ? (
+            decks.length > 0 ? (
+              <View style={styles.actions}>
+                <Summary due={totals.due} cards={totals.cards} />
+                <Spacer size={theme.spacing.lg} />
+              </View>
+            ) : null
           ) : (
-            <Row gap={theme.spacing.sm} style={styles.actions}>
-              <Button label={t('newDeck')} onPress={() => setCreating(true)} style={styles.grow} />
+            <View style={styles.actions}>
+              <Row gap={theme.spacing.sm}>
+                <Button label={t('newDeck')} onPress={() => setCreating(true)} style={styles.grow} />
+                <Button
+                  label={t('pasteText')}
+                  variant="secondary"
+                  onPress={() => router.push('/(app)/text-import')}
+                  style={styles.grow}
+                />
+              </Row>
+              <Spacer size={theme.spacing.sm} />
               <Button
                 label={t('importDeck')}
-                variant="secondary"
+                variant="ghost"
                 onPress={() => router.push('/(app)/import')}
-                style={styles.grow}
               />
-            </Row>
+            </View>
           )
         }
         ListEmptyComponent={
@@ -101,14 +141,42 @@ export default function DecksScreen() {
         ItemSeparatorComponent={() => <Spacer size={theme.spacing.sm} />}
       />
 
-      <View style={[styles.footer, { borderTopColor: theme.colors.border }]}>
-        <Button
-          label={t('settings')}
-          variant="ghost"
-          onPress={() => router.push('/(app)/settings')}
-        />
-      </View>
+      {/* On a wide window Settings is a permanent sidebar row, so this footer
+          would be a second way to the same screen. */}
+      {wide ? null : (
+        <View style={[styles.footer, { borderTopColor: theme.colors.border }]}>
+          <Button
+            label={t('settings')}
+            variant="ghost"
+            onPress={() => router.push('/(app)/settings')}
+          />
+        </View>
+      )}
     </Screen>
+  );
+}
+
+/**
+ * What is waiting, across every deck.
+ *
+ * The one number worth putting at the top of a window: not how much has been
+ * collected, but how much is owed right now. When nothing is owed it says so
+ * plainly rather than showing a zero, which reads as an error.
+ */
+function Summary({ due, cards }: { due: number; cards: number }) {
+  const { t } = useI18n();
+  const theme = useTheme();
+
+  return (
+    <Surface style={styles.summary}>
+      <Label variant="title" tone={due > 0 ? 'accent' : 'default'}>
+        {due > 0 ? t('dueCount', { count: due }) : t('sessionComplete')}
+      </Label>
+      <Spacer size={theme.spacing.xs} />
+      <Label variant="caption" tone="faint">
+        {due > 0 ? t('cardCount', { count: cards }) : t('sessionCompleteHint')}
+      </Label>
+    </Surface>
   );
 }
 
@@ -236,8 +304,8 @@ function NewDeckForm({
 }
 
 const styles = StyleSheet.create({
-  list: { padding: 16, gap: 0 },
   actions: { marginBottom: 16 },
+  summary: { paddingVertical: 20 },
   grow: { flex: 1 },
   deck: {},
   deckHeader: { alignItems: 'flex-start', gap: 12 },

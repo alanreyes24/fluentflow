@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../src/i18n';
 import { useApp } from '../src/state/app';
 import { Button, Field, Label, Screen, Spacer, Surface } from '../src/ui/components';
+import { TitleBar } from '../src/ui/TitleBar';
 import { useTheme } from '../src/ui/theme';
 
 /**
@@ -50,6 +51,7 @@ export default function SignInScreen() {
 
   return (
     <Screen>
+      <TitleBar />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}
@@ -169,7 +171,15 @@ function friendlyAuthError(cause: unknown, fallback: string): string {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  content: { paddingHorizontal: 24, flexGrow: 1, justifyContent: 'center' },
+  content: {
+    paddingHorizontal: 24,
+    flexGrow: 1,
+    justifyContent: 'center',
+    // A form is read at the width of its longest field, not of the window.
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
+  },
   header: { gap: 4 },
   form: { gap: 16 },
 });

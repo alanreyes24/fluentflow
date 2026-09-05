@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useColorScheme } from 'react-native';
+import { useColorScheme, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 /**
@@ -19,7 +19,15 @@ export interface Palette {
   background: string;
   surface: string;
   surfaceRaised: string;
+  /** The navigation column on wide layouts. Recedes; never competes. */
+  sidebar: string;
   border: string;
+  /** Divider inside a surface, weaker than a border between surfaces. */
+  divider: string;
+  /** Pointer feedback. Only ever visible on a device that has a pointer. */
+  hover: string;
+  /** The accent at low opacity, for the selected row in the sidebar. */
+  accentSoft: string;
   text: string;
   textMuted: string;
   textFaint: string;
@@ -38,10 +46,14 @@ export interface Palette {
 }
 
 const light: Palette = {
-  background: '#f6f5f2',
+  background: '#fbfaf8',
   surface: '#ffffff',
   surfaceRaised: '#ffffff',
-  border: '#e2ded7',
+  sidebar: '#f1efea',
+  border: '#e4e0d9',
+  divider: '#ebe7e0',
+  hover: 'rgba(28, 26, 23, 0.05)',
+  accentSoft: 'rgba(31, 111, 92, 0.12)',
   text: '#1c1a17',
   textMuted: '#5f5a52',
   textFaint: '#918a80',
@@ -59,10 +71,14 @@ const light: Palette = {
 };
 
 const dark: Palette = {
-  background: '#141414',
-  surface: '#1d1d1c',
-  surfaceRaised: '#262625',
-  border: '#343432',
+  background: '#1a1a19',
+  surface: '#232322',
+  surfaceRaised: '#2b2b29',
+  sidebar: '#121211',
+  border: '#333331',
+  divider: '#2e2e2c',
+  hover: 'rgba(242, 240, 236, 0.06)',
+  accentSoft: 'rgba(79, 185, 154, 0.16)',
   text: '#f2f0ec',
   textMuted: '#a8a29a',
   textFaint: '#77726b',
@@ -162,4 +178,41 @@ export function useThemeContext(): ThemeContextValue {
   const value = useContext(ThemeContext);
   if (!value) throw new Error('useTheme must be used inside <ThemeProvider>.');
   return value;
+}
+
+// --- layout -----------------------------------------------------------------
+
+/**
+ * Breakpoints and widths.
+ *
+ * The app is one codebase for a phone, a browser tab and a 1100pt desktop
+ * window, and the phone layout does not survive being stretched to 1100 — a
+ * deck row becomes a title at the far left and a badge at the far right with
+ * 800pt of nothing between them. So there are two layouts, not one that
+ * scales.
+ *
+ * `measure` is the width text is actually set at. 680pt is roughly 75
+ * characters at our body size, the long end of the classic range; past that
+ * the eye loses the start of the next line.
+ *
+ * `sidebarWidth` sits inside Apple's 225–275pt guidance for a sidebar's
+ * minimum, which is what a Mac app of this shape uses.
+ */
+export const layout = {
+  /** Above this there is room for a navigation column beside the content. */
+  wide: 900,
+  measure: 680,
+  sidebarWidth: 248,
+} as const;
+
+export interface LayoutInfo {
+  width: number;
+  height: number;
+  /** Is there room for the sidebar? False on a phone and a narrow window. */
+  wide: boolean;
+}
+
+export function useLayout(): LayoutInfo {
+  const { width, height } = useWindowDimensions();
+  return { width, height, wide: width >= layout.wide };
 }
