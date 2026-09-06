@@ -1,6 +1,5 @@
 import { LANGUAGE_NAMES_EN, type TargetLanguage } from '../types.js';
 import type { InferenceFn } from './generate.js';
-import type { ModelFamily } from './prompt.js';
 
 /**
  * Word translation with the on-device model.
@@ -54,32 +53,12 @@ const SYSTEM = (language: string): string =>
  * silently misaligns every translation after it — and the failure looks exactly
  * like a bad translation rather than a parsing bug.
  */
-export function buildTranslatePrompt(
-  word: string,
-  language: TargetLanguage,
-  family: ModelFamily = 'qwen',
-): string {
+export function buildTranslatePrompt(word: string, language: TargetLanguage): string {
   const languageName = LANGUAGE_NAMES_EN[language];
-  const shots = EXAMPLES[language];
-
-  if (family === 'qwen') {
-    let prompt = `<|im_start|>system\n${SYSTEM(languageName)}<|im_end|>\n`;
-    for (const [from, to] of shots) {
-      prompt += `<|im_start|>user\n${from}<|im_end|>\n<|im_start|>assistant\n${to}<|im_end|>\n`;
-    }
-    return `${prompt}<|im_start|>user\n${word}<|im_end|>\n<|im_start|>assistant\n`;
-  }
-
-  if (family === 'tinyllama') {
-    let prompt = `<|system|>\n${SYSTEM(languageName)}</s>\n`;
-    for (const [from, to] of shots) {
-      prompt += `<|user|>\n${from}</s>\n<|assistant|>\n${to}</s>\n`;
-    }
-    return `${prompt}<|user|>\n${word}</s>\n<|assistant|>\n`;
-  }
-
-  const shotText = shots.map(([from, to]) => `${from} = ${to}`).join('\n');
-  return `${SYSTEM(languageName)}\n\n${shotText}\n${word} =`;
+  const shots = EXAMPLES[language]
+    .map(([from, to]) => `${from} = ${to}`)
+    .join('\n');
+  return `${SYSTEM(languageName)}\n\n${shots}\n${word} =`;
 }
 
 /** A word that has no meaning in the paste, with what the model made of it. */
@@ -143,7 +122,6 @@ export function parseTranslation(raw: string, word: string): WordTranslation {
 
 export interface TranslateWordsDeps {
   infer: InferenceFn;
-  family?: ModelFamily;
   maxTokens?: number;
   /** Hard deadline for the whole run. What is done by then is what you get. */
   budgetMs?: number;
@@ -178,12 +156,12 @@ export async function translateWords(
 
     try {
       const raw = await deps.infer({
-        prompt: buildTranslatePrompt(word, language, deps.family ?? 'qwen'),
+        prompt: buildTranslatePrompt(word, language),
         // A translation is a few tokens. Stopping on a newline keeps a chatty
-        // model from spending the budget explaining itself.
-        stop: ['\n', '<|im_end|>', '</s>'],
+        // model from spending the budget — and the output tokens — explaining
+        // itself.
+        stop: ['\n'],
         maxTokens: deps.maxTokens ?? 12,
-        addBos: false,
         ...(deps.signal ? { signal: deps.signal } : {}),
       });
       results.push(parseTranslation(raw, word));

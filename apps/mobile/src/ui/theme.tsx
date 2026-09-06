@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useColorScheme, useWindowDimensions } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { syncDesktopTheme } from './shell';
 
 /**
  * Design tokens and theme switching.
@@ -19,14 +20,14 @@ export interface Palette {
   background: string;
   surface: string;
   surfaceRaised: string;
-  /** The navigation column on wide layouts. Recedes; never competes. */
-  sidebar: string;
+  /** The toolbar strip along the bottom of the window. Recedes; never competes. */
+  bar: string;
   border: string;
   /** Divider inside a surface, weaker than a border between surfaces. */
   divider: string;
   /** Pointer feedback. Only ever visible on a device that has a pointer. */
   hover: string;
-  /** The accent at low opacity, for the selected row in the sidebar. */
+  /** The accent at low opacity, for the selected action in the bottom bar. */
   accentSoft: string;
   text: string;
   textMuted: string;
@@ -49,7 +50,7 @@ const light: Palette = {
   background: '#fbfaf8',
   surface: '#ffffff',
   surfaceRaised: '#ffffff',
-  sidebar: '#f1efea',
+  bar: '#f1efea',
   border: '#e4e0d9',
   divider: '#ebe7e0',
   hover: 'rgba(28, 26, 23, 0.05)',
@@ -74,7 +75,7 @@ const dark: Palette = {
   background: '#1a1a19',
   surface: '#232322',
   surfaceRaised: '#2b2b29',
-  sidebar: '#121211',
+  bar: '#121211',
   border: '#333331',
   divider: '#2e2e2c',
   hover: 'rgba(242, 240, 236, 0.06)',
@@ -149,6 +150,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
+  // Keep the desktop window chrome (traffic lights, window vibrancy) in step
+  // with the in-app choice. A no-op in a browser tab.
+  useEffect(() => {
+    syncDesktopTheme(preference);
+  }, [preference]);
+
   const value = useMemo<ThemeContextValue>(() => {
     const name: ThemeName = preference === 'system' ? (system === 'dark' ? 'dark' : 'light') : preference;
     return {
@@ -185,30 +192,26 @@ export function useThemeContext(): ThemeContextValue {
 /**
  * Breakpoints and widths.
  *
- * The app is one codebase for a phone, a browser tab and a 1100pt desktop
- * window, and the phone layout does not survive being stretched to 1100 — a
- * deck row becomes a title at the far left and a badge at the far right with
- * 800pt of nothing between them. So there are two layouts, not one that
- * scales.
+ * The app runs in anything from a narrow window to a 1100pt one. Nothing
+ * changes shape across that range — the chrome is a title strip above and a
+ * toolbar below at every size — but content that is comfortable in a small
+ * window is loose in a large one, so the wide breakpoint tightens controls and
+ * opens up padding rather than rearranging the screen.
  *
  * `measure` is the width text is actually set at. 680pt is roughly 75
  * characters at our body size, the long end of the classic range; past that
  * the eye loses the start of the next line.
- *
- * `sidebarWidth` sits inside Apple's 225–275pt guidance for a sidebar's
- * minimum, which is what a Mac app of this shape uses.
  */
 export const layout = {
-  /** Above this there is room for a navigation column beside the content. */
+  /** Above this a window has desktop room: roomier padding, tighter controls. */
   wide: 900,
   measure: 680,
-  sidebarWidth: 248,
 } as const;
 
 export interface LayoutInfo {
   width: number;
   height: number;
-  /** Is there room for the sidebar? False on a phone and a narrow window. */
+  /** Is this a desktop-sized window rather than a narrow one? */
   wide: boolean;
 }
 

@@ -102,6 +102,27 @@ const migrations: Migration[] = [
       CREATE INDEX idx_review_log_user ON review_log (userId, reviewedAt);
     `);
   },
+
+  // 4 — the state Anki's scheduler needs on top of interval and ease.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE cards ADD COLUMN phase        TEXT NOT NULL DEFAULT 'new';
+      ALTER TABLE cards ADD COLUMN lapses       INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE cards ADD COLUMN learningStep INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE cards ADD COLUMN leech        INTEGER NOT NULL DEFAULT 0;
+
+      -- Existing cards have no phase, so it is reconstructed the way core's
+      -- normalizeCard() does it: a card that has never been answered is new,
+      -- one carrying a day-level interval has graduated, and the rest were
+      -- somewhere in the middle. Interval and ease carry over untouched, so the
+      -- reconstruction only decides which branch the next answer takes.
+      UPDATE cards SET phase = CASE
+        WHEN status = 'new' AND repetitions = 0 THEN 'new'
+        WHEN interval >= 1 THEN 'review'
+        ELSE 'learning'
+      END;
+    `);
+  },
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

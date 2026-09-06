@@ -60,7 +60,7 @@ export const en = {
   examples: 'Examples',
   generatingExamples: 'Writing examples…',
   examplesOffline: 'Offline examples',
-  examplesOfflineHint: 'The on-device model was unavailable, so these are generic.',
+  examplesOfflineHint: 'The model was unavailable, so these are generic.',
   regenerate: 'Regenerate',
 
   // Progress
@@ -71,6 +71,8 @@ export const en = {
 
   // Import
   importDeck: 'Import from Anki',
+  /** The same action in the bottom bar, where a toolbar label is a word. */
+  importShort: 'Import',
   chooseFile: 'Choose .apkg file',
   importing: 'Importing…',
   importSummary: '{cards} cards in {decks} deck(s)',
@@ -82,10 +84,12 @@ export const en = {
 
   // Text import
   pasteText: 'Paste a word list',
+  pasteShort: 'Paste',
   pasteHint:
     'One card per line: "word - meaning". A tab, comma, colon or pipe works too, and so does a blank line between cards written on two lines.',
   pasteLabel: 'Your list',
   pastePreview: '{count} cards ready',
+  pastePreviewPartial: '{ready} of {count} ready',
   pasteFormat: 'Separator: {format}',
   pasteSkippedLines: '{count} line(s) skipped',
   pasteDuplicates: '{count} already in the deck',
@@ -96,16 +100,31 @@ export const en = {
   addToDeck: 'Add to this deck',
   aiTranslate: 'Look up the meanings',
   aiTranslating: 'Looking up… {done} of {total}',
+  aiSourceDictionary:
+    'The {dictionary} dictionary on this Mac, offline and free. Nothing is sent anywhere and nothing is billed — whatever it does not have comes back blank for you to fill in.',
+  aiSourceModelOnly:
+    'No {dictionary} dictionary is installed, so this sends every word to {model} and bills your API key. Read its answers before importing.',
+  aiAskModel: 'Ask {model} about the remaining {count}',
+  aiAskModelHint:
+    'The only step that sends anything to Google, and it sends only those words. Billed to your API key.',
+  aiAskModelNoKey:
+    'Type the rest in yourself. Adding an API key in Settings lets the app write them for you instead.',
   aiReviewTitle: 'Check these before importing',
   aiReviewHint:
-    'Dictionary entries are reliable. The ones marked "model" are guesses and some will be wrong — edit anything that is off, and clear anything you do not want.',
+    'The rows marked "model" are guesses and some will be wrong — edit anything that is off, and clear anything you do not want. Dictionary rows only need a skim.',
+  aiReviewHintDictionary:
+    'Dictionary entries only need a skim. Type a meaning for anything still blank, or leave it blank — a word with no meaning is skipped, never guessed at.',
   aiNoAnswer: 'no meaning found — type one',
-  aiUnavailable: 'No dictionary or model installed',
+  aiUnavailable:
+    'Nothing here to look them up with: no dictionary for this language and no API key. You can still type the meanings in yourself.',
   aiWordsNeedMeanings: '{count} words with no meaning yet',
   aiFromDictionary: 'dictionary',
   aiFromModel: 'model — check this',
   aiFromNothing: 'not found',
-  aiSummary: '{dictionary} from the dictionary, {model} from the model, {missing} not found',
+  aiFromModelNothing: 'the model had no answer — type one',
+  aiSummaryDictionary: '{count} from the dictionary',
+  aiSummaryModel: '{count} from {model}',
+  aiSummaryMissing: '{count} with no answer',
 
   // Sync
   synced: 'Synced',
@@ -123,10 +142,17 @@ export const en = {
   themeSystem: 'System',
   themeLight: 'Light',
   themeDark: 'Dark',
-  aiSection: 'On-device examples',
-  aiModelReady: 'Model ready',
-  aiModelMissing: 'Model not installed',
-  aiModelMissingHint: 'Examples fall back to generic sentences. Run npm run prepare-model.',
+  cloudSection: 'Cloud examples',
+  cloudReady: 'Connected',
+  cloudMissing: 'Not connected',
+  cloudHint: 'Better sentences, about a second each, and roughly five cents per thousand cards.',
+  cloudKeyLabel: 'API key',
+  cloudKeyPlaceholder: 'Paste a Gemini API key',
+  cloudKeyHint: 'Stored in your keychain on this Mac. It is never sent anywhere but Google.',
+  cloudGetKey: 'Get a free key',
+  cloudSave: 'Save key',
+  cloudRemove: 'Remove key',
+  cloudPlaintext: 'This Mac offered no keychain, so the key is stored as plain text.',
   account: 'Account',
 
   // Generic
@@ -192,7 +218,7 @@ const es: Strings = {
   examples: 'Ejemplos',
   generatingExamples: 'Escribiendo ejemplos…',
   examplesOffline: 'Ejemplos sin conexión',
-  examplesOfflineHint: 'El modelo del dispositivo no estaba disponible, así que estos son genéricos.',
+  examplesOfflineHint: 'El modelo no estaba disponible, así que estos son genéricos.',
   regenerate: 'Regenerar',
 
   statusNew: 'Nuevas',
@@ -201,6 +227,7 @@ const es: Strings = {
   progress: 'Progreso',
 
   importDeck: 'Importar de Anki',
+  importShort: 'Importar',
   chooseFile: 'Elegir archivo .apkg',
   importing: 'Importando…',
   importSummary: '{cards} tarjetas en {decks} mazo(s)',
@@ -212,10 +239,12 @@ const es: Strings = {
 
   // Text import
   pasteText: 'Pegar una lista',
+  pasteShort: 'Pegar',
   pasteHint:
     'Una tarjeta por línea: «palabra - significado». También sirve una tabulación, una coma, dos puntos o una barra vertical, o una línea en blanco entre tarjetas escritas en dos líneas.',
   pasteLabel: 'Tu lista',
   pastePreview: '{count} tarjetas listas',
+  pastePreviewPartial: '{ready} de {count} listas',
   pasteFormat: 'Separador: {format}',
   pasteSkippedLines: '{count} línea(s) omitidas',
   pasteDuplicates: '{count} ya en el mazo',
@@ -226,16 +255,31 @@ const es: Strings = {
   addToDeck: 'Añadir a este mazo',
   aiTranslate: 'Buscar los significados',
   aiTranslating: 'Buscando… {done} de {total}',
+  aiSourceDictionary:
+    'El diccionario de {dictionary} de este Mac, sin conexión y gratis. No se envía nada a ninguna parte ni se cobra nada: lo que no tenga vuelve en blanco para que lo escribas tú.',
+  aiSourceModelOnly:
+    'No hay diccionario de {dictionary} instalado, así que esto envía cada palabra a {model} y cobra a tu clave de API. Lee sus respuestas antes de importar.',
+  aiAskModel: 'Preguntar a {model} por las {count} restantes',
+  aiAskModelHint:
+    'El único paso que envía algo a Google, y solo envía esas palabras. Con cargo a tu clave de API.',
+  aiAskModelNoKey:
+    'Escribe tú el resto. Si añades una clave de API en Ajustes, la app puede escribirlas por ti.',
   aiReviewTitle: 'Revisa esto antes de importar',
   aiReviewHint:
-    'Las entradas del diccionario son fiables. Las marcadas «modelo» son conjeturas y algunas estarán mal: corrige lo que no cuadre y borra lo que no quieras.',
+    'Las filas marcadas «modelo» son conjeturas y algunas estarán mal: corrige lo que no cuadre y borra lo que no quieras. Las del diccionario solo necesitan un vistazo.',
+  aiReviewHintDictionary:
+    'Las del diccionario solo necesitan un vistazo. Escribe un significado para lo que siga en blanco, o déjalo así: una palabra sin significado se omite, nunca se inventa.',
   aiNoAnswer: 'sin significado — escribe uno',
-  aiUnavailable: 'Sin diccionario ni modelo',
+  aiUnavailable:
+    'Aquí no hay con qué buscarlas: ni diccionario para este idioma ni clave de API. Aun así puedes escribir los significados tú.',
   aiWordsNeedMeanings: '{count} palabras todavía sin significado',
   aiFromDictionary: 'diccionario',
   aiFromModel: 'modelo — revísalo',
   aiFromNothing: 'no encontrado',
-  aiSummary: '{dictionary} del diccionario, {model} del modelo, {missing} sin encontrar',
+  aiFromModelNothing: 'el modelo no tuvo respuesta — escribe una',
+  aiSummaryDictionary: '{count} del diccionario',
+  aiSummaryModel: '{count} de {model}',
+  aiSummaryMissing: '{count} sin respuesta',
 
   synced: 'Sincronizado',
   syncing: 'Sincronizando…',
@@ -251,10 +295,17 @@ const es: Strings = {
   themeSystem: 'Sistema',
   themeLight: 'Claro',
   themeDark: 'Oscuro',
-  aiSection: 'Ejemplos en el dispositivo',
-  aiModelReady: 'Modelo listo',
-  aiModelMissing: 'Modelo no instalado',
-  aiModelMissingHint: 'Los ejemplos usan frases genéricas. Ejecuta npm run prepare-model.',
+  cloudSection: 'Ejemplos en la nube',
+  cloudReady: 'Conectado',
+  cloudMissing: 'Sin conectar',
+  cloudHint: 'Mejores frases, alrededor de un segundo cada una, y unos cinco céntimos por mil tarjetas.',
+  cloudKeyLabel: 'Clave de API',
+  cloudKeyPlaceholder: 'Pega una clave de API de Gemini',
+  cloudKeyHint: 'Se guarda en el llavero de este Mac. Solo se envía a Google.',
+  cloudGetKey: 'Consigue una clave gratis',
+  cloudSave: 'Guardar clave',
+  cloudRemove: 'Quitar clave',
+  cloudPlaintext: 'Este Mac no ofreció llavero, así que la clave se guarda como texto sin cifrar.',
   account: 'Cuenta',
 
   retry: 'Reintentar',
@@ -311,7 +362,7 @@ const bs: Strings = {
   examples: 'Primjeri',
   generatingExamples: 'Pišem primjere…',
   examplesOffline: 'Primjeri bez interneta',
-  examplesOfflineHint: 'Model na uređaju nije bio dostupan, pa su ovi primjeri opšti.',
+  examplesOfflineHint: 'Model nije bio dostupan, pa su ovi primjeri opšti.',
   regenerate: 'Generiši ponovo',
 
   statusNew: 'Nove',
@@ -320,6 +371,7 @@ const bs: Strings = {
   progress: 'Napredak',
 
   importDeck: 'Uvezi iz Ankija',
+  importShort: 'Uvezi',
   chooseFile: 'Odaberi .apkg datoteku',
   importing: 'Uvozim…',
   importSummary: '{cards} kartica u {decks} špil(ova)',
@@ -331,10 +383,12 @@ const bs: Strings = {
 
   // Text import
   pasteText: 'Zalijepi listu riječi',
+  pasteShort: 'Zalijepi',
   pasteHint:
     'Jedna kartica po redu: „riječ - značenje“. Može i tabulator, zarez, dvotačka ili uspravna crta, a prazan red razdvaja kartice napisane u dva reda.',
   pasteLabel: 'Tvoja lista',
   pastePreview: '{count} kartica spremno',
+  pastePreviewPartial: '{ready} od {count} spremno',
   pasteFormat: 'Razdjelnik: {format}',
   pasteSkippedLines: '{count} red(ova) preskočeno',
   pasteDuplicates: '{count} već u špilu',
@@ -345,16 +399,31 @@ const bs: Strings = {
   addToDeck: 'Dodaj u ovaj špil',
   aiTranslate: 'Potraži značenja',
   aiTranslating: 'Tražim… {done} od {total}',
+  aiSourceDictionary:
+    'Rječnik ({dictionary}) na ovom Macu, bez interneta i besplatno. Ništa se nigdje ne šalje i ništa se ne naplaćuje — što nema, vraća se prazno da sam upišeš.',
+  aiSourceModelOnly:
+    'Rječnik ({dictionary}) nije instaliran, pa ovo šalje svaku riječ na {model} i tereti tvoj API ključ. Pročitaj odgovore prije uvoza.',
+  aiAskModel: 'Pitaj {model} za preostalih {count}',
+  aiAskModelHint:
+    'Jedini korak koji išta šalje Googleu, i šalje samo te riječi. Na teret tvog API ključa.',
+  aiAskModelNoKey:
+    'Ostalo upiši sam. Ako dodaš API ključ u postavkama, aplikacija ih može napisati umjesto tebe.',
   aiReviewTitle: 'Provjeri ovo prije uvoza',
   aiReviewHint:
-    'Unosi iz rječnika su pouzdani. Oni označeni s „model" su nagađanja i neka će biti pogrešna — ispravi što ne valja i obriši što ne želiš.',
+    'Redovi označeni s „model“ su nagađanja i neka će biti pogrešna — ispravi što ne valja i obriši što ne želiš. Oni iz rječnika trebaju samo pregled.',
+  aiReviewHintDictionary:
+    'Oni iz rječnika trebaju samo pregled. Upiši značenje za ono što je još prazno ili ostavi prazno — riječ bez značenja se preskače, nikad ne nagađa.',
   aiNoAnswer: 'nema značenja — upiši ga',
-  aiUnavailable: 'Nema rječnika ni modela',
+  aiUnavailable:
+    'Nema se čime tražiti: ni rječnika za ovaj jezik ni API ključa. Značenja i dalje možeš upisati sam.',
   aiWordsNeedMeanings: '{count} riječi još bez značenja',
   aiFromDictionary: 'rječnik',
   aiFromModel: 'model — provjeri',
   aiFromNothing: 'nije nađeno',
-  aiSummary: '{dictionary} iz rječnika, {model} od modela, {missing} nije nađeno',
+  aiFromModelNothing: 'model nije imao odgovor — upiši ga',
+  aiSummaryDictionary: '{count} iz rječnika',
+  aiSummaryModel: '{count} sa {model}',
+  aiSummaryMissing: '{count} bez odgovora',
 
   synced: 'Sinhronizovano',
   syncing: 'Sinhronizujem…',
@@ -370,10 +439,17 @@ const bs: Strings = {
   themeSystem: 'Sistemski',
   themeLight: 'Svijetlo',
   themeDark: 'Tamno',
-  aiSection: 'Primjeri na uređaju',
-  aiModelReady: 'Model spreman',
-  aiModelMissing: 'Model nije instaliran',
-  aiModelMissingHint: 'Primjeri koriste opšte rečenice. Pokrenite npm run prepare-model.',
+  cloudSection: 'Primjeri u oblaku',
+  cloudReady: 'Povezano',
+  cloudMissing: 'Nije povezano',
+  cloudHint: 'Bolje rečenice, oko sekunde po rečenici, i otprilike pet centi na hiljadu kartica.',
+  cloudKeyLabel: 'API ključ',
+  cloudKeyPlaceholder: 'Zalijepite Gemini API ključ',
+  cloudKeyHint: 'Čuva se u privjesku ključeva ovog Maca. Šalje se samo Googleu.',
+  cloudGetKey: 'Nabavite besplatan ključ',
+  cloudSave: 'Sačuvaj ključ',
+  cloudRemove: 'Ukloni ključ',
+  cloudPlaintext: 'Ovaj Mac nije ponudio privjesak ključeva, pa se ključ čuva kao običan tekst.',
   account: 'Račun',
 
   retry: 'Pokušaj ponovo',

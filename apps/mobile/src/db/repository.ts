@@ -169,7 +169,7 @@ export class Repository {
 
   /** Apply a review: update scheduling, and record it for the stats screen. */
   async rateCard(card: Card, rating: RatingName, now: Date = new Date()): Promise<Card> {
-    const reviewed = reviewCard(card, rating, now);
+    const reviewed = reviewCard(card, rating, { now });
     await this.db.withTransactionAsync(async () => {
       await this.writeCards([reviewed]);
       await this.db.runAsync(
@@ -419,8 +419,9 @@ export class Repository {
     for (const card of cards) {
       await this.db.runAsync(
         `INSERT INTO cards (id, deckId, userId, front, back, language, examples, interval,
-                            easeFactor, repetitions, nextReview, status, lastModified, syncStatus, deleted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            easeFactor, repetitions, phase, lapses, learningStep, leech,
+                            nextReview, status, lastModified, syncStatus, deleted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            deckId = excluded.deckId,
            userId = excluded.userId,
@@ -431,6 +432,10 @@ export class Repository {
            interval = excluded.interval,
            easeFactor = excluded.easeFactor,
            repetitions = excluded.repetitions,
+           phase = excluded.phase,
+           lapses = excluded.lapses,
+           learningStep = excluded.learningStep,
+           leech = excluded.leech,
            nextReview = excluded.nextReview,
            status = excluded.status,
            lastModified = excluded.lastModified,
@@ -446,6 +451,10 @@ export class Repository {
         card.interval,
         card.easeFactor,
         card.repetitions,
+        card.phase ?? 'new',
+        card.lapses ?? 0,
+        card.learningStep ?? 0,
+        card.leech ? 1 : 0,
         card.nextReview,
         card.status,
         card.lastModified,
@@ -481,6 +490,10 @@ interface CardRow {
   interval: number;
   easeFactor: number;
   repetitions: number;
+  phase: string;
+  lapses: number;
+  learningStep: number;
+  leech: number;
   nextReview: string;
   status: string;
   lastModified: string;
@@ -514,10 +527,14 @@ function toCard(row: CardRow): Card {
     interval: row.interval,
     easeFactor: row.easeFactor,
     repetitions: row.repetitions,
+    phase: row.phase as Card['phase'],
+    lapses: row.lapses,
+    learningStep: row.learningStep,
     nextReview: row.nextReview,
     status: row.status as Card['status'],
     lastModified: row.lastModified,
     syncStatus: row.syncStatus as Card['syncStatus'],
+    ...(row.leech ? { leech: true } : {}),
     ...(row.deleted ? { deleted: true } : {}),
   };
 }

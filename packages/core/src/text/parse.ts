@@ -9,7 +9,7 @@ import { stripHtml } from '../anki/html.js';
  *
  * The `.apkg` importer covers people who already keep decks in Anki. This
  * covers everyone else — a vocabulary list from a textbook, a spreadsheet
- * column, a note on a phone — where the only thing standing between the text
+ * column, a jotted note — where the only thing standing between the text
  * and a deck is knowing which half of each line is the word.
  *
  * Nothing here asks the user to declare a format. Real pasted lists arrive as

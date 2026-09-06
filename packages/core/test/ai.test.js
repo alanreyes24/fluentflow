@@ -21,19 +21,13 @@ test('the instruction names the word, the language and the output format', () =>
   assert.match(instruction, /frases sencillas en español/);
 });
 
-test('each model family gets its own chat template', () => {
+test('the prompt is the bare instruction, with no chat template around it', () => {
   const input = { word: 'raditi', language: 'bs' };
 
-  const tinyllama = buildPrompt(input, 'tinyllama');
-  assert.match(tinyllama, /^<\|system\|>/);
-  assert.match(tinyllama, /<\|assistant\|>\n$/);
-
-  const phi2 = buildPrompt(input, 'phi2');
-  assert.match(phi2, /^Instruct: /);
-  assert.match(phi2, /\nOutput:$/);
-
-  assert.equal(buildPrompt(input, 'raw'), buildInstruction(input));
-  assert.ok(STOP_SEQUENCES.tinyllama.includes('</s>'));
+  // The hosted endpoint applies its own template. Control tokens here would be
+  // text the model has to read past, which is why the wrappers are gone.
+  assert.equal(buildPrompt(input), buildInstruction(input));
+  assert.doesNotMatch(buildPrompt(input), /<\|/);
 });
 
 const es = { word: 'hablar', language: 'es' };
@@ -162,12 +156,11 @@ test('a good model response is used', async () => {
   assert.equal(result.examples.length, 2);
 });
 
-test('the prompt handed to the model matches the configured family', async () => {
+test('the request carries the instruction, the stops and a signal', async () => {
   let seen = null;
   await generateExamples(
     { word: 'raditi', language: 'bs' },
     {
-      family: 'phi2',
       infer: async (request) => {
         seen = request;
         return '["Danas moram raditi do kasno."]';
@@ -175,8 +168,8 @@ test('the prompt handed to the model matches the configured family', async () =>
     },
   );
 
-  assert.match(seen.prompt, /^Instruct: /);
-  assert.deepEqual(seen.stop, STOP_SEQUENCES.phi2);
+  assert.match(seen.prompt, /raditi/);
+  assert.deepEqual(seen.stop, STOP_SEQUENCES);
   assert.ok(seen.signal, 'the request must be cancellable');
 });
 
@@ -274,6 +267,66 @@ test('inference that blows the time budget is abandoned for the fallback', async
   assert.equal(result.source, 'fallback');
   assert.match(result.error, /budget/);
   assert.ok(Date.now() - started < 1000, 'the reveal must not wait for the model');
+});
+
+test("a caller's signal cancels the run, so a prefetch can get out of the way", async () => {
+  // Speculative generation is started for cards the user has not reached. When
+  // they reveal a different card the model has to be freed immediately, and
+  // waiting out the budget would defeat the point of running early at all.
+  const controller = new AbortController();
+  let sawAbort = false;
+
+  // Cancel once the inference is genuinely under way, which is what a reveal
+  // landing on top of a running prefetch does.
+  const started = Date.now();
+  setTimeout(() => controller.abort(), 10);
+
+  const result = await generateExamples(
+    { word: 'hablar', language: 'es' },
+    {
+      // The desktop shell's budget, which is the whole point: thirty seconds is
+      // the right ceiling for a generation somebody wants, and far too long to
+      // wait for one nobody does.
+      budgetMs: 30000,
+      signal: controller.signal,
+      infer: (request) =>
+        new Promise((resolve) => {
+          const timer = setTimeout(() => resolve('["Ella habla espanol."]'), 5000);
+          request.signal.addEventListener('abort', () => {
+            sawAbort = true;
+            clearTimeout(timer);
+            // What a real decode loop does when its signal goes: stop where it
+            // is and hand back what it had, which is nothing usable this early.
+            resolve('');
+          });
+        }),
+    },
+  );
+
+  assert.ok(sawAbort, 'the inference must be told to stop');
+  assert.equal(result.source, 'fallback');
+  assert.ok(Date.now() - started < 1000, 'cancelling must not wait out the budget');
+});
+
+test('a signal already aborted never starts the model at all', async () => {
+  const controller = new AbortController();
+  controller.abort();
+
+  let asked = false;
+  const result = await generateExamples(
+    { word: 'hablar', language: 'es' },
+    {
+      signal: controller.signal,
+      infer: async (request) => {
+        asked = true;
+        assert.ok(request.signal.aborted, 'the inference sees the cancellation');
+        return '';
+      },
+    },
+  );
+
+  assert.ok(asked);
+  assert.equal(result.source, 'fallback');
 });
 
 test('a thrown inference error falls back rather than surfacing to the UI', async () => {

@@ -178,8 +178,8 @@ test('two devices reviewing the same card converge on the later review', () => {
     syncStatus: 'synced',
   };
 
-  const onPhone = reviewCard(original, 'good', new Date('2024-09-03T10:05:00.000Z'));
-  const onLaptop = reviewCard(original, 'again', new Date('2024-09-03T10:10:00.000Z'));
+  const onPhone = reviewCard(original, 'good', { now: new Date('2024-09-03T10:05:00.000Z') });
+  const onLaptop = reviewCard(original, 'again', { now: new Date('2024-09-03T10:10:00.000Z') });
 
   const plan = planMerge([onPhone], [onLaptop]);
 

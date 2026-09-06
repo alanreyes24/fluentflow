@@ -31,6 +31,8 @@ import {
   type TranslationProgress,
 } from '../../src/ai/desktop';
 
+type Translate = ReturnType<typeof useI18n>['t'];
+
 /**
  * Import from pasted text.
  *
@@ -45,13 +47,21 @@ import {
  * same list adds only what is new.
  *
  * A list with no meanings on it — just words — is filled in by the desktop
- * shell: the bilingual dictionary first, the model only for what the dictionary
- * does not have. Both land in an editable review list rather than in the deck,
- * and each row says where its meaning came from, because the two are not
- * equally trustworthy. The dictionary answered twelve of twelve on the list
- * this was built against; the model, asked the same twelve, got about seven and
- * invented the rest. Marking which is which is what lets attention go to the
- * handful of rows that need it.
+ * shell: the bilingual dictionary first, the hosted model only for what the
+ * dictionary does not have. Both land in an editable review list rather than in
+ * the deck, and each row says where its meaning came from, because the two are
+ * not equally trustworthy — the dictionary answered twelve of twelve on the
+ * list this was built against, and can say "I don't know", which is the thing
+ * no model will do for you.
+ *
+ * That order is also the screen's main source of confusion, and the shape here
+ * is the answer to it. The lookup is two presses, not one. The first asks the
+ * dictionary alone: free, offline, instant, and enough for most word lists. Only
+ * if it leaves something over does a second button appear, naming the model and
+ * the exact number of words it would send. So nothing is ever billed as a side
+ * effect of asking for meanings, and — the part that was actually broken —
+ * every box can simply be typed into instead, which before this was reachable
+ * only by running a lookup first.
  */
 export default function TextImportScreen() {
   const { deckId } = useLocalSearchParams<{ deckId?: string }>();
@@ -121,38 +131,105 @@ export default function TextImportScreen() {
 
   const targetLanguage = deck?.language ?? language ?? 'es';
   const hasDictionary = Boolean(sources?.dictionary.languages?.[targetLanguage]);
+  const hasModel = Boolean(sources?.cloud?.available);
   /** Either source is enough to be worth offering. */
-  const canLookUp = hasDictionary || Boolean(sources?.model.available);
+  const canLookUp = hasDictionary || hasModel;
+
+  // The two names that go into the sentence explaining the lookup. The
+  // dictionary's own name matters for Bosnian, which is served by the
+  // Serbo-Croatian Wiktionary and should say so rather than quietly answering
+  // as something else.
+  const dictionaryName =
+    sources?.dictionary.source?.[targetLanguage] ?? LANGUAGE_NAMES[targetLanguage];
+  const modelName = sources?.cloud?.model ?? '';
 
   const missingMeanings = useMemo(
     () => preview.entries.filter((entry) => !entry.back).map((entry) => entry.front),
     [preview.entries],
   );
 
-  const translate = useCallback(async () => {
-    if (missingMeanings.length === 0) return;
-    setTranslating(true);
-    setProgress({ done: 0, total: missingMeanings.length });
-    setError(null);
-    try {
-      // The deck's language when adding to one, otherwise whatever the user
-      // picked. Detection cannot help here: it reads the words, and a model
-      // asked to translate Spanish as Bosnian answers confidently either way.
-      const target = deck?.language ?? language ?? 'es';
-      const results = await lookUpMeanings(missingMeanings, target, setProgress);
-      setDrafts((current) => ({ ...current, ...draftsFrom(results) }));
-      setOrigins((current) => ({
-        ...current,
-        ...Object.fromEntries(results.map((entry) => [entry.word, entry])),
-      }));
-      setReviewing(true);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setTranslating(false);
-      setProgress(null);
-    }
-  }, [missingMeanings, deck, language]);
+  /** How many meanings came from where, once the lookup has run. */
+  const counts = useMemo(() => tally(missingMeanings, origins), [missingMeanings, origins]);
+
+  /**
+   * Whether the editable list of meanings is on screen.
+   *
+   * After a lookup, always. Also when there is nothing to look up with, because
+   * otherwise the only thing this screen offers someone with no dictionary and
+   * no key is a dead end — which is exactly what it was.
+   */
+  const editing = reviewing || (sources !== null && !canLookUp);
+
+  /** Words that still have nothing — neither looked up nor typed in. */
+  const remaining = useMemo(
+    () => missingMeanings.filter((word) => !drafts[word]?.trim()),
+    [missingMeanings, drafts],
+  );
+
+  /**
+   * The subset of those the model has not already been asked about.
+   *
+   * A word it was asked about and had no answer for is not worth a second
+   * billed request, so the offer disappears once there is nothing new to send.
+   */
+  const unasked = useMemo(
+    () => remaining.filter((word) => origins[word]?.rejected !== 'model-rejected'),
+    [remaining, origins],
+  );
+
+  /**
+   * Fill in the meanings, in one of the two passes this screen offers.
+   *
+   * The free pass asks the dictionary about every missing word and bills
+   * nothing. The paid pass asks the model about the handful left over, and is
+   * only ever reached by pressing a button that names the model and the count.
+   *
+   * @param useModel whether this pass may spend the user's API key
+   */
+  const runLookup = useCallback(
+    async (useModel: boolean) => {
+      const words = useModel ? unasked : missingMeanings;
+      if (words.length === 0) return;
+      setTranslating(true);
+      setProgress({ done: 0, total: words.length });
+      setError(null);
+      try {
+        // The deck's language when adding to one, otherwise whatever the user
+        // picked. Detection cannot help here: it reads the words, and a model
+        // asked to translate Spanish as Bosnian answers confidently either way.
+        const target = deck?.language ?? language ?? 'es';
+        const results = await lookUpMeanings(words, target, setProgress, { useModel });
+        // A meaning already in the box wins. The second pass exists to fill
+        // blanks, not to overwrite a correction someone has just typed.
+        setDrafts((current) => {
+          const next = { ...current };
+          for (const [word, meaning] of Object.entries(draftsFrom(results))) {
+            if (!next[word]?.trim()) next[word] = meaning;
+          }
+          return next;
+        });
+        setOrigins((current) => ({
+          ...current,
+          ...Object.fromEntries(results.map((entry) => [entry.word, entry])),
+        }));
+        setReviewing(true);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      } finally {
+        setTranslating(false);
+        setProgress(null);
+      }
+    },
+    [missingMeanings, unasked, deck, language],
+  );
+
+  // Auto-run dictionary lookup when valid text is pasted.
+  useEffect(() => {
+    if (!text.trim() || missingMeanings.length === 0 || reviewing || translating) return;
+    if (!hasDictionary) return; // Only auto-run if dictionary is available.
+    if (origins[missingMeanings[0]]) return; // Already looked up.
+    void runLookup(false);
+  }, [text, missingMeanings, reviewing, translating, hasDictionary, origins, runLookup]);
 
   const run = useCallback(async () => {
     if (!repository || !user || preview.entries.length === 0) return;
@@ -183,8 +260,10 @@ export default function TextImportScreen() {
         await repository.importDecks(result.decks, result.cards);
       }
 
+      const createdDeckId = result.decks[0]?.id ?? null;
+      const deckToView = deck?.id ?? createdDeckId;
       setSummary(result.summary);
-      setImportedDeckId(deck?.id ?? result.decks[0]?.id ?? null);
+      setImportedDeckId(deckToView);
       // The words just written are duplicates for anything pasted next, and
       // the screen stays open for exactly that.
       setExistingFronts((current) => [...current, ...result.cards.map((card) => card.front)]);
@@ -193,6 +272,12 @@ export default function TextImportScreen() {
       setReviewing(false);
       await refreshDecks();
       void syncNow();
+
+      // Go to the deck view immediately: for new decks, the fresh one; for
+      // existing decks, back to the one being added to.
+      if (deckToView) {
+        router.replace({ pathname: '/(app)/deck/[id]', params: { id: deckToView } });
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('importFailed'));
     } finally {
@@ -275,9 +360,9 @@ export default function TextImportScreen() {
         ) : null}
 
         <Spacer size={theme.spacing.md} />
-        <Preview result={preview} />
+        <Preview result={preview} ready={readyCount} />
 
-        {missingMeanings.length > 0 ? (
+        {missingMeanings.length > 0 && !translating ? (
           <>
             <Spacer size={theme.spacing.md} />
             <Surface style={styles.options}>
@@ -285,50 +370,59 @@ export default function TextImportScreen() {
                 {t('aiWordsNeedMeanings', { count: missingMeanings.length })}
               </Label>
 
-              {canLookUp ? (
-                <>
-                  <Button
-                    label={
-                      translating && progress
-                        ? t('aiTranslating', { done: progress.done, total: progress.total })
-                        : t('aiTranslate')
-                    }
-                    variant="secondary"
-                    onPress={() => void translate()}
-                    loading={translating}
-                    disabled={translating}
-                  />
-                  <Label variant="caption" tone="faint">
-                    {[
-                      hasDictionary ? sources?.dictionary.source?.[targetLanguage] : null,
-                      sources?.model.available ? sources.model.name : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </Label>
-                </>
-              ) : (
+              {sources === null ? (
+                <Label variant="caption" tone="faint">
+                  {t('loading')}
+                </Label>
+              ) : !canLookUp ? (
                 <Label variant="caption" tone="faint">
                   {t('aiUnavailable')}
-                  {sources?.dictionary.reason ? ` — ${sources.dictionary.reason}` : ''}
+                  {sources.dictionary.reason ? ` — ${sources.dictionary.reason}` : ''}
                 </Label>
+              ) : reviewing ? null : (
+                <>
+                  <Label variant="caption" tone="muted">
+                    {hasDictionary
+                      ? t('aiSourceDictionary', { dictionary: dictionaryName })
+                      : t('aiSourceModelOnly', { dictionary: dictionaryName, model: modelName })}
+                  </Label>
+                  <Button
+                    label={t('aiTranslate')}
+                    variant="secondary"
+                    onPress={() => void runLookup(!hasDictionary)}
+                    disabled={translating}
+                  />
+                </>
               )}
             </Surface>
           </>
         ) : null}
 
-        {reviewing ? (
+        {translating ? (
+          <>
+            <Spacer size={theme.spacing.md} />
+            <Surface style={styles.options}>
+              <Label variant="label">
+                {t('aiTranslating', { done: progress?.done ?? 0, total: progress?.total ?? 0 })}
+              </Label>
+            </Surface>
+          </>
+        ) : null}
+
+        {editing && missingMeanings.length > 0 ? (
           <>
             <Spacer size={theme.spacing.md} />
             <Surface style={styles.options}>
               <Label variant="label">{t('aiReviewTitle')}</Label>
-              {/* The whole point of the screen: a guess the user corrects,
-                  never a card written on the model's say-so. */}
-              <Label variant="caption" tone="muted">
-                {t('aiReviewHint')}
-              </Label>
               <Label variant="caption" tone="faint">
-                {t('aiSummary', tally(missingMeanings, origins))}
+                {summaryLine(counts, modelName, t)}
+              </Label>
+              {/* The whole point of the screen: a guess the user corrects,
+                  never a card written on the model's say-so. Which is only
+                  worth saying when the model actually wrote something — a list
+                  the dictionary covered outright gets the calmer line. */}
+              <Label variant="caption" tone="muted">
+                {counts.model > 0 ? t('aiReviewHint') : t('aiReviewHintDictionary')}
               </Label>
 
               {missingMeanings.map((word) => (
@@ -343,16 +437,49 @@ export default function TextImportScreen() {
                     autoCapitalize="none"
                   />
                   {/* The source, per row. A dictionary entry can be skimmed; a
-                      model guess is the one to actually read. */}
-                  <Label
-                    variant="caption"
-                    tone={origins[word]?.source === 'model' ? 'danger' : 'faint'}
-                  >
-                    {sourceLabel(origins[word], t)}
-                    {origins[word]?.lemma ? ` · ${origins[word]?.lemma}` : ''}
-                  </Label>
+                      model guess is the one to actually read. A box the user
+                      has filled in themselves gets no label at all — "not
+                      found" under their own words would be nonsense. */}
+                  {originLabelVisible(origins[word], drafts[word]) ? (
+                    <Label
+                      variant="caption"
+                      tone={origins[word]?.source === 'model' ? 'danger' : 'faint'}
+                    >
+                      {sourceLabel(origins[word], t)}
+                      {origins[word]?.lemma ? ` · ${origins[word]?.lemma}` : ''}
+                    </Label>
+                  ) : null}
                 </View>
               ))}
+
+              {/* The paid step, and the only one. It appears after the free
+                  pass has left something over, names the model and the exact
+                  number of words it would send, and is never the only way
+                  forward — every box above it can simply be typed into. */}
+              {unasked.length > 0 && hasModel ? (
+                <>
+                  <Button
+                    label={
+                      translating && progress
+                        ? t('aiTranslating', { done: progress.done, total: progress.total })
+                        : t('aiAskModel', { model: modelName, count: unasked.length })
+                    }
+                    variant="secondary"
+                    onPress={() => void runLookup(true)}
+                    loading={translating}
+                    disabled={translating}
+                  />
+                  <Label variant="caption" tone="faint">
+                    {t('aiAskModelHint')}
+                  </Label>
+                </>
+              ) : null}
+
+              {unasked.length > 0 && !hasModel ? (
+                <Label variant="caption" tone="faint">
+                  {t('aiAskModelNoKey')}
+                </Label>
+              ) : null}
             </Surface>
           </>
         ) : null}
@@ -416,8 +543,21 @@ export default function TextImportScreen() {
   );
 }
 
-/** What the paste currently amounts to: counts, separator, the first few cards. */
-function Preview({ result }: { result: ReturnType<typeof parseTextCards> }) {
+/**
+ * What the paste currently amounts to: counts, separator, the first few cards.
+ *
+ * `ready` is the count that can actually become cards, which is not the same as
+ * the number of lines parsed — a list of bare words parses perfectly and
+ * creates nothing until the meanings are filled in. Saying "5 cards ready"
+ * above a disabled Create button was the screen telling two different stories.
+ */
+function Preview({
+  result,
+  ready,
+}: {
+  result: ReturnType<typeof parseTextCards>;
+  ready: number;
+}) {
   const { t } = useI18n();
   const theme = useTheme();
 
@@ -434,7 +574,11 @@ function Preview({ result }: { result: ReturnType<typeof parseTextCards> }) {
   return (
     <Surface style={styles.preview}>
       <Row style={styles.previewHead}>
-        <Label variant="label">{t('pastePreview', { count: result.entries.length })}</Label>
+        <Label variant="label">
+          {ready === result.entries.length
+            ? t('pastePreview', { count: result.entries.length })
+            : t('pastePreviewPartial', { ready, count: result.entries.length })}
+        </Label>
         {result.separatorLabel ? (
           <Label variant="caption" tone="faint">
             {t('pasteFormat', { format: result.separatorLabel })}
@@ -519,12 +663,49 @@ function tally(words: string[], origins: Record<string, ResolvedMeaning>) {
   return { dictionary, model, missing };
 }
 
-function sourceLabel(
-  origin: ResolvedMeaning | undefined,
-  t: (key: 'aiFromDictionary' | 'aiFromModel' | 'aiFromNothing') => string,
+/**
+ * The lookup result in one line, naming only what actually happened.
+ *
+ * Zeros are left out on purpose. "0 from the model" reads as a claim that the
+ * model was involved, and the commonest outcome by far — a list the dictionary
+ * covered outright — should say that and nothing else. Naming the model rather
+ * than saying "the model" is what connects the count to the thing being billed.
+ */
+function summaryLine(
+  counts: { dictionary: number; model: number; missing: number },
+  model: string,
+  t: Translate,
 ): string {
+  const parts: string[] = [];
+  if (counts.dictionary > 0) parts.push(t('aiSummaryDictionary', { count: counts.dictionary }));
+  if (counts.model > 0) parts.push(t('aiSummaryModel', { count: counts.model, model }));
+  if (counts.missing > 0) parts.push(t('aiSummaryMissing', { count: counts.missing }));
+  return parts.join(' · ');
+}
+
+/**
+ * Whether a row's source line is worth showing.
+ *
+ * It is not, for a box the user filled in themselves: they know where that
+ * meaning came from, and the lookup's verdict on the word ("not found") stops
+ * being true the moment they answer it.
+ */
+function originLabelVisible(origin: ResolvedMeaning | undefined, draft: string | undefined): boolean {
+  if (origin?.source === 'dictionary' || origin?.source === 'model') return true;
+  return !draft?.trim();
+}
+
+/**
+ * Where one row's meaning came from, or why there isn't one.
+ *
+ * An empty box because the model was asked and had nothing is a different
+ * situation from an empty box because nothing was asked, and only the first
+ * tells the user their key was spent on it.
+ */
+function sourceLabel(origin: ResolvedMeaning | undefined, t: Translate): string {
   if (origin?.source === 'dictionary') return t('aiFromDictionary');
   if (origin?.source === 'model') return t('aiFromModel');
+  if (origin?.rejected === 'model-rejected') return t('aiFromModelNothing');
   return t('aiFromNothing');
 }
 

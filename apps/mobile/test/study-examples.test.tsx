@@ -94,9 +94,10 @@ describe('StudyScreen examples', () => {
     });
   });
 
-  it('falls back to written sentences when no model is installed', async () => {
-    // The real service, with no ONNX Runtime and no weights present — the
-    // state this repository ships in.
+  it('falls back to written sentences when there is no model to ask', async () => {
+    // The real service with no desktop shell and so no API key — the state a
+    // browser tab is always in, and a fresh desktop install until a key is
+    // pasted in.
     const examples = new ExampleService(repository);
     await renderScreen(<StudyScreen />, { repository, examples });
 
@@ -107,7 +108,7 @@ describe('StudyScreen examples', () => {
     // The fallback says why it is generic rather than leaving the learner to
     // wonder whether the model wrote a bad sentence.
     expect(
-      screen.getByText('The on-device model was unavailable, so these are generic.'),
+      screen.getByText('The model was unavailable, so these are generic.'),
     ).toBeTruthy();
     // It quotes the word rather than conjugating it, so the word appears both
     // on the card and inside the sentence.

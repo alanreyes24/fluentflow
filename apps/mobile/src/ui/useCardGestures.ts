@@ -5,14 +5,14 @@ import { ratingFromValue, type RatingName } from '@fluentflow/core';
 /**
  * Rating input that is not a button press.
  *
- * Two paths, because the app runs on phones and on desktops:
+ * Two paths, for the two ways to drive the app without reaching for a button:
  *
- *  - **Swipe** (touch). Only the two ratings worth a gesture are bound: left
- *    for Again, right for Good. Mapping four ratings onto diagonal swipes reads
- *    well in a design document and is unusable in practice, so Hard and Easy
- *    stay button-only.
- *  - **Number keys** (web/desktop). 1–4 match the button order and the labels,
- *    which is the same muscle memory Anki users already have.
+ *  - **Swipe** (touch, including a trackpad). Only the two ratings worth a
+ *    gesture are bound: left for Again, right for Good. Mapping four ratings
+ *    onto diagonal swipes reads well in a design document and is unusable in
+ *    practice, so Hard and Easy stay button-only.
+ *  - **Number keys.** 1–4 match the button order and the labels, which is the
+ *    same muscle memory Anki users already have.
  *
  * `PanResponder` is used rather than `react-native-gesture-handler` so the
  * gesture needs no extra native dependency.

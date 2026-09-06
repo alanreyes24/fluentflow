@@ -102,7 +102,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // second refresh recovered.
     //
     // `pagehide` rather than `beforeunload`: it fires for the back/forward
-    // cache and on mobile Safari, where `beforeunload` is unreliable.
+    // cache and in browsers where `beforeunload` is unreliable.
     const closeBeforeUnload = () => {
       void opened?.closeAsync();
     };

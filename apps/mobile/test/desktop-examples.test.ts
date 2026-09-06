@@ -6,11 +6,11 @@ import { createTestRepository } from './fakes/database';
  * Where a card reveal gets its sentences on the desktop.
  *
  * The bundle is the same one a browser tab runs, so it cannot load a model
- * itself — `onnxruntime-react-native` is a native mobile module. In Electron
- * the model lives in the main process and reaches the app through the bridge
- * `preload.js` exposes. What is pinned here is the routing and its failure
- * behaviour, not the model: when the shell is present it must be asked, and
- * when it is not, or it fails, the reveal must still produce something.
+ * itself. In Electron the model lives in the main process and reaches the app
+ * through the bridge `preload.js` exposes. What is pinned here is the routing
+ * and its failure behaviour, not the model: when the shell is present it must
+ * be asked, and when it is not, or it fails, the reveal must still produce
+ * something.
  */
 
 /** The shape `apps/desktop/preload.js` exposes on `window.fluentflowDesktop`. */
@@ -58,12 +58,12 @@ describe('example generation through the desktop shell', () => {
     const card = await testCard();
     const result = await new ExampleService(context.repository).forCard(card);
 
-    expect(examples).toHaveBeenCalledWith({
-      word: 'nido',
-      meaning: 'nest',
-      language: 'es',
-      count: 2,
-    });
+    expect(examples).toHaveBeenCalledWith(
+      { word: 'nido', meaning: 'nest', language: 'es', count: 2 },
+      // The id the shell needs to match a later `cancelExamples` against; an
+      // AbortSignal cannot cross contextBridge, so the handle is a string.
+      expect.any(String),
+    );
     expect(result.source).toBe('model');
     expect(result.examples).toEqual(modelResult.examples);
   });
@@ -109,7 +109,7 @@ describe('example generation through the desktop shell', () => {
     expect(result.examples.length).toBeGreaterThan(0);
   });
 
-  it('uses the in-process path in a plain browser tab, with no shell present', async () => {
+  it('falls back to carrier sentences in a plain browser tab, with no shell present', async () => {
     const card = await testCard();
     const result = await new ExampleService(context.repository).forCard(card);
 

@@ -3,14 +3,11 @@
 /**
  * Desktop shell for Windows and macOS.
  *
- * Expo targets iOS, Android and the web. It does not target Windows or macOS —
- * those need the out-of-tree `react-native-windows` / `react-native-macos`
- * forks, which are not Expo-managed and would mean maintaining a second native
- * project. Wrapping the web export in Electron gets a real desktop app from the
- * same codebase. The on-device model survives that move, but not in the
- * renderer: `onnxruntime-react-native` is a native mobile module and cannot
- * load in the web export, so inference runs in this process behind the IPC
- * handlers at the bottom of the file. See ai.js for what runs there and why.
+ * The app is a React web build (Expo's web export). Electron wraps it in a real
+ * desktop window on Windows and macOS. The on-device model does not run in the
+ * renderer — the web export has no Node runtime and cannot load an inference
+ * backend — so inference runs in this process behind the IPC handlers at the
+ * bottom of the file. See ai.js for what runs there and why.
  *
  * The export is served over a custom `app://` scheme rather than loaded from
  * `file://`. That is not cosmetic:
@@ -25,11 +22,33 @@
  * content.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, net, protocol, shell, session } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  ipcMain,
+  nativeTheme,
+  net,
+  protocol,
+  shell,
+  session,
+} = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { existsSync } = require('node:fs');
 const ai = require('./ai');
+const cloud = require('./cloud');
+const windowState = require('./window-state');
+const updater = require('./updater');
+
+// The name Electron derives every per-user path from. Without this it takes the
+// package name, `@fluentflow/desktop`, and the scope's slash turns into a
+// directory: dictionaries and the model would be looked for under
+// `Application Support/@fluentflow/desktop/`, while the fetch scripts write to
+// `Application Support/FluentFlow/`. The app then reports nothing installed
+// however many times you run the fetch. Must run before anything resolves
+// `userData`, which is why it sits with the requires.
+app.setName('FluentFlow');
 
 /** Set to the Metro dev server URL to develop against live reload. */
 const DEV_URL = process.env.FLUENTFLOW_DEV_URL;
@@ -80,15 +99,23 @@ function registerProtocolHandler() {
   });
 }
 
+const isMac = process.platform === 'darwin';
+
 function createWindow() {
+  const { bounds, maximized } = windowState.initialState();
+
   const window = new BrowserWindow({
-    width: 1100,
-    height: 800,
+    ...bounds,
     minWidth: 480,
     minHeight: 520,
-    // Matches the app's own light background so a cold start does not flash
-    // white on a dark desktop.
-    backgroundColor: '#fbfaf8',
+    // On macOS the window is a vibrancy pane, so its background is transparent
+    // and the material shows through where the page does not paint — the title
+    // strip and the bottom bar. Elsewhere it matches the app's own light
+    // background so a cold start does not flash white on a dark desktop.
+    backgroundColor: isMac ? '#00000000' : '#fbfaf8',
+    // `sidebar` is the standard material for app chrome; `followWindow` dims it
+    // when the window is not focused, the way native chrome does.
+    ...(isMac ? { vibrancy: 'sidebar', visualEffectState: 'followWindow' } : {}),
     show: false,
     // `hidden` rather than `hiddenInset` so the page knows where the window
     // buttons are. `hiddenInset` shifts them by an amount Electron documents
@@ -97,7 +124,7 @@ function createWindow() {
     // those three buttons over the top-left of the page whatever is there.
     // `TITLE_BAR_HEIGHT` and `WINDOW_BUTTONS_WIDTH` in the app's ui/shell.ts
     // are the other half of this pair.
-    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
+    titleBarStyle: isMac ? 'hidden' : 'default',
     trafficLightPosition: { x: 18, y: 15 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -108,7 +135,23 @@ function createWindow() {
     },
   });
 
-  window.once('ready-to-show', () => window.show());
+  windowState.track(window);
+
+  window.once('ready-to-show', () => {
+    if (maximized) window.maximize();
+    window.show();
+  });
+
+  // The renderer keeps a strip clear for the traffic lights and uses it as the
+  // drag handle. macOS hides the lights in full-screen, so the strip has to go
+  // too — the page cannot see the window's state on its own.
+  const sendFullscreen = () =>
+    window.webContents.send('window:fullscreen', window.isFullScreen());
+  window.on('enter-full-screen', sendFullscreen);
+  window.on('leave-full-screen', sendFullscreen);
+  window.webContents.on('did-finish-load', sendFullscreen);
+
+  updater.start(window);
 
   if (DEV_URL) {
     void window.loadURL(DEV_URL);
@@ -166,10 +209,29 @@ function applyContentSecurityPolicy() {
 }
 
 function buildMenu() {
-  const isMac = process.platform === 'darwin';
-
   return Menu.buildFromTemplate([
-    ...(isMac ? [{ role: 'appMenu' }] : []),
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              {
+                label: 'Check for Updates…',
+                click: () => updater.checkNow(),
+              },
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' },
+            ],
+          },
+        ]
+      : []),
     { role: 'fileMenu' },
     { role: 'editMenu' },
     {
@@ -203,11 +265,26 @@ function missingBuildPage() {
   <p>This shell renders the Expo web export. Build it first:</p>
   <p><code>npm run dist</code></p>
   <p>Or develop against the Metro dev server:</p>
-  <p><code>npm run mobile</code> in the repository root, then <code>npm run dev</code> here.</p>
+  <p><code>npm run web</code> in the repository root, then <code>npm run dev</code> here.</p>
 </main></body></html>`;
 
   return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
+
+/**
+ * Generations in flight, by the id the renderer gave them.
+ *
+ * Cancellation is here because of the prefetch. The study screen generates
+ * examples for the cards *behind* the one on screen, so when the user reveals a
+ * card the model is usually several tokens into a different one — and there is
+ * one session and one set of threads. Starting the card the user is looking at
+ * means stopping the one they are not; without this the reveal waits out a
+ * generation nobody wants any more, which measured 3.5–6.2 s on an M-series Mac.
+ *
+ * The renderer supplies the id because an AbortSignal cannot cross
+ * `contextBridge` — only structured-cloneable data does.
+ */
+const runningExamples = new Map();
 
 /**
  * Looking words up runs here, not in the renderer.
@@ -226,18 +303,21 @@ function registerAiHandlers() {
   ipcMain.handle('ai:status', () => ai.sources());
 
   ipcMain.handle('ai:resolve', async (event, request) => {
-    const { words, language } = request ?? {};
+    const { words, language, useModel } = request ?? {};
     if (!Array.isArray(words) || words.length === 0) {
       return { ok: false, error: 'No words to look up.' };
     }
 
     try {
+      // Opt out, not opt in: a renderer too old to send the flag gets the
+      // behaviour it was written against.
+      const askModel = useModel !== false;
       const meanings = await ai.resolve(words, language, (done, total) => {
         // The window can go away mid-run; a long list outlives a closed window.
         if (!event.sender.isDestroyed()) {
           event.sender.send('ai:progress', { done, total });
         }
-      });
+      }, askModel);
       return { ok: true, meanings };
     } catch (error) {
       return { ok: false, error: String(error?.message ?? error) };
@@ -245,18 +325,95 @@ function registerAiHandlers() {
   });
 
   ipcMain.handle('ai:examples', async (_event, request) => {
-    const { word, meaning, language, count } = request ?? {};
+    const { word, meaning, language, count, requestId } = request ?? {};
     if (typeof word !== 'string' || !word.trim()) {
       return { ok: false, error: 'No word to write examples for.' };
     }
 
+    const controller = new AbortController();
+    if (requestId != null) runningExamples.set(requestId, controller);
+
     try {
-      return { ok: true, result: await ai.examples({ word, meaning, language, count }) };
+      const result = await ai.examples({ word, meaning, language, count }, controller.signal);
+      return { ok: true, result, cancelled: controller.signal.aborted };
     } catch (error) {
       // A reveal must not break because the model did. The renderer turns this
       // into the same carrier sentences it would show with no model installed.
       return { ok: false, error: String(error?.message ?? error) };
+    } finally {
+      if (requestId != null) runningExamples.delete(requestId);
     }
+  });
+
+  ipcMain.on('ai:examples:cancel', (_event, requestId) => {
+    runningExamples.get(requestId)?.abort();
+  });
+
+  /**
+   * Configure the hosted model.
+   *
+   * Deliberately write-only. The renderer can set a key, change the model and
+   * clear both, and it gets back the same status `ai:status` reports — which
+   * says whether a key is present, never what it is. Reading the key is a main
+   * process job because using it is a main process job; a getter would put a
+   * credential into a page that renders user-supplied deck content for no
+   * benefit at all.
+   */
+  ipcMain.handle('ai:cloud:set', (_event, request) => {
+    const { apiKey, model } = request ?? {};
+    try {
+      if (typeof model === 'string') cloud.setModel(model);
+      if (typeof apiKey === 'string') return { ok: true, status: cloud.setApiKey(apiKey) };
+      return { ok: true, status: cloud.status() };
+    } catch (error) {
+      // Writing to userData can fail — a full disk, a keychain the user denied
+      // — and the settings screen needs to say so rather than silently
+      // appearing to have saved.
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+  });
+
+  ipcMain.handle('ai:cloud:clear', () => {
+    try {
+      return { ok: true, status: cloud.clear() };
+    } catch (error) {
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+  });
+}
+
+/**
+ * Keep the window chrome — the traffic lights and the window vibrancy — in
+ * step with the theme the user picked inside the app.
+ *
+ * The renderer decides light/dark for its own palette from
+ * `prefers-color-scheme`, which Electron drives from `nativeTheme`. So the
+ * whole job here is to relay the app's Light/Dark/System preference to
+ * `themeSource`; the renderer then follows the media query as it already does.
+ */
+function registerThemeSync() {
+  ipcMain.on('theme:set', (_event, preference) => {
+    nativeTheme.themeSource =
+      preference === 'light' || preference === 'dark' ? preference : 'system';
+  });
+
+  nativeTheme.on('updated', () => {
+    const name = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('theme:native-changed', name);
+    }
+  });
+}
+
+if (isMac) {
+  app.setAboutPanelOptions({
+    applicationName: 'FluentFlow',
+    applicationVersion: app.getVersion(),
+    version: '',
+    copyright: '© 2026 FluentFlow',
+    credits:
+      'On-device model: Qwen2.5-1.5B-Instruct.\n' +
+      'Dictionary data from Wiktionary (CC BY-SA).',
   });
 }
 
@@ -264,6 +421,7 @@ app.whenReady().then(() => {
   registerProtocolHandler();
   applyContentSecurityPolicy();
   registerAiHandlers();
+  registerThemeSync();
   Menu.setApplicationMenu(buildMenu());
   createWindow();
 

@@ -19,14 +19,13 @@ import {
   Surface,
   useContentStyle,
 } from '../../../src/ui/components';
-import { useLayout, useTheme } from '../../../src/ui/theme';
+import { useTheme } from '../../../src/ui/theme';
 
 /** Deck detail: progress, the study entry point, and card management. */
 export default function DeckScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { t } = useI18n();
   const theme = useTheme();
-  const { wide } = useLayout();
   const content = useContentStyle();
   const navigation = useNavigation();
   const { repository, user, refreshDecks } = useApp();
@@ -138,7 +137,6 @@ export default function DeckScreen() {
                 })
               }
               disabled={cards.length === 0}
-              style={wide ? styles.selfStart : undefined}
             />
 
             <Spacer size={theme.spacing.sm} />
@@ -194,7 +192,7 @@ export default function DeckScreen() {
         )}
         ItemSeparatorComponent={() => <Spacer size={theme.spacing.xs} />}
         ListFooterComponent={
-          <View style={[styles.footer, wide ? styles.selfStart : null]}>
+          <View style={styles.footer}>
             <Button label={t('deleteDeck')} variant="ghostDanger" onPress={removeDeck} />
           </View>
         }
@@ -317,7 +315,6 @@ function confirm(
 
 const styles = StyleSheet.create({
   header: {},
-  selfStart: { alignSelf: 'flex-start' },
   card: { paddingVertical: 12 },
   grow: { flex: 1 },
   form: { gap: 16 },

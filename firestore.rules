@@ -40,9 +40,14 @@ service cloud.firestore {
         && card.language in ['es', 'bs']
         && card.status in ['new', 'learning', 'mastered']
         && card.interval is number && card.interval >= 0 && card.interval <= 36500
-        // 1.3 is the SM-2 floor. A client writing a lower ease factor would
+        // 1.3 is Anki's ease floor. A client writing a lower ease factor would
         // schedule the card into a death spiral on every other device.
         && card.easeFactor is number && card.easeFactor >= 1.3 && card.easeFactor <= 10
+        // The scheduler fields are checked only when present: a client that
+        // predates them still syncs, and the reader fills in what is missing.
+        && (!('phase' in card) || card.phase in ['new', 'learning', 'review', 'relearning'])
+        && (!('lapses' in card) || (card.lapses is int && card.lapses >= 0))
+        && (!('learningStep' in card) || (card.learningStep is int && card.learningStep >= 0))
         && card.examples is list && card.examples.size() <= 10
         && isIsoTimestamp(card.nextReview)
         && isIsoTimestamp(card.lastModified);

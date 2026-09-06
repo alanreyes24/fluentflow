@@ -1,7 +1,7 @@
 {
   "name": "@fluentflow/core",
   "version": "0.1.0",
-  "description": "Shared domain logic: SM-2 scheduling, Anki .apkg import, sync merge, AI prompting",
+  "description": "Shared domain logic: Anki-compatible scheduling, .apkg import, sync merge, AI prompting",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

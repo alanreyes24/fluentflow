@@ -11,9 +11,9 @@ import { Repository } from '../../src/db/repository';
  * SQL, and a screen test that asserts against a mocked repository proves
  * nothing about the app. Node ships SQLite as `node:sqlite`, so the tests run
  * the real migrations, the real indexes and the real queries; pressing "Good"
- * in a test runs the same SM-2 code that runs on a phone.
+ * in a test runs the same scheduling code the app runs.
  *
- * The only difference from the device is the driver: expo-sqlite is async and
+ * The only difference from the app is the driver: expo-sqlite is async and
  * `node:sqlite` is synchronous, so every method here is a promise around a
  * synchronous call.
  */

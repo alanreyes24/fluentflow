@@ -246,7 +246,10 @@ async function run(page, baseUrl) {
   await resumeOfflineSession(page);
   await waitForText(page, 'Spanish Verbs');
 
-  await clickLabel(page, 'Paste a word list');
+  // The bottom bar's action, which makes a new deck from the paste. The deck
+  // screen has its own "Paste a word list" that adds to the deck already open;
+  // this is deliberately the other one.
+  await clickLabel(page, 'Paste');
   await typeInto(page, 'Your list', 'hvala - thank you\nmolim - please\nkuća - house\nnot a card');
   const previewed = await hasText(page, '3 cards ready', 8000);
   check('the paste is turned into cards before anything is written', previewed);

@@ -16,7 +16,7 @@ import type { SyncStatus } from '../src/sync/engine';
  * Everything mocked below is a native module with no JavaScript implementation
  * to run — a document picker that opens a system dialog, a network reachability
  * listener, a Firebase SDK that wants credentials. The database is *not* mocked
- * (see fakes/database.ts), so the code under test does real SQL and real SM-2.
+ * (see fakes/database.ts), so the code under test does real SQL and real scheduling.
  */
 
 // --- native seams -----------------------------------------------------------
@@ -54,7 +54,6 @@ jest.mock('expo-sqlite', () => ({
 
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn() }));
 jest.mock('expo-file-system', () => ({ File: jest.fn(), Paths: {} }));
-jest.mock('expo-asset', () => ({ Asset: { fromModule: jest.fn() } }));
 jest.mock('expo-splash-screen', () => ({
   preventAutoHideAsync: jest.fn(async () => {}),
   hideAsync: jest.fn(async () => {}),
@@ -113,6 +112,9 @@ export const mockRouter = {
 
 export const mockSearchParams: { current: Record<string, string | undefined> } = { current: {} };
 
+/** Which route the shell thinks is open, for anything that marks itself selected. */
+export const mockPathname: { current: string } = { current: '/decks' };
+
 /**
  * Stable across renders, deliberately.
  *
@@ -132,6 +134,7 @@ jest.mock('expo-router', () => ({
   router: mockRouter,
   useRouter: () => mockRouter,
   useLocalSearchParams: () => mockSearchParams.current,
+  usePathname: () => mockPathname.current,
   useNavigation: () => mockNavigation,
   // The real one re-runs on screen focus; in a test the screen is always
   // focused, so running the effect once is the honest equivalent.
@@ -158,13 +161,13 @@ beforeEach(async () => {
 const IDLE_SYNC: SyncStatus = { state: 'idle', pending: 0, lastSyncedAt: null, error: null };
 
 /**
- * A phone-shaped frame with a notch, matching what `app/_layout.tsx` provides
- * through `SafeAreaProvider`. Without it, any screen calling
- * `useSafeAreaInsets` throws rather than rendering.
+ * A window-sized frame, matching what `app/_layout.tsx` provides through
+ * `SafeAreaProvider`. Without it, any screen calling `useSafeAreaInsets`
+ * throws rather than rendering.
  */
 const TEST_METRICS = {
-  frame: { x: 0, y: 0, width: 390, height: 844 },
-  insets: { top: 47, left: 0, right: 0, bottom: 34 },
+  frame: { x: 0, y: 0, width: 1024, height: 768 },
+  insets: { top: 0, left: 0, right: 0, bottom: 0 },
 };
 
 export const TEST_USER: AuthUser = {

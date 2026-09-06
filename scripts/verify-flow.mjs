@@ -5,8 +5,8 @@
  * This is not a unit test — those live in `packages/core/test` and
  * `apps/server/test`. It exercises the seams those cannot reach: two devices
  * talking to one account over HTTP, an Anki archive travelling through the
- * import endpoint, and an offline device catching up. The React Native UI is
- * the one layer it cannot cover; everything underneath it is real.
+ * import endpoint, and an offline device catching up. The UI is the one layer
+ * it cannot cover; everything underneath it is real.
  *
  * Each device here is a small stand-in for what the app does on device: hold
  * records locally, reconcile with `planMerge` from core, push what it owns.
@@ -47,9 +47,9 @@ async function main() {
 
 async function run() {
   // --- 1. Sign in, create a deck, add ten cards ----------------------------
-  const phone = new Device('phone');
+  const desktop = new Device('desktop');
   const deck = createDeck({ userId: USER, name: 'Spanish Verbs', language: 'es' });
-  phone.decks.push(deck);
+  desktop.decks.push(deck);
 
   const words = [
     ['hablar', 'to speak'], ['comer', 'to eat'], ['vivir', 'to live'],
@@ -58,11 +58,11 @@ async function run() {
     ['salir', 'to leave'],
   ];
   for (const [front, back] of words) {
-    phone.cards.push(createCard({ userId: USER, deckId: deck.id, front, back, language: 'es' }));
+    desktop.cards.push(createCard({ userId: USER, deckId: deck.id, front, back, language: 'es' }));
   }
 
-  await phone.push();
-  check('a deck and ten cards reach the server', phone.lastPush.accepted.cards === 10);
+  await desktop.push();
+  check('a deck and ten cards reach the server', desktop.lastPush.accepted.cards === 10);
 
   // --- 2. A second device picks them up ------------------------------------
   const laptop = new Device('laptop');
@@ -139,13 +139,13 @@ async function run() {
   laptop.replaceCard(rated);
   await laptop.push();
 
-  await phone.pull();
-  const onPhone = phone.getCard(card.id);
+  await desktop.pull();
+  const onDesktop = desktop.getCard(card.id);
   check(
     'a review made on one device shows up on the other',
-    onPhone.interval === 1 && onPhone.repetitions === 1,
+    onDesktop.phase === 'learning' && onDesktop.repetitions === 1,
   );
-  check('the generated examples sync with the card', onPhone.examples.length === 2);
+  check('the generated examples sync with the card', onDesktop.examples.length === 2);
 
   // --- 6. Import an Anki deck with scheduling intact -----------------------
   const apkg = buildApkg({
@@ -166,28 +166,28 @@ async function run() {
 
   const mature = imported.cards.find((c) => c.interval === 40);
   check(
-    'SM-2 scheduling survives the import',
+    'Anki scheduling survives the import',
     Boolean(mature) && mature.easeFactor === 2.75 && mature.status === 'mastered',
     mature ? `interval ${mature.interval}d, ease ${mature.easeFactor}` : 'no mature card',
   );
   check(
-    'a graduated card resumes rather than restarting the ladder',
-    Boolean(mature) && mature.repetitions >= 2,
+    'a graduated card resumes in review rather than back on the learning steps',
+    Boolean(mature) && mature.phase === 'review',
   );
 
-  await phone.pull();
+  await desktop.pull();
   check(
     'the imported deck reaches every device',
-    phone.decks.length === 2 && phone.cards.length === 70,
+    desktop.decks.length === 2 && desktop.cards.length === 70,
   );
 
   // --- 7. A Bosnian deck alongside the Spanish one -------------------------
   const bosnian = createDeck({ userId: USER, name: 'Bosanski A1', language: 'bs' });
-  phone.decks.push(bosnian);
-  phone.cards.push(
+  desktop.decks.push(bosnian);
+  desktop.cards.push(
     createCard({ userId: USER, deckId: bosnian.id, front: 'raditi', back: 'to work', language: 'bs' }),
   );
-  await phone.push();
+  await desktop.push();
 
   const bosnianExamples = await generateExamples(
     { word: 'raditi', meaning: 'to work', language: 'bs' },
@@ -195,7 +195,7 @@ async function run() {
   );
   check(
     'a Bosnian deck coexists with the Spanish one',
-    phone.decks.some((d) => d.language === 'bs') && phone.decks.some((d) => d.language === 'es'),
+    desktop.decks.some((d) => d.language === 'bs') && desktop.decks.some((d) => d.language === 'es'),
   );
   check(
     'examples respect the deck language',
@@ -204,7 +204,7 @@ async function run() {
   );
 
   // --- 8. Offline, then reconnected ---------------------------------------
-  const offline = new Device('offline-tablet');
+  const offline = new Device('offline-desktop');
   await offline.pull();
   offline.online = false;
 
@@ -230,34 +230,38 @@ async function run() {
   check('offline reviews arrive on the other devices', syncedBack);
 
   // --- 9. Conflicting edits converge --------------------------------------
-  const contested = dueCards(phone.cards)[0];
-  const phoneEdit = reviewCard(phone.getCard(contested.id), 'again', new Date('2030-01-01T10:00:00Z'));
-  const laptopEdit = reviewCard(laptop.getCard(contested.id), 'easy', new Date('2030-01-01T10:05:00Z'));
+  const contested = dueCards(desktop.cards)[0];
+  const desktopEdit = reviewCard(desktop.getCard(contested.id), 'again', {
+    now: new Date('2030-01-01T10:00:00Z'),
+  });
+  const laptopEdit = reviewCard(laptop.getCard(contested.id), 'easy', {
+    now: new Date('2030-01-01T10:05:00Z'),
+  });
 
-  const onPhoneResult = planMerge([phoneEdit], [laptopEdit]).merged[0];
-  const onLaptopResult = planMerge([laptopEdit], [phoneEdit]).merged[0];
+  const onDesktopResult = planMerge([desktopEdit], [laptopEdit]).merged[0];
+  const onLaptopResult = planMerge([laptopEdit], [desktopEdit]).merged[0];
 
   check(
     'two devices resolve the same conflict identically',
-    JSON.stringify(onPhoneResult) === JSON.stringify(onLaptopResult),
+    JSON.stringify(onDesktopResult) === JSON.stringify(onLaptopResult),
   );
   check(
     'the later write wins',
-    onPhoneResult.lastModified === laptopEdit.lastModified,
+    onDesktopResult.lastModified === laptopEdit.lastModified,
   );
 
   // --- 10. Deck counts stay derived ---------------------------------------
-  const counted = recomputeCardCounts(phone.decks, phone.cards);
+  const counted = recomputeCardCounts(desktop.decks, desktop.cards);
   const spanish = counted.find((d) => d.id === deck.id);
   check(
     'deck card counts are recomputed, not trusted',
-    spanish.cardCount === phone.cards.filter((c) => c.deckId === deck.id && !c.deleted).length,
+    spanish.cardCount === desktop.cards.filter((c) => c.deckId === deck.id && !c.deleted).length,
   );
 
   // --- 11. A deleted card stays deleted -----------------------------------
-  const doomed = phone.cards.find((c) => c.deckId === bosnian.id);
-  phone.replaceCard(softDelete(doomed));
-  await phone.push();
+  const doomed = desktop.cards.find((c) => c.deckId === bosnian.id);
+  desktop.replaceCard(softDelete(doomed));
+  await desktop.push();
   await laptop.pull();
   check(
     'a delete propagates instead of resurrecting',

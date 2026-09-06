@@ -17,33 +17,68 @@ import { Platform } from 'react-native';
  *
  * Both are one-line CSS in a browser and neither is expressible in a React
  * Native style object, so the rules are injected once and referenced by
- * `data-` attribute. On iOS, Android and the web this module is inert.
+ * `data-` attribute. In a plain browser tab, with no shell, this module is
+ * inert.
  */
 
 interface DesktopBridge {
   platform?: string;
+  theme?: {
+    set(preference: string): void;
+    onNativeChange(listener: (name: 'light' | 'dark') => void): () => void;
+  };
+  window?: {
+    onFullscreenChange(listener: (fullscreen: boolean) => void): () => void;
+  };
+}
+
+function desktop(): DesktopBridge | null {
+  if (Platform.OS !== 'web' || typeof globalThis === 'undefined') return null;
+  return (globalThis as { fluentflowDesktop?: DesktopBridge }).fluentflowDesktop ?? null;
 }
 
 /** Is this bundle running inside the Electron shell rather than a browser? */
 export function inDesktopShell(): boolean {
-  if (Platform.OS !== 'web' || typeof globalThis === 'undefined') return false;
-  return Boolean((globalThis as { fluentflowDesktop?: DesktopBridge }).fluentflowDesktop);
+  return desktop() !== null;
 }
 
 /** Is that shell macOS, where the window buttons are top-left? */
 export function onMacDesktop(): boolean {
-  if (!inDesktopShell()) return false;
-  const desktop = (globalThis as { fluentflowDesktop?: DesktopBridge }).fluentflowDesktop;
-  return desktop?.platform === 'darwin';
+  return desktop()?.platform === 'darwin';
+}
+
+/**
+ * Tell the shell which appearance the app is set to, so the window chrome — the
+ * traffic lights and the window vibrancy — matches. A no-op with no shell, or
+ * an older shell without the bridge.
+ */
+export function syncDesktopTheme(preference: string): void {
+  desktop()?.theme?.set(preference);
+}
+
+/**
+ * Subscribe to the OS appearance changing while the app is following the
+ * system. Returns an unsubscribe; a no-op unsubscribe when there is no shell.
+ */
+export function onDesktopThemeChange(listener: (name: 'light' | 'dark') => void): () => void {
+  return desktop()?.theme?.onNativeChange(listener) ?? (() => {});
+}
+
+/**
+ * Subscribe to the window entering or leaving native full-screen. macOS hides
+ * the traffic lights there, so the strip kept clear for them has to go too.
+ */
+export function onDesktopFullscreenChange(listener: (fullscreen: boolean) => void): () => void {
+  return desktop()?.window?.onFullscreenChange(listener) ?? (() => {});
 }
 
 /**
  * Height of the strip kept clear at the top of the window.
  *
  * It has to clear the window buttons, which `trafficLightPosition` in
- * apps/desktop/main.js puts at y=18 and which are 16pt tall — so 18 + 16 plus
- * a little air below them. The same strip is the drag handle, and a handle
- * thinner than this is hard to hit.
+ * apps/desktop/main.js puts at y=15 and which are ~14pt tall — so 15 + 14 plus
+ * air below them. The same strip is the drag handle, and a handle thinner than
+ * this is hard to hit.
  */
 export const TITLE_BAR_HEIGHT = 44;
 
@@ -71,8 +106,7 @@ export function installWindowDragRegions(): void {
   if (injected || !inDesktopShell()) return;
   if (typeof document === 'undefined') return;
 
-  const style = document.createElement('style');
-  style.textContent =
+  let css =
     `[${DRAG_ATTRIBUTE}] { -webkit-app-region: drag; }\n` +
     `[${DRAG_ATTRIBUTE}] [${NO_DRAG_ATTRIBUTE}],\n` +
     `[${DRAG_ATTRIBUTE}] a,\n` +
@@ -80,6 +114,18 @@ export function installWindowDragRegions(): void {
     `[${DRAG_ATTRIBUTE}] input,\n` +
     `[${DRAG_ATTRIBUTE}] textarea,\n` +
     `[${DRAG_ATTRIBUTE}] [role="button"] { -webkit-app-region: no-drag; }`;
+
+  // On macOS the window is a vibrancy pane. The document root has to be
+  // transparent for the material to show through where the app does not paint
+  // — the panes that should stay solid (every content Screen) set their own
+  // background, and the title strip and bottom bar leave themselves
+  // transparent.
+  if (onMacDesktop()) {
+    css += `\nhtml, body, #root { background: transparent !important; }`;
+  }
+
+  const style = document.createElement('style');
+  style.textContent = css;
   document.head.appendChild(style);
   injected = true;
 }

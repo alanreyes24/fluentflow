@@ -9,9 +9,10 @@ import { mockRouter, renderScreen, TEST_USER } from './setup';
 /**
  * Settings.
  *
- * The model section carries most of the weight: "why are my examples generic?"
- * is the question this app will be asked most often, and the answer is nearly
- * always one of three specific things.
+ * The examples section carries most of the weight: "why are my examples
+ * generic?" is the question this app will be asked most often, and the answer
+ * is nearly always one specific, fixable thing — a missing API key, or running
+ * in a browser tab where there is nowhere to keep one.
  */
 
 describe('SettingsScreen', () => {
@@ -27,28 +28,29 @@ describe('SettingsScreen', () => {
     await context.close();
   });
 
-  it('says which of the three things is missing, not just "unavailable"', async () => {
+  it('says exactly what is missing, not just "unavailable"', async () => {
     jest.spyOn(model, 'modelStatus').mockResolvedValue({
       available: false,
-      reason: 'onnxruntime-react-native is not installed in this build.',
+      configured: false,
+      reason: 'No API key. Get one at https://aistudio.google.com/apikey and paste it here.',
     });
 
     await renderScreen(<SettingsScreen />, { repository });
 
-    await screen.findByText('onnxruntime-react-native is not installed in this build.');
+    await screen.findByText(/No API key/);
   });
 
-  it('reports a ready model with its vocabulary size', async () => {
+  it('names the model it is calling once a key is stored', async () => {
     jest.spyOn(model, 'modelStatus').mockResolvedValue({
       available: true,
-      modelPath: '/tmp/model.onnx',
-      vocabSize: 32000,
+      configured: true,
+      name: 'gemini-3.1-flash-lite',
     });
 
     await renderScreen(<SettingsScreen />, { repository });
 
-    await screen.findByText('Model ready');
-    expect(screen.getByText(/32,000 tokens/)).toBeTruthy();
+    await screen.findByText('Connected');
+    expect(screen.getByText(/gemini-3\.1-flash-lite/)).toBeTruthy();
   });
 
   it('actually clears the example cache when the button says it will', async () => {
@@ -64,8 +66,8 @@ describe('SettingsScreen', () => {
     await waitFor(async () => {
       expect(await repository.getCachedExamples('hablar', 'es')).toBeNull();
     });
-    // The in-memory model handle is re-probed too, so installing weights and
-    // clearing the cache is enough to start using them without a restart.
+    // The service's per-session state is reset too, so a key added since launch
+    // is picked up without a restart.
     expect(reset).toHaveBeenCalled();
   });
 

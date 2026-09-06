@@ -1,9 +1,9 @@
 # FluentFlow
 
-A flashcard app for language learning: spaced repetition over vocabulary decks,
-with example sentences generated on the device rather than by an API, Anki
-`.apkg` import, decks built from a pasted word list, and last-write-wins sync
-across devices.
+A desktop flashcard app for language learning: spaced repetition over vocabulary
+decks, with example sentences generated on the device rather than by an API,
+Anki `.apkg` import, decks built from a pasted word list, and last-write-wins
+sync across devices.
 
 ```
 npm install
@@ -12,7 +12,7 @@ npm test               # 232 tests
 npm run verify         # end-to-end check of the success criteria
 npm run verify:web     # the same criteria, driven through Chrome
 npm run server         # sync API on :8787 (no Firebase project needed)
-npm run mobile         # Expo dev server
+npm run web            # the app in a browser tab (Metro dev server)
 ```
 
 A packaged Windows build is on the
@@ -21,9 +21,13 @@ executable that needs no installation, and an installer. Both are unsigned, so
 SmartScreen asks for **More info → Run anyway** the first time.
 
 macOS builds from the same command — `npm run desktop:mac` writes
-`FluentFlow-0.1.0-arm64.dmg`. It is ad-hoc signed rather than notarised, so a
-downloaded copy is quarantined and the first launch needs **right-click →
-Open**. Nothing has been uploaded to the releases page for macOS.
+`FluentFlow-0.1.0-arm64.dmg` (Apple Silicon; see the Intel note under Known
+gaps). The bundle carries a real icon, a hardened runtime and its entitlements,
+and is signed — but ad-hoc, not with a Developer ID, so a downloaded copy is
+still quarantined and the first launch needs **right-click → Open**. The signing
+and notarization pipeline is wired and one environment-variable set away from
+producing a notarised build (see the macOS notes under Building the desktop
+app). Nothing has been uploaded to the releases page for macOS yet.
 
 Nothing above needs a Firebase project or the model weights. The server starts
 in local mode with an in-memory store, and examples fall back to written
@@ -34,14 +38,14 @@ sentences until a model is installed. Both are covered below.
 ```
 packages/core      domain logic, no platform dependencies — 136 tests
 apps/server        Express + Firestore sync API and Anki import — 17 tests
-apps/mobile        Expo app (iOS, Android, web)
+apps/mobile        the app's UI: a React web build (Expo web export)
 apps/desktop       Electron shell for Windows and macOS, both packaged
-scripts            model preparation, end-to-end verification
+scripts            model download, end-to-end verification
 ```
 
-`packages/core` holds everything that is neither UI nor I/O: SM-2 scheduling,
+`packages/core` holds everything that is neither UI nor I/O: Anki's scheduler,
 the `.apkg` parser, the pasted-text parser, sync merge, prompt construction,
-output parsing and the BPE tokenizer. It is plain TypeScript with one dependency (`fflate`), which is why
+output parsing and the hosted-model client. It is plain TypeScript with one dependency (`fflate`), which is why
 it can be tested with `node --test` and reused unchanged by the app, the server
 and the scripts. When the app and the server disagree about how a card should be
 scheduled, there is one place to look.
@@ -53,7 +57,7 @@ misread:
 
 | Area | State |
 | --- | --- |
-| SM-2 scheduling | Complete and tested, including the four-button adaptation |
+| Scheduling | Anki's SM-2 (v3) scheduler: learning steps, lapses, leeches, fuzz |
 | `.apkg` import | Complete for schema 11 and 18; zstd exports rejected with a fix |
 | Text import | Complete: separator detection, live preview, per-line reporting |
 | Word lists | Complete: a list with no meanings is looked up, then reviewed |
@@ -62,39 +66,40 @@ misread:
 | Sync | Complete: LWW, offline queue, real-time listeners, tombstones |
 | Localisation | Complete: English, Spanish, Bosnian UI packs |
 | AI pipeline | Complete: prompting, parsing, validation, budget, fallback |
-| AI **weights** | **Not bundled**, and now optional. `npm run fetch-desktop-model` |
-| Desktop inference | Real: `onnxruntime-node` in the main process — meanings *and* examples, measured below |
-| iOS / Android / web | Expo, standard |
-| Windows / macOS | Electron around the web export, not native RN; both packaged |
+| AI **key** | **Yours**, and optional. Paste it into Settings; free tier covers a personal deck |
+| Generation | Real: Gemini 3.1 Flash-Lite, called from the main process — meanings *and* examples, measured below |
+| Windows / macOS | Electron around the web export; both packaged |
 | The views | 79 render tests; the web and desktop builds walked through by a browser |
 
-All three platform bundles build: `npx expo export --platform web` and
-`--platform ios --platform android` both complete, the latter through Hermes.
-The web build and both desktop builds are also driven end to end by a real
-browser — see Testing — so what is claimed below has been watched running, not
-only compiled.
+The web build and both desktop builds are driven end to end by a real browser —
+see Testing — so what is claimed below has been watched running, not only
+compiled.
 
-The AI integration is real code — a decoder over an ONNX graph with KV cache
-reuse, greedy or sampled depending on the job, and a Llama-style BPE tokenizer
-with byte fallback, both written here and the tokenizer unit-tested. What is not
-in the repository is the weights.
+The AI integration is real code — prompt construction per language, a response
+schema, a parser that degrades through four extraction strategies, and
+validation that throws away a sentence not containing the word it was meant to
+demonstrate. What is not in the repository is an API key.
 
-On the desktop they are one `npm run fetch-desktop-model` away and inference
-runs in Electron's main process, so card reveals are generated. On a phone
-`onnxruntime-react-native` is an optional dependency — a native module needing a
-development build — and until it and the ~620 MB of quantised weights are both
-present, `generateExamples` uses its fallback and the UI says so. See
-[apps/mobile/assets/models/README.md](apps/mobile/assets/models/README.md).
+It goes in Settings, is stored in the OS keychain, and is used from Electron's
+main process — the renderer is a plain web build that draws user-supplied deck
+content and must never hold a credential. Until a key is present
+`generateExamples` uses its fallback and the UI says so.
 
-Windows and macOS deserve the same directness. Expo targets iOS, Android and the
-web; desktop would otherwise mean the out-of-tree `react-native-windows` and
-`react-native-macos` forks and a second native project to maintain.
-[apps/desktop](apps/desktop) wraps the web export in Electron instead, which
-gives a real installable app from one codebase. The model survives the move by
-running in the main process rather than the renderer, which cannot load a native
-mobile module.
-The same shell now ships for both: a `.dmg` for macOS alongside the Windows
-installers, packaged and driven through the same 17-check walkthrough.
+**This used to run a 1.2 GB Qwen2.5-1.5B locally under `onnxruntime-node`, and
+that code is gone.** It worked, and the measurements are kept below because they
+are the argument: it answered about ten words in fourteen against the
+dictionary's twelve in twelve, took 5–7 s a card against about 1.9 s, wrote
+Bosnian that was not really Bosnian, pinned the macOS build to arm64 because
+onnxruntime-node ships no x64 binary, added 88 MB to the installer and 283 MB to
+`node_modules`, and created its inference session on the main thread — which is
+Chromium's browser process, so a cold start stalled window input for seconds.
+A hosted Flash-Lite costs about five cents per thousand cards and is better on
+every one of those axes except working on a plane.
+
+[apps/desktop](apps/desktop) wraps the web export in Electron, which gives a real
+installable app for Windows and macOS from one codebase. The same shell ships for
+both: a `.dmg` for macOS alongside the Windows installers, packaged and driven
+through the same 17-check walkthrough.
 
 ## Running it
 
@@ -102,7 +107,7 @@ installers, packaged and driven through the same 17-check walkthrough.
 
 ```
 npm run server        # local mode: in-memory store, "Bearer local:<name>" tokens
-npm run mobile        # then press w for web, i for iOS
+npm run web           # the app in a browser tab
 ```
 
 Local mode exists so the app is demonstrable before anyone provisions Firebase.
@@ -125,9 +130,10 @@ Three ways, none of which need an account or a network:
   language from the words.
 - **Paste just the words.** A list with no meanings on it at all is recognised
   as a list of words rather than mangled into one card. On the desktop app,
-  "Look up the meanings" fills them in — the bilingual dictionary first, the
-  model only for what the dictionary does not have — into an editable review
-  list that says where each meaning came from. See
+  "Look up the meanings" fills them in from the bilingual dictionary, free and
+  offline, into an editable review list that says where each meaning came from;
+  anything it misses can be typed in, or sent to the model by a second button
+  that names it and the number of words. See
   [Looking up a word list](#looking-up-a-word-list).
 - **Import from Anki.** A `.apkg` exported from Anki Desktop; see the collation
   note under Design notes for why that is harder than it sounds.
@@ -151,7 +157,7 @@ npm run desktop       # builds the web export, then packages for this platform
 ```
 
 `apps/desktop` is deliberately outside the npm workspaces: Electron is a large
-download and nobody working on the mobile app should pay for it on every
+download and nobody working on the core or the server should pay for it on every
 `npm install`.
 
 That packages installers, which is slow and not how you would try a change out.
@@ -166,13 +172,26 @@ things fill them in, in this order:
 
 ```
 npm run fetch-dictionaries      # 45 MB: Spanish and Bosnian
-npm run fetch-desktop-model     # 1.2 GB, optional: the long tail
 npm run desktop:pack            # a build that can use them
 ```
 
+**The lookup is two presses, and only the second one costs anything.** "Look up
+the meanings" asks the dictionary alone — free, offline, instant, and enough for
+most word lists outright. Only if it leaves something over does a second button
+appear, naming the model and the exact number of words it would send. Nothing is
+billed as a side effect of asking for meanings, and every box in the review list
+can simply be typed into instead, which is the way through for someone with
+neither a dictionary nor a key.
+
+That shape came out of a real misreading: a single button whose caption
+mentioned Gemini read as "this screen makes me use Gemini", when in fact the
+dictionary had answered every word and nothing had been sent anywhere. The fix
+was not better wording for one button but splitting it in two, so the free part
+and the paid part are separate things a person chooses between.
+
 **The dictionary answers almost everything.** It is built from Wiktionary by way
-of kaikki.org, distilled into SQLite — which every platform here already reads —
-and shipped as two files: 40 MB for Spanish, 5 MB for Bosnian. Lookup is about a
+of kaikki.org, distilled into SQLite — which the app already reads — and shipped
+as two files: 40 MB for Spanish, 5 MB for Bosnian. Lookup is about a
 millisecond.
 
 Measured on the same fourteen Spanish words the model was measured on:
@@ -180,8 +199,13 @@ Measured on the same fourteen Spanish words the model was measured on:
 | | Size | Right | Per word |
 | --- | --- | --- | --- |
 | Dictionary | 40 MB | 12 of 12 | 0.2 ms |
-| Qwen2.5-1.5B q4f16 | 1.2 GB | ~10 of 14 | 1.4 s |
-| Qwen2.5-0.5B int8 | 488 MB | ~0 of 14 | 0.25 s |
+| Qwen2.5-1.5B q4f16, on-device | 1.2 GB | ~10 of 14 | 1.4 s |
+| Qwen2.5-0.5B int8, on-device | 488 MB | ~0 of 14 | 0.25 s |
+
+The two local rows are why the on-device model was removed. They are kept
+because they are the evidence, not nostalgia: a dictionary that answers
+everything correctly in a fifth of a millisecond makes a gigabyte of weights a
+strange thing to ship for the sake of the four words it gets wrong.
 
 Two of that twelve are the interesting ones. `ponovili` is Bosnian and
 `almadura` is a typo, both sitting in a Spanish list, and the dictionary says it
@@ -208,86 +232,127 @@ That ordering has a sharp edge worth stating — the model only ever sees what t
 dictionary could not answer, which is the rare, the inflected and the misspelt,
 and that is exactly where it is least reliable. So every row in the review list
 says where its meaning came from. Dictionary rows can be skimmed; `model — check
-this` is where to actually look. A blank is never imported.
+this` is where to actually look. A blank is never imported. Being hosted changes
+none of that: a wrong translation from a large model is still a wrong
+translation, and it is still marked for review.
 
-If no model is installed, the dictionary alone is the normal case rather than a
-degraded one, and the 1.2 GB stays undownloaded.
-
-Both run in the Electron **main** process
+The dictionary is read, and the model called, in the Electron **main** process
 ([ai.js](apps/desktop/ai.js), [dictionary.js](apps/desktop/dictionary.js)): the
 renderer has a content security policy because it draws user-supplied deck
-content, `onnxruntime-node` is a native module, and a minute of decoding on the
-UI thread would freeze the window. The renderer gets four functions over
-`contextBridge` and no filesystem. The policy — dictionary first, model for the
-rest, sources kept apart — is
-[packages/core/src/ai/resolve.ts](packages/core/src/ai/resolve.ts), with the
-lookup injected so it can be tested without either file present. The decode loop
-is [decode.ts](packages/core/src/ai/decode.ts), shared with the phone.
+content, and it must never hold the API key. The renderer gets a handful of
+functions over `contextBridge`, no filesystem, and no way to read the key back.
+The policy — dictionary first, model for the rest, sources kept apart — is
+[packages/core/src/ai/resolve.ts](packages/core/src/ai/resolve.ts), with both
+the lookup and the inference injected so it can be tested with neither a
+dictionary file nor a network anywhere near it.
+
+A word list that the dictionary covers completely makes no network request at
+all: `resolve` peeks first and only builds a client if something is left over.
+Its `useModel` flag is the stronger version of the same promise — the import
+screen's first pass passes `false`, so that pass cannot reach the network
+whatever the word list turns out to contain.
 
 Wiktionary is CC BY-SA. The attribution is written into a `meta` table in each
 dictionary file so it travels with the data.
 
 ## Writing example sentences
 
-Revealing a card asks the model for two sentences using the word. Same model,
-same process, same decode loop as the lookup above — but almost every setting
+Revealing a card asks the model for two sentences using the word. Same model and
+same process as the long tail of the lookup above — but almost every setting
 differs, because the two jobs are not the same job.
 
 ```
-npm run fetch-desktop-model     # the same 1.2 GB, if it is not already there
-npm run desktop:pack
+GEMINI_API_KEY=... npm run check-cloud-model   # verify a key before trusting it
 ```
 
-Measured on an M-series Mac with Qwen2.5-1.5B q4f16:
+Get a key free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey),
+check it, then paste it into Settings → Cloud examples. The check script runs one
+real request through the actual pipeline and prints the sentences, the latency
+and the cost computed from the API's own token counts.
+
+Measured on `gemini-3.1-flash-lite`, six words across both languages:
 
 | | Cost |
 | --- | --- |
-| Session creation, once per launch | 3.3 s |
-| Two sentences, per card | 5–7 s |
-| The same card again | 0 ms — cached by word in SQLite |
+| Two sentences, per card | 0.6–3.3 s, 1.9 s average |
+| Tokens | ~84 in, ~22 out |
+| Money | $0.000054 a card — **$0.05 per 1000 cards** |
+| The same card again | 0 ms, $0 — cached by word in SQLite |
 
 The generation is charged once per *word*, not per card or per review: the
 result is written to `example_cache` and onto the card, so it syncs to the
-user's other devices and a word appearing in two decks is generated once.
+user's other devices and a word appearing in two decks is generated once. A
+thousand-word deck costs five cents, once, ever — and the free tier covers a
+personal deck outright.
 
 **Here the model has no competition, so it is the source rather than the
 fallback.** That is the reverse of the lookup, and not an inconsistency: no
 dictionary contains a sentence. What keeps it honest is the same validation
 either way — core rejects a candidate that does not contain the word it was
 meant to demonstrate, tolerating inflection, so a sentence about a word the
-model has quietly changed never reaches a card.
+model has quietly changed never reaches a card. Six words out of six came back
+usable when measured; the seventh, had there been one, would have been thrown
+away rather than shown.
 
-**Asked greedily for two sentences, the model writes one sentence twice.** This
-is the finding that shaped the feature. Greedy decoding takes the
-highest-scoring token at every step, so both slots of the JSON array decode from
-nearly the same state and come out identical — `zdravo` returned
-`["Zdravo, kako ste?", "Zdravo, kako ste?"]` on every run, and asking for three
-produced three copies. Deduplication then leaves one example where two were
-asked for. Sampling is the fix, and it is also the only thing that makes the
-UI's Regenerate button able to return anything new.
+**Why this model.** `gemini-2.5-flash-lite` is cheaper on paper ($0.10/$0.40 per
+million tokens against $0.25/$1.50) and was the first choice — but Google has
+closed it to new keys, and it fails in the most annoying possible way: it appears
+in a model listing and then refuses the request. `gemini-3.5-flash-lite` is both
+newer and dearer ($0.30/$2.50) and measured no better at this. So the default is
+a model that was measured, not the cheapest row in a pricing table, and the field
+in Settings is editable because model names age faster than releases do.
 
-**The temperature was measured, not chosen.** 0.4, 0.55, 0.7 and 0.8 over the
-same five words: too low and the sampler collapses back toward greedy and
-repeats itself; 0.8 invented `amamorando`, which is not a Spanish word. 0.7 with
-top-k 40 gave two distinct sentences for all five and the most plausible
-Spanish. It lives in one constant, `EXAMPLE_SAMPLING` in
-[decode.ts](packages/core/src/ai/decode.ts), because the phone and the desktop
-run the same loop and two copies of a tuning number drift.
+**Asking for no thinking is worth doing, and cannot be done by model name.**
+Thinking tokens bill as output at the dearer rate, and "write two short
+sentences" needs none. But `gemini-3.1-flash-lite` accepts `thinkingBudget: 0`,
+`gemini-3.5-flash-lite` rejects the entire request with a flat "invalid
+argument", and the Pro models have a floor above zero. Rather than keep a list
+that goes stale every release,
+[remote.ts](packages/core/src/ai/remote.ts) tries it once and turns it off for
+good on a 400. The cost of being wrong is one retried request per app run.
 
-Translation stays greedy at temperature 0. There is one right answer, and
-looking a word up twice should not give two meanings.
+**The response schema replaced a pile of prompt engineering.** Asked for a JSON
+array with `responseMimeType: application/json` and an array-of-strings schema,
+the answer arrives parseable every time and ends at the closing bracket. The
+parser's four fallback strategies — bracket scanning, quoted spans, bare lines —
+are still there and still tested, because they cost nothing and the local model
+needed all of them. Stop sequences are *not* sent alongside a schema: they can
+only truncate valid JSON into invalid JSON.
 
-**Spanish is good; Bosnian is noticeably weaker.** `La abeja construye su nido
-en la colina del jardín.` against `Naravno je da je knjiga prazanje za glasne
-ljudi.`, which is not a sentence. The model is the limit, not the pipeline —
-Bosnian is thin in a 1.5B model's training data for the same reason it was thin
-in the dictionaries. Worth knowing before trusting a Bosnian card.
+**One attempt, not two.** The local path retried on a parse failure because a
+1.5B returned usable JSON about two-thirds of the time and the retry was free.
+A hosted retry is a second billed request for something that arrived correctly
+the first time, so `retryOnParseFailure` is off. Core still keeps the best
+partial answer, so a short result is not thrown away.
 
-The budget is 30 s here rather than the phone's 2 s, and the difference is
-structural rather than generous: inference is in the main process, so the window
-stays interactive and the rating buttons work while it thinks. The session is
-loaded *before* the budget starts, so the first card of a session is not charged
-3.3 s of setup out of its own deadline.
+**Spanish is good, and Bosnian is now good too.** This is the clearest win from
+the change. The local 1.5B wrote `Naravno je da je knjiga prazanje za glasne
+ljudi.`, which is not a sentence; Flash-Lite writes `Ova knjiga je veoma
+zanimljiva za čitanje.` Bosnian was thin in a 1.5B's training data for the same
+reason it was thin in the dictionaries, and a larger model simply does not have
+that problem.
+
+The budget is 10 s, down from the 30 s a CPU decode loop needed. Against a
+measured 0.6–3.3 s, anything past ten is not a slow answer but a network that is
+not going to produce one, and a carrier sentence is waiting behind it.
+
+**The key is the user's, and it never enters the bundle.** The app is packaged
+with `asar: false`, so a key compiled in would be a key published on disk to
+everyone who installs it. What is stored instead is what the user pastes,
+encrypted with `safeStorage` — macOS Keychain — in
+`Application Support/FluentFlow/cloud.json` at mode 0600. The preload bridge has
+a setter and no getter: the key is read and used in the main process, and the
+renderer, which draws user-supplied deck content, receives finished sentences and
+never the credential. `npm run verify:desktop` asserts that from inside the page.
+
+**Generation is still prefetched, and that is now almost free.** A study session
+knows its whole queue, so the three cards ahead of the one on screen are
+generated before they are revealed — measured at 6/6 reveals already finished
+when the local model was doing the work, and a hosted call is five times faster
+than that. See `PREFETCH_DEPTH` in
+[service.ts](apps/mobile/src/ai/service.ts). Nothing is wasted: results go to
+`example_cache`, so a prefetch the session never reaches is a reveal paid for
+early rather than a request thrown away.
 
 ## Design notes
 
@@ -308,6 +373,32 @@ bumps the schema cookie, and reopens.
 the details; the import still degrades to positional field mapping rather than
 failing if the repair does not take.
 
+**The scheduler is Anki's, not the SM-2 paper's.** Cards here move between
+decks and Anki through `.apkg`, and a card that schedules differently on the two
+sides is a card the import quietly damaged. So
+[packages/core/src/scheduler.ts](packages/core/src/scheduler.ts) is a port of
+Anki's v3 scheduler rather than of Wozniak's 1990 algorithm, which it only
+resembles: a card is in one of four phases — new, learning, review, relearning —
+new cards walk the 1m/10m learning steps before earning a day-level interval,
+ease moves by fixed deltas (again -0.20, hard -0.15, good 0, easy +0.15) rather
+than by SM-2's quadratic in the grade, `good` is credited half the days a card
+was overdue and `easy` all of them, `hard` is a flat 1.2 that ignores ease, a
+lapse takes the interval to the lapse multiplier (0% by default) and walks the
+10m relearning step, eight lapses make a leech, and every day-level interval is
+fuzzed so a batch reviewed together does not stay together. Anki's own defaults
+are the defaults, and every one of them is a field on `SchedulerConfig` so
+per-deck options can be added without touching the algorithm.
+
+Two things Anki does that this does not. Anki rolls the day over at 4am and
+schedules review cards to a day number; `nextReview` here is an instant and
+"days late" is elapsed 24-hour periods, which differs only for someone
+answering within hours of a rollover. And Anki's per-deck new/review daily
+limits are not implemented — that is queue building rather than scheduling, and
+the study screen builds the queue. What the study screen does implement is the
+other half of learning steps: a card answered onto a step ten minutes out comes
+back at the end of the same session, because steps that never come back are
+just a slower way of burying a card.
+
 **A pasted list has no schema, so the separator is scored, not sniffed.** Word
 lists arrive as tabs from a spreadsheet, commas from a CSV export,
 `word - meaning` from a notes app, pipes from a Markdown table, or two lines per
@@ -322,18 +413,21 @@ shown with its line number rather than guessed at, and the count and the first
 few cards appear before anything is written. The conviction is the AI parser's:
 a wrong card is worse than a missing one.
 
-**Two layouts, because the phone's does not survive being stretched.** The same
-bundle runs on a phone, in a browser tab and in an 1100pt desktop window. Scaled
-up unchanged, a deck row becomes a title at the far left of the window and a
-badge at the far right with 800pt of nothing between them, and a flashcard
-becomes one word adrift in an empty rectangle — the shape of a layout being
-shown at a size it was not designed for. So above 900pt the deck list moves into
-a sidebar, where a desktop app keeps its navigation, and the content pane is set
-to a measure (680pt, roughly 75 characters) rather than to the window. The
-sidebar follows Apple's guidance for the control: 248pt wide, inside the
-225–275pt they give as a minimum, and the actions that operate on the list
-gathered into a bottom bar rather than scattered above the content. Below 900pt
-nothing changes — the phone keeps the navigation stack it had.
+**One layout, and a toolbar that does not move.** The same bundle runs in a
+narrow window, in a browser tab and in an 1100pt desktop window, as a single
+column: a title strip for the window buttons, the screen you are looking at, and
+a toolbar along the bottom of the window. The toolbar holds what belongs to the
+app rather than to a screen — New deck, Paste a word list, Import from Anki,
+Settings, and sync status at the trailing edge, which is where a Mac app puts
+status — so those four stay in one place instead of appearing and disappearing
+as screens change. Decks are navigated to rather than listed alongside the
+content, which is what keeps the layout the same at every width. What the 900pt
+breakpoint still changes is only fit: the content pane is set to a measure
+(680pt, roughly 75 characters) rather than to the window, padding opens up, and
+controls tighten to desktop proportions. That column is centred in the window,
+with the stack's title centred over it — it used to hug the leading edge, which
+was right while a sidebar sat beside it and reads as content that fell over
+once the sidebar is gone.
 
 **Hiding the title bar means owning what it did.** `titleBarStyle: 'hidden'`
 gives the app the whole window, and hands it two jobs macOS was doing. Close,
@@ -360,19 +454,21 @@ confabulates most. A chain that hid its sources would therefore be *worse* than
 either source alone, because its worst answers would be indistinguishable from
 its best. The review list labels every row instead.
 
-**Two tokenizer families, and the newer one is not optional.** The BPE
-tokenizer was written for Llama 2: metaspace markers, `<0xNN>` byte fallback,
-one merge loop. Everything since — Llama 3, Qwen, Mistral's newer releases —
-uses byte-level BPE instead, where every byte maps to a printable character (a
-space is `Ġ`), there is no fallback because the vocabulary covers all 256 by
-construction, and a regex splits the text before any merging happens. Supporting
-Qwen meant supporting both, which is `byteLevel` in
-[tokenizer.ts](packages/core/src/ai/tokenizer.ts). Two details cost time. Chat
-markers have to be cut out *before* BPE — run `<|im_start|>` through the merge
-loop and it becomes a handful of ordinary tokens the model has never seen in
-that arrangement, so it answers, badly. And the split regex upstream uses an
-inline `(?i:…)` group, which Hermes does not support: written out literally it
-would have passed every test on Node and thrown on the phone.
+**The on-device model was built, measured, and then deleted.** A BPE tokenizer
+with byte-level and metaspace variants, a decode loop over an ONNX graph with KV
+cache reuse, greedy and sampled paths, per-family chat templates — all of it
+worked, and all of it is gone. What killed it was not that it was hard but that
+the measurements came in: against a 0.2 ms dictionary lookup and a 1.9 s hosted
+call costing five thousandths of a cent, a 1.2 GB download that answered ten
+words in fourteen, froze the window while its session loaded, and pinned macOS
+to arm64 had no axis left to win on. The lesson worth keeping is that the seam
+survived the swap — everything platform-specific was behind one `InferenceFn`,
+so replacing the entire backend touched the prompt layer and nothing else.
+
+**Keeping the dictionary local was the other half of that decision.** It is the
+common path, it is faster than a network round trip by four orders of magnitude,
+it costs nothing, and it is the only source in the system that can say "I don't
+know". Moving *everything* to the cloud would have been simpler and worse.
 
 **Conflicts must converge without coordination.** Last-write-wins is
 underspecified when two devices write in the same millisecond, and picking
@@ -401,15 +497,6 @@ tolerates inflection, since Spanish and Bosnian both decline heavily and
 right without a model is not something a template can do honestly in either
 language, so the fallback produces sentences that are grammatical *about* the
 word (`«hablar» significa "to speak".`). The UI labels them as offline examples.
-
-**An optional native module needs resolver help, not a try/catch.** ONNX
-Runtime has to be optional — it is a native module, so it needs a development
-build and cannot load in Expo Go. Neither obvious approach works: `await
-import(name)` is a Hermes compile error ("Invalid expression encountered"), and
-a static `require` in a try/catch still breaks the *build*, because Metro
-resolves requires before any code runs. `metro.config.js` therefore maps the
-module to a stub when it is absent, and the app writes a plain require and
-checks what came back.
 
 **Package versions follow the SDK, not npm's `latest`.** Every `expo-*` and
 community package declares `react-native: *`, so npm hoists whatever is newest
@@ -449,19 +536,17 @@ of a pasted word list. `verify:desktop` does the same against the packaged
 executable, which is how the `app://` scheme, the content security policy and
 SQLite-outside-a-browser get exercised; `FLUENTFLOW_APP=/Applications/FluentFlow.app`
 points it at an installed copy instead of the one in `dist/`, and
-`FLUENTFLOW_DICTIONARY_DIR=<dir>` (and optionally
-`FLUENTFLOW_MODEL_DIR`) adds six checks that drive real lookups through the
-review flow, asserting that the dictionary answered and the model was not
-needed — without them the same run checks that the app says it has nothing
-installed rather than offering to look anything up. Both leave
-screenshots behind as evidence.
+`FLUENTFLOW_DICTIONARY_DIR=<dir>` adds six checks that drive real lookups
+through the review flow, asserting that the dictionary answered and the model was
+not needed — without it the same run checks that the app says it has nothing
+installed rather than offering to look anything up. A `GEMINI_API_KEY` in the
+repo's gitignored `.env` is picked up automatically and makes the reveal check
+drive a real, billed request against the hosted model instead of asserting the
+offline frames. Both leave screenshots behind as evidence.
 
-The 79 view tests run under jest-expo in two projects, iOS and web, rather than
-one with a mocked `Platform`. Keyboard shortcuts only bind on web and the rating
-buttons only show their number prefix there, so running the same components
-under both presets tests the real branch instead of the mock. The repository
-they run against is real SQLite through `node:sqlite`, so pressing "Good" in a
-test runs the same SM-2 code a phone runs.
+The 79 view tests run under jest-expo, and the repository they run against is
+real SQLite through `node:sqlite`, so pressing "Good" in a test runs the same
+scheduling code the app runs.
 
 These have earned their place. `verify:web` found that refreshing the page
 mid-session left the app on "FluentFlow could not start": on the web,
@@ -504,15 +589,14 @@ see
 
 ## Known gaps
 
-- **iOS and Android have never been run on a device.** Both bundles export, and
-  the views are covered by 71 render tests plus a browser walkthrough of the
-  same components under react-native-web, but nothing here has launched them on
-  a phone or a simulator. The native paths that differ from the web — the real
-  SQLite backend, the document picker, ONNX Runtime — are unexercised.
-- The model weights are not bundled, as described above, so the desktop and web
-  builds fall back to written sentences and the mobile build does too until
-  `npm run prepare-model` has run. The decode loop has never seen a real ONNX
-  graph.
+- Example generation needs an API key, as described above, so until one is
+  pasted into Settings every reveal falls back to a written sentence. The web
+  build (with no Electron shell) always does, because there is nowhere safe to
+  keep a key in a page that draws deck content.
+- Generation now needs a network. Reviewing offline still works — sentences live
+  on the card and in `example_cache` — but a deck imported on a plane gets
+  carrier frames until it is online. This is the one thing the on-device model
+  did better, and it was traded knowingly.
 - `firebase-admin` pulls transitive dependencies with moderate `npm audit`
   advisories (via `@google-cloud/storage` → `teeny-request` → `uuid`). Nothing
   in this app uses Cloud Storage; resolving them needs an upstream release.
@@ -524,18 +608,29 @@ see
 - Import merges reverse and cloze siblings into one card per note and reports
   the count. Studying both directions of a card is not supported yet.
 - Neither desktop build is signed by a real identity. Windows also skips the
-  executable resource edit — see below. The macOS build is ad-hoc signed, which
-  is not a Developer ID and is not notarisation: a downloaded copy is
-  quarantined and needs right-click → Open the first time.
-- The macOS build has only been made and run on Apple Silicon. No x64 or
-  universal build has been produced, so an Intel Mac is untested.
+  executable resource edit — see below. The macOS build runs the hardened
+  runtime with its entitlements and is signed, but ad-hoc: not a Developer ID
+  and not notarised, so a downloaded copy is quarantined and needs right-click →
+  Open the first time. `APPLE_IDENTITY` (plus a certificate and the `APPLE_*`
+  notarization vars) switches on real signing without any code change — see the
+  macOS notes below.
+- macOS builds arm64 only. This *was* a hard limit — `onnxruntime-node` dropped
+  its macOS-x64 binary after 1.22, so an Intel build would have had no inference
+  backend — and with that dependency gone it is now just a build setting that
+  nobody has flipped. Adding `"x64"` to the `mac` targets in
+  [apps/desktop/package.json](apps/desktop/package.json) should be the whole
+  change; it is listed here because it is untested, not because it is blocked.
+- Auto-update is configured (`electron-updater`, GitHub Releases feed). On
+  Windows it works once a release is published. On macOS Squirrel.Mac requires a
+  Developer ID signature, so it stays inert until real signing is switched on —
+  the wiring is already there.
 - The Windows walkthrough has not been re-run since `verify-desktop.mjs` changed
   how it finds a control (see Testing). The change is platform-independent DOM
   logic, but "should be fine" is not the same as having watched it.
-- The wide layout has only been seen at 1100pt and 700pt, which is what
+- The layout has only been seen at 1100pt and 700pt, which is what
   `verify:desktop` drives. Nothing has looked at it on a 27-inch display, where
   a 680pt column sits in a great deal of window.
-- The sidebar recounts every deck's due total whenever the deck list changes.
+- The deck list recounts every deck's due total whenever the deck list changes.
   That is one `count(*)` per deck and invisible at the scale anyone has tested;
   it is the wrong shape for someone with two hundred decks.
 - Text import drops a third column rather than mapping it. Anki's CSV export
@@ -543,10 +638,9 @@ see
 - **The model, when it is reached at all, is wrong about one word in three** and
   wrong most often on uncommon words. It is now the fallback rather than the
   path, and its rows are labelled, but nothing makes its answers trustworthy.
-- Looking words up is desktop-only. The phone has ONNX Runtime but has never
-  run it (see above) and no dictionary is shipped to it; the browser build has
-  neither. Putting the dictionary on the phone is the obvious next step — it is
-  a 5–40 MB SQLite file and expo-sqlite already reads those.
+- Looking words up needs the Electron shell: the dictionary and the model both
+  run in the main process, so a plain browser tab has neither and offers no
+  lookup.
 - The Spanish dictionary is 40 MB, which is mostly its 665,709 inflected forms.
   Dropping the rarest of them would trade coverage for size; no one has measured
   where that trade stops being worth it.
@@ -563,24 +657,29 @@ see
 ```
 npm run desktop           # installs Electron, builds, packages for this platform
 npm run desktop:win       # ...or for Windows explicitly: installer + portable exe
-npm run desktop:mac       # ...or for macOS: a .dmg
+npm run desktop:mac       # ...or for macOS: a .dmg (plus a .zip for auto-update)
 npm run verify:desktop    # launches the packaged app and drives it
 ```
 
 That writes installers — two on Windows, a `.dmg` on macOS — and takes minutes.
 It is the wrong loop for trying a change out.
 
-Neither the dictionaries nor the model are in there.
-`npm run fetch-dictionaries` and `npm run fetch-desktop-model` put them in the
-app's user data directory instead; see
+The app icon lives at `apps/desktop/build/icon-source.png` (a 1024² PNG);
+`npm --prefix apps/desktop run make-icon` regenerates `build/icon.icns` and
+`build/icon.png` from it, which are committed so the packaged build never
+depends on `iconutil`. The one committed now is a placeholder.
+
+The dictionaries are not in there. `npm run fetch-dictionaries` puts them in the
+app's user data directory instead, alongside the stored API key; see
 [Looking up a word list](#looking-up-a-word-list).
 
 ### Testing a new version without downloading one
 
-A packaged FluentFlow is 386 MB on disk: 290 MB of Electron runtime, 88 MB of
-ONNX Runtime binaries, and about 3 MB that actually changes between versions —
-the web export, `main.js`, `preload.js` and `ai.js`. So a new version is a file
-copy, not a download.
+A packaged FluentFlow is about 300 MB on disk: nearly all of it Electron
+runtime, and about 3 MB that actually changes between versions — the web export,
+`main.js`, `preload.js`, `ai.js` and `cloud.js`. So a new version is a file copy,
+not a download. (It was 386 MB until the 88 MB of ONNX Runtime binaries went with
+the on-device model.)
 
 ```
 npm run desktop:pack               # once: an unpacked build, no installer
@@ -609,18 +708,30 @@ save shows up in the window straight away. That is not the packaged code path,
 though — the `app://` scheme and the production CSP only exist in a real build —
 so confirm anything shell-shaped with `refresh` before believing it.
 
-### Two macOS notes
+### Three macOS notes
 
-**Ad-hoc signing is done deliberately, and is not Gatekeeper.** `identity: null`
-tells electron-builder not to hunt for a Developer ID it will not find, and what
-that leaves is not cleanly unsigned: the Electron binary keeps the linker's own
+**Ad-hoc signing is the default, and is not Gatekeeper.** `identity: null` tells
+electron-builder not to hunt for a Developer ID it will not find, and what that
+leaves is not cleanly unsigned: the Electron binary keeps the linker's own
 ad-hoc signature, which declares that the bundle has sealed resources when it
 has none. `codesign --verify` refuses it with "code has no resources but
 signature indicates they must be present". `apps/desktop/scripts/after-pack.cjs`
-therefore signs the finished bundle ad hoc, which makes it self-consistent and
-matches the state `desktop:refresh` restores. It buys nothing with Gatekeeper —
-ad-hoc is not a Developer ID and nothing is notarised, so a downloaded copy is
-still quarantined and still needs right-click → Open.
+therefore signs the finished bundle ad hoc — now with `--options runtime` and
+`build/entitlements.mac.plist`, so an ad-hoc build behaves the same as a
+Developer-ID one would (ONNX Runtime JITs, and needs `allow-jit` +
+`disable-library-validation` under the hardened runtime). It matches the state
+`desktop:refresh` restores. It still buys nothing with Gatekeeper — ad-hoc is
+not a Developer ID and nothing is notarised, so a downloaded copy is still
+quarantined and still needs right-click → Open.
+
+**Turning on real signing is configuration, not code.** Set `APPLE_IDENTITY` to
+the Developer ID name and supply the certificate (login keychain, or `CSC_LINK`
++ `CSC_KEY_PASSWORD`); `scripts/desktop-build.mjs` then overrides the null
+identity and enables `mac.notarize`, and `after-pack.cjs` steps aside. For
+notarization also set `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and
+`APPLE_TEAM_ID`. The `mac.hardenedRuntime` / `entitlements` keys are already in
+`package.json` waiting for that. Once a signed, notarised build is published to
+GitHub Releases, `electron-updater` starts working on macOS too.
 
 **A broken seal is not what stops an app from launching.** Writing into
 `Contents/Resources` invalidates the signature, and the obvious conclusion — that

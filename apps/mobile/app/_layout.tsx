@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { I18nProvider, useI18n } from '../src/i18n';
 import { AppProvider, useApp } from '../src/state/app';
 import { ThemeProvider, useTheme } from '../src/ui/theme';
+import { DesktopChromeProvider } from '../src/ui/DesktopChrome';
 import { installWindowDragRegions } from '../src/ui/shell';
 import { EmptyState, Label, Loading, Screen } from '../src/ui/components';
 
@@ -22,11 +23,13 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <I18nProvider>
-          <AppProvider>
-            <Gate />
-          </AppProvider>
-        </I18nProvider>
+        <DesktopChromeProvider>
+          <I18nProvider>
+            <AppProvider>
+              <Gate />
+            </AppProvider>
+          </I18nProvider>
+        </DesktopChromeProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

@@ -1,6 +1,8 @@
 import {
   TARGET_LANGUAGES,
+  normalizeCard,
   type Card,
+  type CardPhase,
   type Deck,
   type TargetLanguage,
 } from '@fluentflow/core';
@@ -54,7 +56,7 @@ function parseDeck(value: unknown, userId: string, path: string): Deck {
 
 function parseCard(value: unknown, userId: string, path: string): Card {
   const raw = asObject(value, path);
-  return {
+  return normalizeCard({
     id: id(raw.id, `${path}.id`),
     deckId: id(raw.deckId, `${path}.deckId`),
     userId,
@@ -65,12 +67,27 @@ function parseCard(value: unknown, userId: string, path: string): Card {
     interval: number(raw.interval, `${path}.interval`, 0, 36500),
     easeFactor: number(raw.easeFactor, `${path}.easeFactor`, 1.3, 10),
     repetitions: integer(raw.repetitions ?? 0, `${path}.repetitions`, 0),
+    // The scheduler fields are optional on the wire: a client that predates
+    // them still syncs, and the normalizeCard() wrapper reconstructs the phase
+    // it left out.
+    ...(raw.phase === undefined
+      ? {}
+      : {
+          phase: oneOf<CardPhase>(
+            raw.phase,
+            ['new', 'learning', 'review', 'relearning'],
+            `${path}.phase`,
+          ),
+        }),
+    lapses: integer(raw.lapses ?? 0, `${path}.lapses`, 0),
+    learningStep: integer(raw.learningStep ?? 0, `${path}.learningStep`, 0),
+    ...(raw.leech === true ? { leech: true } : {}),
     nextReview: isoDate(raw.nextReview, `${path}.nextReview`),
     status: oneOf(raw.status, ['new', 'learning', 'mastered'], `${path}.status`),
     lastModified: isoDate(raw.lastModified, `${path}.lastModified`),
     syncStatus: 'synced',
     ...(raw.deleted === true ? { deleted: true } : {}),
-  };
+  });
 }
 
 function parseArray<T>(input: unknown, field: string, parse: (v: unknown, path: string) => T): T[] {

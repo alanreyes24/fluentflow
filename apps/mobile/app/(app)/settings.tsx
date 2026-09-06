@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import { LANGUAGE_NAMES, SUPPORTED_LANGUAGES, type LanguageCode } from '@fluentflow/core';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
 import { modelStatus, type ModelStatus } from '../../src/ai/model';
-import { modelSizeBytes } from '../../src/ai/assets';
+import {
+  clearCloudSettings,
+  cloudBridgeAvailable,
+  saveCloudSettings,
+  type CloudModelStatus,
+} from '../../src/ai/desktop';
 import {
   Button,
+  Field,
   Label,
   Row,
   Screen,
@@ -19,27 +25,19 @@ import {
 import { useTheme, useThemeContext, type ThemePreference } from '../../src/ui/theme';
 
 /**
- * Settings: interface language, appearance, model status and the account.
+ * Settings: interface language, appearance, where examples come from, and the
+ * account.
  *
- * The model section exists because "why are my examples generic?" is the
- * question this app will be asked most, and the answer is nearly always one of
- * three specific things. Saying which one beats a spinner.
+ * The examples section exists because "why are my examples generic?" is the
+ * question this app will be asked most, and the answer is now exactly one
+ * fixable thing: no API key. Saying so beats a spinner.
  */
 export default function SettingsScreen() {
   const { t, language, setLanguage } = useI18n();
   const theme = useTheme();
   const { preference, setPreference } = useThemeContext();
-  const { user, sync, syncNow, signOut, cloudAvailable, examples, repository } = useApp();
+  const { user, sync, syncNow, signOut, cloudAvailable } = useApp();
   const content = useContentStyle();
-
-  const [model, setModel] = useState<ModelStatus | null>(null);
-  const [modelSize, setModelSize] = useState<number | null>(null);
-  const [clearing, setClearing] = useState(false);
-
-  useEffect(() => {
-    void modelStatus().then(setModel);
-    void modelSizeBytes().then(setModelSize);
-  }, []);
 
   const themeOptions: { value: ThemePreference; label: string }[] = [
     { value: 'system', label: t('themeSystem') },
@@ -78,57 +76,7 @@ export default function SettingsScreen() {
           </Row>
         </Section>
 
-        <Section title={t('aiSection')}>
-          {model === null ? (
-            <Label variant="body" tone="muted">
-              {t('loading')}
-            </Label>
-          ) : model.available ? (
-            <>
-              <Row gap={theme.spacing.sm}>
-                <View style={[styles.dot, { backgroundColor: theme.colors.statusMastered }]} />
-                <Label variant="body">{t('aiModelReady')}</Label>
-              </Row>
-              <Label variant="caption" tone="faint">
-                {modelDetail(model, modelSize)}
-              </Label>
-            </>
-          ) : (
-            <>
-              <Row gap={theme.spacing.sm}>
-                <View style={[styles.dot, { backgroundColor: theme.colors.statusLearning }]} />
-                <Label variant="body">{t('aiModelMissing')}</Label>
-              </Row>
-              <Label variant="caption" tone="muted">
-                {model.reason ?? t('aiModelMissingHint')}
-              </Label>
-            </>
-          )}
-
-          <Spacer size={theme.spacing.sm} />
-          <Button
-            label="Clear cached examples"
-            variant="ghost"
-            loading={clearing}
-            onPress={() => {
-              setClearing(true);
-              // Both halves are needed: the SQLite table holds generated
-              // sentences, and the service holds an in-memory handle to the
-              // model that should be re-probed in case one has been installed
-              // since launch. Examples already attached to a card are left
-              // alone — those are synced content, not a cache.
-              void (async () => {
-                try {
-                  await repository?.clearExampleCache();
-                  examples?.reset();
-                  setModel(await modelStatus());
-                } finally {
-                  setClearing(false);
-                }
-              })();
-            }}
-          />
-        </Section>
+        <ExamplesSection />
 
         <Section title={t('account')}>
           <Label variant="body">{user?.email ?? t('workOffline')}</Label>
@@ -171,6 +119,163 @@ export default function SettingsScreen() {
   );
 }
 
+/**
+ * Where example sentences come from, and how to fix it when they are generic.
+ *
+ * Always rendered, because the answer differs by where the app is running and
+ * every one of those answers is worth saying:
+ *
+ *  - In a browser tab there is no shell, so there is nowhere to keep an API key
+ *    and nothing to call it from. {@link modelStatus} says so.
+ *  - In the desktop app with no key, the key field is the fix.
+ *  - With a key, it says which model and what it costs.
+ *
+ * The key travels one way. It is written to the OS keychain by the main process
+ * and used there; nothing reads it back, so after saving, this screen shows
+ * "Connected" rather than the key. That is also why the field is emptied on
+ * save: what is in it is no longer the truth about what is stored.
+ */
+function ExamplesSection() {
+  const { t } = useI18n();
+  const theme = useTheme();
+  const { examples, repository } = useApp();
+
+  const [status, setStatus] = useState<ModelStatus | null>(null);
+  const [key, setKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void modelStatus().then(setStatus);
+  }, []);
+
+  const editable = cloudBridgeAvailable();
+  const connected = status?.available === true;
+
+  const run = async (work: () => Promise<CloudModelStatus>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await work();
+      setKey('');
+      // The service caches "this word has no model and never will" per session.
+      // Connecting one has to clear that, or the deck studied a minute ago goes
+      // on showing carrier sentences until the app is restarted.
+      examples?.reset();
+      setStatus(await modelStatus());
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section title={t('cloudSection')}>
+      {status === null ? (
+        <Label variant="body" tone="muted">
+          {t('loading')}
+        </Label>
+      ) : (
+        <>
+          <Row gap={theme.spacing.sm}>
+            <View
+              style={[
+                styles.dot,
+                {
+                  backgroundColor: connected
+                    ? theme.colors.statusMastered
+                    : theme.colors.statusLearning,
+                },
+              ]}
+            />
+            <Label variant="body">{connected ? t('cloudReady') : t('cloudMissing')}</Label>
+          </Row>
+          <Label variant="caption" tone="faint">
+            {connected ? `${status.name} · ${t('cloudHint')}` : (status.reason ?? t('cloudHint'))}
+          </Label>
+        </>
+      )}
+
+      {editable ? (
+        <>
+          <Spacer size={theme.spacing.sm} />
+          <Field
+            label={t('cloudKeyLabel')}
+            hint={t('cloudKeyHint')}
+            error={error}
+            value={key}
+            onChangeText={setKey}
+            placeholder={t('cloudKeyPlaceholder')}
+            // A credential, so: no dictation, no autocorrect, no shoulder surfing.
+            secureTextEntry
+            autoCapitalize="none"
+            autoCorrect={false}
+            spellCheck={false}
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              if (key.trim()) void run(() => saveCloudSettings({ apiKey: key.trim() }));
+            }}
+          />
+
+          <Row gap={theme.spacing.sm}>
+            <Button
+              label={t('cloudSave')}
+              onPress={() => void run(() => saveCloudSettings({ apiKey: key.trim() }))}
+              disabled={!key.trim()}
+              loading={busy}
+              style={styles.grow}
+            />
+            {connected ? (
+              <Button
+                label={t('cloudRemove')}
+                variant="ghost"
+                onPress={() => void run(clearCloudSettings)}
+                style={styles.grow}
+              />
+            ) : (
+              <Button
+                label={t('cloudGetKey')}
+                variant="secondary"
+                onPress={() => {
+                  // Opens in the user's browser: `setWindowOpenHandler` in
+                  // apps/desktop/main.js keeps external links out of the window.
+                  if (status?.keyUrl) void Linking.openURL(status.keyUrl);
+                }}
+                style={styles.grow}
+              />
+            )}
+          </Row>
+        </>
+      ) : null}
+
+      <Spacer size={theme.spacing.sm} />
+      <Button
+        label="Clear cached examples"
+        variant="ghost"
+        loading={clearing}
+        onPress={() => {
+          setClearing(true);
+          // Both halves are needed: the SQLite table holds generated sentences,
+          // and the service remembers per session which words it has already
+          // settled. Examples already attached to a card are left alone — those
+          // are synced content, not a cache.
+          void (async () => {
+            try {
+              await repository?.clearExampleCache();
+              examples?.reset();
+              setStatus(await modelStatus());
+            } finally {
+              setClearing(false);
+            }
+          })();
+        }}
+      />
+    </Section>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const theme = useTheme();
   return (
@@ -180,36 +285,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <Surface style={styles.card}>{children}</Surface>
     </View>
   );
-}
-
-function formatBytes(bytes: number): string {
-  const megabytes = bytes / (1024 * 1024);
-  return megabytes >= 1024
-    ? `${(megabytes / 1024).toFixed(1)} GB`
-    : `${Math.round(megabytes)} MB`;
-}
-
-/**
- * The line under "Model ready".
- *
- * The two hosts know different things about the model they loaded, and neither
- * knows the other's. In-process the tokenizer is right here, so the vocabulary
- * size and the bundled weight size are both readable; through the desktop
- * bridge nothing crosses but a name and a directory, because the session lives
- * in another process. Rather than print a blank where the other's number would
- * go, each says what it actually has.
- */
-function modelDetail(model: ModelStatus, bundledBytes: number | null): string {
-  if (model.host === 'desktop') {
-    return [model.name, model.modelPath].filter(Boolean).join(' · ');
-  }
-
-  return [
-    model.vocabSize ? `${model.vocabSize.toLocaleString()} tokens` : null,
-    bundledBytes ? formatBytes(bundledBytes) : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
 }
 
 const styles = StyleSheet.create({

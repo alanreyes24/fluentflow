@@ -1,9 +1,7 @@
 import Constants from 'expo-constants';
-import type { ModelFamily } from '@fluentflow/core';
 
 /**
- * Runtime configuration, read from `app.json`'s `extra` block (overridable per
- * build with EAS environment variables).
+ * Runtime configuration, read from `app.json`'s `extra` block.
  *
  * Firebase config is deliberately optional. The app has to be useful before
  * anyone has provisioned a project — sign-in is skippable, decks live in
@@ -20,22 +18,14 @@ export interface FirebaseConfig {
   appId: string;
 }
 
-export interface AiConfig {
-  modelFamily: ModelFamily;
-  budgetMs: number;
-  maxTokens: number;
-}
-
 export interface AppConfig {
   apiBaseUrl: string | null;
   firebase: FirebaseConfig | null;
-  ai: AiConfig;
 }
 
 interface RawExtra {
   apiBaseUrl?: string;
   firebase?: Partial<FirebaseConfig>;
-  ai?: Partial<AiConfig>;
 }
 
 function readExtra(): RawExtra {
@@ -65,11 +55,6 @@ function buildConfig(): AppConfig {
           appId: firebase!.appId!,
         }
       : null,
-    ai: {
-      modelFamily: (extra.ai?.modelFamily as ModelFamily) ?? 'tinyllama',
-      budgetMs: extra.ai?.budgetMs ?? 2000,
-      maxTokens: extra.ai?.maxTokens ?? 96,
-    },
   };
 }
 

@@ -1,11 +1,11 @@
 /**
- * Jest for the React Native views.
+ * Jest for the app's views.
  *
- * Two projects rather than one, because `Platform.OS` is not a detail these
- * screens can be tested around: keyboard shortcuts only bind on web, and the
- * rating buttons render their number prefix only on web. Mocking `Platform`
- * would test the mock. Running the same components under both of jest-expo's
- * platform presets tests the real branch.
+ * The app ships as a web build, but the components still carry `Platform.OS`
+ * guards — keyboard shortcuts and the rating buttons' number prefix are behind
+ * `=== 'web'`, and a few fall-through branches are not. Two projects, one under
+ * each of jest-expo's platform presets, exercise both sides of those guards
+ * rather than mocking `Platform` and testing the mock.
  *
  * `transformIgnorePatterns` has to reach the workspace root: @fluentflow/core
  * and every expo package ship untranspiled ESM, and they resolve above this

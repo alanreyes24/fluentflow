@@ -1,5 +1,5 @@
 import type { TargetLanguage } from '../types.js';
-import { buildPrompt, STOP_SEQUENCES, type ModelFamily } from './prompt.js';
+import { buildPrompt, STOP_SEQUENCES } from './prompt.js';
 import { parseExamples } from './parse.js';
 import { fallbackExamples } from './fallback.js';
 
@@ -20,11 +20,12 @@ export interface InferenceRequest {
   stop: string[];
   maxTokens: number;
   signal?: AbortSignal;
-  /** Prepend the model's BOS token. Chat templates supply their own opener. */
-  addBos?: boolean;
 }
 
-/** Runs the bundled model. Implemented per platform (ONNX Runtime, llama.cpp). */
+/**
+ * Turns a prompt into text. The one seam every backend plugs into — today the
+ * hosted model in ai/remote.ts, and a stub in the tests.
+ */
 export type InferenceFn = (request: InferenceRequest) => Promise<string>;
 
 export interface GenerateExamplesInput {
@@ -38,7 +39,6 @@ export interface GenerateExamplesInput {
 
 export interface GenerateExamplesDeps {
   infer?: InferenceFn | null;
-  family?: ModelFamily;
   /** Hard deadline for inference, in milliseconds. */
   budgetMs?: number;
   maxTokens?: number;
@@ -48,6 +48,16 @@ export interface GenerateExamplesDeps {
    * loop below for why an identical one would be pointless.
    */
   retryOnParseFailure?: boolean;
+  /**
+   * Cancels the run from outside, as distinct from the budget's own deadline.
+   *
+   * The two are different to the caller even though they look identical to the
+   * decode loop. A spent budget means "this is taking too long, ship what you
+   * have"; a cancellation means "nobody wants this any more", and its partial
+   * output should be thrown away rather than cached. Callers tell them apart by
+   * checking the signal, which is theirs.
+   */
+  signal?: AbortSignal;
   now?: () => number;
 }
 
@@ -89,10 +99,14 @@ export async function generateExamples(
     return { examples: fallback(), source: 'fallback', durationMs: 0, attempts: 0 };
   }
 
-  const family = deps.family ?? 'tinyllama';
   const budgetMs = deps.budgetMs ?? DEFAULT_BUDGET_MS;
   const maxAttempts = deps.retryOnParseFailure ? 2 : 1;
   const controller = new AbortController();
+
+  // The caller's signal and the deadline below both end at the same place: the
+  // one controller the inference actually sees.
+  if (deps.signal?.aborted) controller.abort();
+  else deps.signal?.addEventListener('abort', () => controller.abort(), { once: true });
 
   let attempts = 0;
   let lastError = 'no usable output';
@@ -103,8 +117,9 @@ export async function generateExamples(
   // usually wins the race against the deadline's. The flag keeps the reported
   // reason accurate ("budget", not whatever the backend calls cancellation).
   let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
       reject(new Error(budgetMessage(budgetMs)));
@@ -117,22 +132,24 @@ export async function generateExamples(
       attempts++;
 
       // Asking for one more sentence than is needed, rather than repeating the
-      // question. Core cannot see how the platform decodes, and a greedy
-      // backend returns the same tokens for the same prompt — so a retry that
-      // asks the identical question is a second inference for a guaranteed
-      // identical answer. A wider ask diverges either way, and it also covers
-      // the case the retry usually exists for: a model that wrote two sentences
-      // but only one usable one, or wrote the same sentence twice.
+      // question. Core cannot see how the backend decodes, and a deterministic
+      // one returns the same tokens for the same prompt — so a retry that asks
+      // the identical question is a second request for a guaranteed identical
+      // answer, billed twice. A wider ask diverges either way, and it also
+      // covers the case the retry usually exists for: a model that wrote two
+      // sentences but only one usable one, or wrote the same sentence twice.
       const ask = attempts === 1 ? count : count + 1;
-      const prompt = buildPrompt(
-        { word: input.word, meaning: input.meaning, language: input.language, count: ask },
-        family,
-      );
+      const prompt = buildPrompt({
+        word: input.word,
+        meaning: input.meaning,
+        language: input.language,
+        count: ask,
+      });
 
       const raw = await Promise.race([
         deps.infer({
           prompt,
-          stop: STOP_SEQUENCES[family],
+          stop: STOP_SEQUENCES,
           maxTokens: deps.maxTokens ?? DEFAULT_MAX_TOKENS,
           signal: controller.signal,
         }),
@@ -169,6 +186,9 @@ export async function generateExamples(
         ? error.message
         : String(error);
   } finally {
+    // Speculative generation runs this many times per session rather than once
+    // per reveal, so a timer left armed for every call is worth clearing.
+    clearTimeout(timer);
     controller.abort();
   }
 

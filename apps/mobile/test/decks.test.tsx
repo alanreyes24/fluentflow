@@ -1,15 +1,17 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import type { Deck } from '@fluentflow/core';
 import DecksScreen from '../app/(app)/decks';
+import { BottomBar } from '../src/ui/BottomBar';
 import { SyncIndicator } from '../src/ui/SyncIndicator';
 import { Repository } from '../src/db/repository';
 import { createTestRepository } from './fakes/database';
 import { mockRouter, renderScreen, TEST_USER } from './setup';
 
 /**
- * The deck list, and the offline indicator that sits above it.
+ * The deck list, the toolbar under it, and the offline indicator in that
+ * toolbar.
  *
- * The progress counts come from real cards through real SM-2, so a deck shows
+ * The progress counts come from real cards through the real scheduler, so a deck shows
  * "new / learning / mastered" because those cards genuinely are in those
  * states, not because the numbers were handed to the component.
  */
@@ -70,9 +72,7 @@ describe('DecksScreen', () => {
       user: TEST_USER,
     });
 
-    // Two "New deck" buttons while the list is empty: the toolbar action and
-    // the empty state's own call to action. Either opens the form.
-    await fireEvent.press(screen.getAllByRole('button', { name: 'New deck' })[0]!);
+    await fireEvent.press(screen.getByRole('button', { name: 'New deck' }));
     await fireEvent.changeText(await screen.findByDisplayValue(''), 'Bosnian Basics');
     await fireEvent.press(screen.getByRole('button', { name: 'Create deck' }));
 
@@ -84,14 +84,39 @@ describe('DecksScreen', () => {
     expect(mockRouter.push).toHaveBeenCalled();
   });
 
-  it('routes to import and settings', async () => {
-    await renderScreen(<DecksScreen />, { repository, decks: [] });
+});
 
-    await fireEvent.press(screen.getByRole('button', { name: 'Import from Anki' }));
+/**
+ * The toolbar along the bottom of the window.
+ *
+ * Its actions are the app's, not the open screen's, which is why they are
+ * tested apart from any one screen: whatever is showing above it, these four
+ * routes have to stay reachable.
+ */
+describe('BottomBar', () => {
+  it('routes to the actions that are not tied to a screen', async () => {
+    await renderScreen(<BottomBar />);
+
+    // Short names on purpose: the deck screen's own "Paste a word list" adds to
+    // the deck that is open, and the toolbar's starts a new one.
+    await fireEvent.press(screen.getByRole('button', { name: 'Paste' }));
+    expect(mockRouter.push).toHaveBeenCalledWith('/(app)/text-import');
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Import' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/import');
 
     await fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/settings');
+  });
+
+  it('opens the new-deck form on the deck screen rather than duplicating it', async () => {
+    await renderScreen(<BottomBar />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'New deck' }));
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/(app)/decks',
+      params: { new: '1' },
+    });
   });
 });
 

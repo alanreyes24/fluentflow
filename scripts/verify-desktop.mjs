@@ -15,13 +15,23 @@
  *   FLUENTFLOW_DICTIONARY_DIR=<dir> node scripts/verify-desktop.mjs   # + lookup
  */
 
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
+
+// The API key lives in a gitignored `.env` at the repo root. Loading it here
+// means `npm run verify:desktop` exercises the real hosted path without anyone
+// having to remember to export anything.
+try {
+  process.loadEnvFile(new URL('../.env', import.meta.url));
+} catch {
+  // No .env: the run checks the no-key state instead, which is also worth
+  // checking and is what CI sees.
+}
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SHOTS_DIR = join(ROOT, '.desktop-shots');
@@ -50,11 +60,18 @@ async function main() {
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
 
+  // A run that times out leaves its Electron alive on the debugging port, and
+  // the next run's `connectWhenReady` then attaches to *that* — a stale
+  // instance full of the previous run's decks — instead of the one it just
+  // spawned. Clear the port first.
+  await killStaleInstances();
+
   // A throwaway profile per run. The desktop app keeps its SQLite database in
   // the user data directory, which survives between launches — so a second run
   // would find the first run's deck and never see the empty state it is
   // supposed to be checking.
   const profile = mkdtempSync(join(tmpdir(), 'fluentflow-verify-'));
+  seedApiKey(profile);
 
   const app = spawn(
     executable,
@@ -69,6 +86,8 @@ async function main() {
     // it also logs IMK and CoreText noise; only genuine failures matter here.
     if (/FATAL|Uncaught|Error:/i.test(line)) crashes.push(line.trim());
   });
+
+  checkMacBundle(executable);
 
   let browser;
   try {
@@ -128,9 +147,9 @@ async function run(browser, crashes, app) {
   const collisions = await underWindowButtons(page);
   check('nothing is drawn under the window buttons', collisions.length === 0, collisions[0]);
 
-  // Again with the window dragged narrow. Below the sidebar's breakpoint the
-  // app falls back to the phone's navigation stack, whose back arrow sits
-  // exactly where the window buttons are — so the wide layout being clear
+  // Again with the window dragged narrow. The navigation stack's back arrow
+  // sits exactly where the window buttons are, and a narrow window packs the
+  // header and the bottom bar differently — so the wide window being clear
   // says nothing about this one.
   await page.setViewport({ width: 700, height: 800 });
   await delay(300);
@@ -193,10 +212,21 @@ async function run(browser, crashes, app) {
   await shoot(page, '03-study');
 
   if (usesModel) {
-    // The point of running the model in the main process: on the desktop the
-    // renderer cannot load one, so before that bridge existed every reveal
-    // landed in the branch below no matter what was installed.
-    check('the examples came from the model, not the offline frames', !offline, shown.slice(0, 120));
+    // The point of calling the model from the main process: the renderer must
+    // never hold the API key, so before that bridge existed every reveal landed
+    // in the branch below no matter what was configured.
+    // On a failure, ask the bridge directly rather than reporting page text.
+    // The interesting part of "the examples are generic" is always the reason —
+    // a refused key, a spent quota, a retired model name — and the page only
+    // shows the sentences.
+    const why = offline
+      ? await page.evaluate(() =>
+          window.fluentflowDesktop.ai
+            .examples({ word: 'zdravo', meaning: 'hello', language: 'bs', count: 2 })
+            .then((r) => r?.result?.error ?? r?.error ?? 'no reason given'),
+        )
+      : shown.slice(0, 120);
+    check('the examples came from the model, not the offline frames', !offline, why);
     check(
       'the model wrote two different sentences using the word',
       sentences.length >= 2 && sentences[0] !== sentences[1],
@@ -204,7 +234,7 @@ async function run(browser, crashes, app) {
     );
   } else {
     check(
-      'with no model installed the examples are labelled offline, not passed off',
+      'with no API key the examples are labelled offline, not passed off',
       offline,
     );
     // The deck's language, not the interface's, decides what the examples are
@@ -216,11 +246,18 @@ async function run(browser, crashes, app) {
     );
   }
 
-  await page.keyboard.press('3');
-  check(
-    'the keyboard shortcut rates the card',
-    await hasText(page, 'nothing left to review', 8000),
-  );
+  // "Good" (3) advances a new card through the learning steps rather than
+  // graduating it in one press, so the one-card session takes a few. Alternate
+  // rate (3) and reveal (Enter) until the queue drains — all from the keyboard,
+  // which is what this check is really about; the press count is the
+  // scheduler's business.
+  let sessionDone = false;
+  for (let press = 0; press < 4 && !sessionDone; press++) {
+    await page.keyboard.press('3');
+    sessionDone = await hasText(page, 'nothing left to review', 4000);
+    if (!sessionDone) await page.keyboard.press('Enter');
+  }
+  check('the keyboard shortcut rates the card', sessionDone);
   await shoot(page, '04-session-complete');
 
   // --- a pasted word list becomes cards ------------------------------------
@@ -263,7 +300,7 @@ async function run(browser, crashes, app) {
 
   check(
     'a bare word list is read as words, not as one card',
-    await hasText(page, '3 cards ready', 8000) && await hasText(page, 'One word per line', 2000),
+    await hasText(page, '0 of 3 ready', 8000) && await hasText(page, 'One word per line', 2000),
   );
   check(
     'words with no meaning are counted, and nothing can be imported yet',
@@ -273,19 +310,39 @@ async function run(browser, crashes, app) {
 
   if (lookupInstalled()) {
     await clickLabel(page, 'Look up the meanings');
-    // The dictionary answers in milliseconds; anything it misses goes to the
-    // model, which has a gigabyte of weights to load first.
-    const reviewed = await hasText(page, 'Check these before importing', 180000);
+    // The first press is the dictionary alone, which answers in milliseconds
+    // and cannot reach the network at all.
+    const reviewed = await hasText(page, 'Check these before importing', 60000);
     check('the meanings are filled in', reviewed);
 
     if (reviewed) {
-      const shown = await bodyText(page);
-      const summary = shown.match(
-        /(\d+) from the dictionary, (\d+) from the model, (\d+) not found/,
-      );
-      const [, fromDictionary, fromModel] = summary ?? [];
+      // Nothing is billed to get here. If the dictionary left words over, the
+      // model is a second button naming them, and this is where it is pressed.
+      const askModel = await findVisibleLabel(page, /^Ask .* about the remaining \d+$/);
+      if (askModel) {
+        await clickLabel(page, askModel);
+        // Settled either way: the button goes when the model has answered, and
+        // also when it was asked and had nothing — a depleted key, say. Waiting
+        // for the answer alone would stall for the whole timeout on a run that
+        // had already finished.
+        const deadline = Date.now() + 60000;
+        while (Date.now() < deadline) {
+          if ((await findVisibleLabel(page, /^Ask .* about the remaining \d+$/)) === null) break;
+          await delay(500);
+        }
+      }
 
-      check('every meaning says which source answered it', Boolean(summary), summary?.[0]);
+      const shown = await bodyText(page);
+      const fromDictionary = shown.match(/(\d+) from the dictionary/)?.[1] ?? '0';
+      // The model half of the summary names the model rather than the word
+      // "model", so that a count and a bill can be connected.
+      const fromModel = shown.match(/(\d+) from gemini[\w.-]*/)?.[1] ?? '0';
+
+      check(
+        'every meaning says which source answered it',
+        /from the dictionary|from gemini|with no answer/.test(shown),
+        shown.match(/.*(from the dictionary|with no answer).*/)?.[0],
+      );
 
       if (dictionaryInstalled()) {
         // The point of the whole arrangement: ordinary words come from the
@@ -294,7 +351,12 @@ async function run(browser, crashes, app) {
         check(
           'the dictionary answered all three, and the model was not needed',
           fromDictionary === '3' && fromModel === '0',
-          summary?.[0],
+          `dictionary ${fromDictionary}, model ${fromModel}`,
+        );
+        check(
+          'nothing was offered to the model, because nothing was left over',
+          askModel === null,
+          askModel ?? 'no paid step offered',
         );
         check(
           'dictionary meanings are not flagged for review',
@@ -308,7 +370,7 @@ async function run(browser, crashes, app) {
         check(
           'with no dictionary the model answers, and says that it did',
           fromDictionary === '0' && fromModel === '3',
-          summary?.[0],
+          `dictionary ${fromDictionary}, model ${fromModel}`,
         );
         check(
           'every model meaning is flagged for review before import',
@@ -359,33 +421,37 @@ async function run(browser, crashes, app) {
   } else {
     check(
       'with nothing installed the app says so rather than offering to look up',
-      await hasText(page, 'No dictionary or model installed', 8000),
+      await hasText(page, 'No dictionary installed and no API key', 8000),
     );
   }
 
   // --- the settings screen's answer about the model ------------------------
   //
   // "Why are my examples generic?" is the question this app gets asked most,
-  // and settings is where it is answered. On the desktop the in-process check
-  // can only ever report that `onnxruntime-react-native` is not installed —
-  // true, useless, and wrong about whether examples work — so the screen asks
-  // the shell instead. This is that answer, in the packaged app.
+  // and settings is where it is answered. The renderer never holds the API key,
+  // so the screen asks the shell instead. This is that answer, in the packaged
+  // app.
   await clickLabel(page, 'Settings');
-  await waitForText(page, 'On-device examples');
+  await waitForText(page, 'Cloud examples');
   const settings = await bodyText(page);
 
   check(
     modelInstalled()
-      ? 'settings reports the model the shell actually loaded'
-      : 'settings says the model is missing, and where to get one',
+      ? 'settings names the model the shell is calling'
+      : 'settings says there is no key, and where to get one',
     modelInstalled()
-      ? settings.includes('Model ready') && /Qwen/i.test(settings)
-      : settings.includes('Model not installed') && /fetch-model/i.test(settings),
-    settings.match(/Model (ready|not installed)[\s\S]{0,90}/)?.[0]?.replace(/\s+/g, ' '),
+      ? settings.includes('Connected') && /gemini/i.test(settings)
+      : settings.includes('Not connected') && /aistudio\.google\.com/i.test(settings),
+    settings.match(/(Connected|Not connected)[\s\S]{0,90}/)?.[0]?.replace(/\s+/g, ' '),
   );
+
+  // The key must not be reachable from the page that draws deck content.
   check(
-    'settings does not blame the native module the desktop could never load',
-    !settings.includes('onnxruntime-react-native'),
+    'the renderer has no way to read the API key back',
+    await page.evaluate(() => {
+      const ai = window.fluentflowDesktop?.ai ?? {};
+      return !('getCloud' in ai) && !('apiKey' in ai);
+    }),
   );
   await shoot(page, '10-settings');
 
@@ -403,11 +469,11 @@ async function run(browser, crashes, app) {
 /**
  * Is there anything for the app to look words up in?
  *
- * Neither the dictionaries nor the model weights are in the repository, so
- * these checks are conditional: with either installed the flow is driven,
- * with neither the app is checked for saying so. Point
- * FLUENTFLOW_DICTIONARY_DIR and/or FLUENTFLOW_MODEL_DIR at them — the app
- * reads the same variables.
+ * The dictionaries are not in the repository and the API key is not either, so
+ * these checks are conditional: with either present the flow is driven, with
+ * neither the app is checked for saying so. Point FLUENTFLOW_DICTIONARY_DIR at
+ * a built dictionary — the app reads the same variable — and put a
+ * GEMINI_API_KEY in the repo's `.env`.
  */
 function lookupInstalled() {
   return dictionaryInstalled() || modelInstalled();
@@ -424,11 +490,111 @@ function dictionaryInstalled() {
  *
  * Its own question, not a synonym for {@link lookupInstalled}: a dictionary
  * fills in meanings but cannot write a sentence, so a run with a dictionary and
- * no model should still expect the offline frames on a card reveal.
+ * no key should still expect the offline frames on a card reveal.
+ *
+ * Set GEMINI_API_KEY (the repo's gitignored `.env` carries one) and the run
+ * drives the real hosted path — a real request, over the network, billed. With
+ * it unset the app is checked for saying plainly that it has no model, which is
+ * the state a fresh install is in.
  */
 function modelInstalled() {
-  const model = process.env.FLUENTFLOW_MODEL_DIR;
-  return Boolean(model && existsSync(join(model, 'model.onnx')));
+  return Boolean(process.env.GEMINI_API_KEY);
+}
+
+/**
+ * Give the throwaway profile the API key, the way the app stores one.
+ *
+ * `encrypted: false` is a supported shape in apps/desktop/cloud.js — it is what
+ * a machine with no keychain falls back to — and it is the only way to seed a
+ * key without driving the settings screen first. The profile is deleted at the
+ * end of the run.
+ */
+function seedApiKey(profile) {
+  if (!modelInstalled()) return;
+  writeFileSync(
+    join(profile, 'cloud.json'),
+    JSON.stringify({ key: process.env.GEMINI_API_KEY, encrypted: false }, null, 2),
+    { mode: 0o600 },
+  );
+}
+
+/**
+ * The parts of a packaged macOS bundle that only exist once, at build time —
+ * the icon and the code signature — rather than anything the running app does.
+ */
+function checkMacBundle(executable) {
+  if (process.platform !== 'darwin' || !executable.includes('.app/Contents/MacOS/')) return;
+
+  const appDir = executable.replace(/\/Contents\/MacOS\/[^/]+$/, '');
+
+  let iconFile = '';
+  try {
+    iconFile = execFileSync(
+      'defaults',
+      ['read', join(appDir, 'Contents', 'Info.plist'), 'CFBundleIconFile'],
+      { encoding: 'utf8' },
+    ).trim();
+  } catch {
+    // no such key — treated as "no custom icon" below
+  }
+  const iconPath = join(appDir, 'Contents', 'Resources', iconFile);
+  const customIcon =
+    iconFile !== '' &&
+    iconFile !== 'electron.icns' &&
+    existsSync(iconPath) &&
+    statSync(iconPath).size > 1024;
+  check('the app carries a custom icon, not the default Electron one', customIcon, iconFile);
+
+  let signature = '';
+  try {
+    signature = execFileSync('codesign', ['-d', '--entitlements', ':-', appDir], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch {
+    signature = '';
+  }
+  check(
+    'the bundle is signed with the hardened-runtime entitlements',
+    /com\.apple\.security\.cs\.allow-jit/.test(signature),
+  );
+
+  let verified = false;
+  try {
+    execFileSync('codesign', ['--verify', '--strict', appDir], { stdio: 'ignore' });
+    verified = true;
+  } catch {
+    verified = false;
+  }
+  check('the code signature is self-consistent', verified);
+}
+
+/** Kill any FluentFlow left holding the debugging port from an earlier run. */
+async function killStaleInstances() {
+  const pidsOnPort = () => {
+    try {
+      return execFileSync('lsof', ['-ti', `tcp:${DEBUG_PORT}`], { encoding: 'utf8' })
+        .split('\n')
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+
+  const pids = pidsOnPort();
+  if (pids.length === 0) return;
+
+  for (const pid of pids) {
+    try {
+      process.kill(Number(pid), 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  }
+  // Wait for the port to actually free before the new instance claims it.
+  for (let attempt = 0; attempt < 20 && pidsOnPort().length > 0; attempt++) {
+    await delay(100);
+  }
 }
 
 function findExecutable() {
@@ -510,6 +676,30 @@ async function visibleMatch(page, selector, timeout = 20000) {
   }
   if (!last) throw new Error(`No visible element matches ${selector}`);
   return last;
+}
+
+/**
+ * The aria-label of a visible element matching a pattern, or null.
+ *
+ * Unlike {@link visibleMatch} this neither waits nor throws: it answers "is this
+ * on screen right now", a question with two legitimate answers. The paid lookup
+ * step only appears when the free dictionary pass left something over, and a run
+ * where it never appears is a run that passed.
+ */
+async function findVisibleLabel(page, pattern) {
+  return page.evaluate(
+    (source, flags) => {
+      const expression = new RegExp(source, flags);
+      for (const node of document.querySelectorAll('[aria-label]')) {
+        const label = node.getAttribute('aria-label') ?? '';
+        const box = node.getBoundingClientRect();
+        if (box.width > 0 && box.height > 0 && expression.test(label)) return label;
+      }
+      return null;
+    },
+    pattern.source,
+    pattern.flags,
+  );
 }
 
 async function clickText(page, pattern) {

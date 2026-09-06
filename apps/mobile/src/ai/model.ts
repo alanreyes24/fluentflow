@@ -1,230 +1,44 @@
-import {
-  BpeTokenizer,
-  EXAMPLE_SAMPLING,
-  decode,
-  shapeFromConfig,
-  tokenizerDataFromHuggingFace,
-  type InferenceRequest,
-  type LlamaShape,
-  type OrtLike,
-  type OrtLikeSession,
-} from '@fluentflow/core';
-import { loadModelAssets, type ModelAssets } from './assets';
-import { exampleBridgeAvailable, lookupSources } from './desktop';
+import { cloudBridgeAvailable, exampleBridgeAvailable, lookupSources } from './desktop';
 
 /**
- * On-device text generation with ONNX Runtime.
+ * Whether the app can write real example sentences right now, and if not, why.
  *
- * The decode loop itself is in `@fluentflow/core`: the desktop shell runs the
- * same models through `onnxruntime-node`, and a second copy of a KV cache loop
- * is a second place for it to be subtly wrong. What stays here is the part that
- * is genuinely React Native — loading the optional native module and reading
- * the model files off the device.
+ * The settings screen shows this because "why are my examples generic?" is the
+ * question this app will be asked most, and the answer is nearly always one
+ * specific, fixable thing — no desktop shell, or no API key.
  *
- * The shared loop decodes greedily over a decoder-only transformer exported by
- * Optimum, which gives the conventional signature:
- *
- *   inputs   input_ids, attention_mask, position_ids,
- *            past_key_values.{layer}.{key,value}
- *   outputs  logits, present.{layer}.{key,value}
- *
- * The KV cache is the whole ballgame for the 2-second budget. Without it every
- * new token re-reads the entire prompt, so generating 40 tokens costs 40 full
- * forward passes over ~120 tokens of prompt — roughly 20x the work. With it,
- * only the first pass is long and each subsequent step processes a single
- * token.
- *
- * `onnxruntime-react-native` is an optional dependency: it is a native module,
- * so it needs a development build rather than Expo Go, and the app must stay
- * fully usable without it. Metro substitutes a stub when it is not installed
- * (see metro.config.js), so the require below always resolves and the check is
- * on what came back. Every failure path here ends at "no model", and the
- * example pipeline falls back to written sentences.
+ * Generation happens in the Electron main process (see apps/desktop/ai.js),
+ * because that is where the API key lives and this bundle must never hold it.
+ * The renderer — the same bundle a browser tab runs — reaches it through the
+ * desktop bridge. In a plain browser tab there is no bridge, and every reveal
+ * falls back to written carrier sentences.
  */
-
-/** Minimal slice of the ONNX Runtime API this file uses. */
-interface OrtTensor {
-  readonly data: ArrayLike<number> | BigInt64Array;
-  readonly dims: readonly number[];
-}
-
-interface OrtSession {
-  readonly inputNames: readonly string[];
-  readonly outputNames: readonly string[];
-  run(feeds: Record<string, OrtTensor>): Promise<Record<string, OrtTensor>>;
-  release?(): Promise<void>;
-}
-
-interface OrtModule {
-  InferenceSession: {
-    create(path: string, options?: Record<string, unknown>): Promise<OrtSession>;
-  };
-  Tensor: new (
-    type: string,
-    data: Float32Array | BigInt64Array,
-    dims: readonly number[],
-  ) => OrtTensor;
-}
-
-export type { LlamaShape };
 
 export interface ModelStatus {
   available: boolean;
-  /** Why the model is unavailable, for the settings screen. */
+  /** Why generation is unavailable, for the settings screen. */
   reason?: string;
-  modelPath?: string;
-  vocabSize?: number;
-  /** The model's own name, when the host can say. Desktop only. */
+  /** The model being called, e.g. `gemini-3.1-flash-lite`. */
   name?: string;
-  /** Where the answer came from, so the settings screen can be specific. */
-  host?: 'device' | 'desktop';
+  /** Whether an API key is stored. */
+  configured?: boolean;
+  /** Where to get a key, when there is none. */
+  keyUrl?: string;
 }
 
-let ortModule: OrtModule | null | undefined;
-let sessionPromise: Promise<LoadedModel | null> | null = null;
+const NO_SHELL = 'Example generation runs in the FluentFlow desktop app.';
+const NO_BRIDGE = 'This version of the desktop app cannot reach a model.';
 
-interface LoadedModel {
-  session: OrtSession;
-  tokenizer: BpeTokenizer;
-  shape: LlamaShape;
-  assets: ModelAssets;
-}
-
-/**
- * Load ONNX Runtime, if it is installed.
- *
- * `undefined` means "not tried yet"; `null` means "tried and unavailable", so
- * a missing native module is probed once rather than on every card reveal.
- *
- * The require is a plain static specifier on purpose — see the note above about
- * why dynamic import and try/catch both fail here.
- */
-function loadOrt(): OrtModule | null {
-  if (ortModule !== undefined) return ortModule;
-
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const imported = require('onnxruntime-react-native') as Partial<OrtModule> & {
-      default?: Partial<OrtModule>;
-    };
-    const resolved = imported.InferenceSession ? imported : imported.default;
-    // The stub has no InferenceSession, which is how "not installed" is read.
-    ortModule = resolved?.InferenceSession && resolved.Tensor ? (resolved as OrtModule) : null;
-  } catch {
-    ortModule = null;
-  }
-
-  return ortModule;
-}
-
-async function loadModel(): Promise<LoadedModel | null> {
-  const ort = loadOrt();
-  if (!ort) return null;
-
-  const assets = await loadModelAssets();
-  if (!assets) return null;
-
-  const session = await ort.InferenceSession.create(assets.modelPath, {
-    // Fewer threads than cores on purpose: the UI thread has to stay responsive
-    // while this runs, and small models see little benefit past four.
-    interOpNumThreads: 1,
-    intraOpNumThreads: 4,
-    graphOptimizationLevel: 'all',
-    executionMode: 'sequential',
-  });
-
-  const tokenizer = new BpeTokenizer(tokenizerDataFromHuggingFace(assets.tokenizerJson));
-  const shape = shapeFrom(assets.configJson);
-
-  return { session, tokenizer, shape, assets };
-}
-
-export function modelSession(): Promise<LoadedModel | null> {
-  sessionPromise ??= loadModel().catch(() => null);
-  return sessionPromise;
-}
-
-/**
- * What model this build can actually reach, whoever is hosting it.
- *
- * The desktop shell is asked first, and the order matters for what the settings
- * screen tells the user. In Electron the in-process check below is always going
- * to say "onnxruntime-react-native is not installed", which is true and useless:
- * it is a native mobile module and never could be installed there, while a
- * model is very likely loaded and working one process away. Answering with the
- * shell's status is what makes "why are my examples generic?" get a real answer
- * on the desktop — usually "no model in ~/Library/…, run npm run fetch-model".
- */
 export async function modelStatus(): Promise<ModelStatus> {
-  if (exampleBridgeAvailable()) {
-    const { model } = await lookupSources();
-    return {
-      available: model.available,
-      reason: model.reason,
-      name: model.name,
-      modelPath: model.dir,
-      host: 'desktop',
-    };
-  }
+  if (!exampleBridgeAvailable()) return { available: false, reason: NO_SHELL };
+  if (!cloudBridgeAvailable()) return { available: false, reason: NO_BRIDGE };
 
-  const ort = loadOrt();
-  if (!ort) {
-    return {
-      available: false,
-      reason: 'onnxruntime-react-native is not installed in this build.',
-    };
-  }
-
-  const assets = await loadModelAssets();
-  if (!assets) {
-    return { available: false, reason: 'Model weights are not bundled. Run npm run prepare-model.' };
-  }
-
-  const model = await modelSession();
-  if (!model) {
-    return { available: false, reason: 'The model could not be loaded.' };
-  }
-
+  const { cloud } = await lookupSources();
   return {
-    available: true,
-    modelPath: model.assets.modelPath,
-    vocabSize: model.tokenizer.vocabSize,
-    host: 'device',
+    available: cloud?.available === true,
+    configured: cloud?.configured === true,
+    reason: cloud?.reason,
+    name: cloud?.model,
+    keyUrl: cloud?.keyUrl,
   };
-}
-
-/**
- * An {@link InferenceFn} for the core example pipeline, or `null` when no model
- * is available — which is what makes the pipeline choose its fallback.
- */
-export async function createInference(): Promise<((request: InferenceRequest) => Promise<string>) | null> {
-  const model = await modelSession();
-  if (!model) return null;
-  return (request) => generate(model, request);
-}
-
-async function generate(model: LoadedModel, request: InferenceRequest): Promise<string> {
-  const { session, tokenizer, shape } = model;
-  const ort = loadOrt();
-  if (!ort) throw new Error('ONNX Runtime went away mid-request.');
-
-  return decode(ort as unknown as OrtLike, session as unknown as OrtLikeSession, tokenizer, shape, {
-    ...request,
-    // Example generation asks for a JSON array and has what it needs the
-    // moment the bracket closes.
-    stopOnJsonArray: true,
-    // Decoded greedily the model writes one sentence twice, so a card asking
-    // for two examples gets one. See EXAMPLE_SAMPLING in core.
-    ...EXAMPLE_SAMPLING,
-  });
-}
-
-/**
- * Read the cache geometry from the model's `config.json`.
- *
- * The rules live in core with the decode loop that depends on them; this is
- * only where the file gets read on a device.
- */
-function shapeFrom(config: unknown): LlamaShape {
-  return shapeFromConfig(config);
 }

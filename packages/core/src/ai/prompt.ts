@@ -1,15 +1,15 @@
 import { LANGUAGE_NAMES_EN, type TargetLanguage } from '../types.js';
 
 /**
- * Prompt construction for the bundled on-device model.
+ * What the model is asked for, when a card needs example sentences.
  *
- * Small instruct models (TinyLlama 1.1B, Phi-2 2.7B) are sensitive to their
- * chat template: feed TinyLlama a Phi-2 prompt and it will happily continue the
- * instruction instead of answering it. Each supported family therefore gets its
- * own wrapper around one shared instruction.
+ * This used to carry a chat template per model family, because a local base
+ * model fed the wrong control tokens continues the instruction instead of
+ * answering it — feed TinyLlama a Phi-2 prompt and it happily writes the next
+ * question. With generation now going to a hosted chat endpoint there is one
+ * prompt and no wrappers: the service applies its own template, and sending it
+ * `<|im_start|>` would just be text it has to read past.
  */
-
-export type ModelFamily = 'tinyllama' | 'phi2' | 'qwen' | 'raw';
 
 export interface ExamplePromptInput {
   word: string;
@@ -19,7 +19,7 @@ export interface ExamplePromptInput {
   count?: number;
 }
 
-/** Short, concrete instructions in the target language keep small models on task. */
+/** Short, concrete instructions in the target language keep the answer on task. */
 const LANGUAGE_INSTRUCTIONS: Record<TargetLanguage, (word: string, count: number) => string> = {
   es: (word, count) =>
     `Escribe ${count} frases sencillas en español que usen la palabra "${word}". ` +
@@ -28,9 +28,6 @@ const LANGUAGE_INSTRUCTIONS: Record<TargetLanguage, (word: string, count: number
     `Napiši ${count} jednostavne rečenice na bosanskom jeziku koje koriste riječ "${word}". ` +
     'Svaka rečenica treba imati između 4 i 12 riječi.',
 };
-
-const SYSTEM_PROMPT =
-  'You are a language-learning assistant. You reply with a JSON array of strings and nothing else.';
 
 export function buildInstruction(input: ExamplePromptInput): string {
   const count = input.count ?? 2;
@@ -47,37 +44,26 @@ export function buildInstruction(input: ExamplePromptInput): string {
   );
 }
 
-/** Wrap the instruction in the chat template the given model family expects. */
-export function buildPrompt(input: ExamplePromptInput, family: ModelFamily = 'tinyllama'): string {
-  const instruction = buildInstruction(input);
-
-  switch (family) {
-    case 'tinyllama':
-      return (
-        `<|system|>\n${SYSTEM_PROMPT}</s>\n` +
-        `<|user|>\n${instruction}</s>\n` +
-        '<|assistant|>\n'
-      );
-    case 'qwen':
-      return (
-        `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n` +
-        `<|im_start|>user\n${instruction}<|im_end|>\n` +
-        '<|im_start|>assistant\n'
-      );
-    case 'phi2':
-      return `Instruct: ${instruction}\nOutput:`;
-    case 'raw':
-      return instruction;
-  }
+/**
+ * The prompt for a card reveal.
+ *
+ * Kept as its own function rather than folded into {@link buildInstruction}
+ * because the two names mean different things to a reader — one is "the words
+ * we say to the model", the other is "the request we send" — and the
+ * distinction is where a template would go back if a second provider ever needs
+ * one.
+ */
+export function buildPrompt(input: ExamplePromptInput): string {
+  return buildInstruction(input);
 }
 
 /**
- * Sequences that end generation. TinyLlama emits `</s>`; Phi-2 tends to start a
- * new `Instruct:` turn instead of stopping, so both are treated as terminators.
+ * Sequences that end generation, for a backend that needs telling.
+ *
+ * The hosted path with a response schema ignores these: the answer is complete
+ * when the JSON array closes, and a stop sequence layered on top of a schema
+ * can only truncate valid JSON into invalid JSON. They are still sent for
+ * unstructured answers, where a chatty model otherwise runs on past the point
+ * it has answered.
  */
-export const STOP_SEQUENCES: Record<ModelFamily, string[]> = {
-  tinyllama: ['</s>', '<|user|>', '<|system|>'],
-  qwen: ['<|im_end|>', '<|im_start|>', '<|endoftext|>'],
-  phi2: ['Instruct:', '\nOutput:', '<|endoftext|>'],
-  raw: ['\n\n'],
-};
+export const STOP_SEQUENCES: string[] = ['\n\n'];

@@ -70,6 +70,7 @@ export default function ImportScreen() {
       await refreshDecks();
       // Get the new deck to the user's other devices without them asking.
       void syncNow();
+      if (result.summary.decksCreated > 0) router.replace('/(app)/decks');
     } catch (cause) {
       setError(describeError(cause, t('importFailed')));
     } finally {

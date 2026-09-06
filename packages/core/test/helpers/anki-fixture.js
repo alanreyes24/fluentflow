@@ -96,6 +96,7 @@ export const CRT = Math.floor(Date.UTC(2024, 0, 1, 4, 0, 0) / 1000);
  * @property {number}   [factor] ease factor in permille, e.g. 2500
  * @property {number}   [reps]
  * @property {number}   [lapses]
+ * @property {number}   [left]   steps remaining, as Anki packs them in `left`
  * @property {number}   [extraTemplates] additional sibling cards to emit
  */
 
@@ -179,7 +180,7 @@ export function buildApkg(options) {
     );
     const insertCard = db.prepare(
       `INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data)
-       VALUES (?, ?, ?, ?, ?, -1, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, '')`,
+       VALUES (?, ?, ?, ?, ?, -1, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '')`,
     );
 
     let nextId = 1700000000000;
@@ -213,6 +214,7 @@ export function buildApkg(options) {
           ord === 0 ? (note.factor ?? 0) : 0,
           ord === 0 ? (note.reps ?? 0) : 0,
           ord === 0 ? (note.lapses ?? 0) : 0,
+          ord === 0 ? (note.left ?? 0) : 0,
         );
       }
     });

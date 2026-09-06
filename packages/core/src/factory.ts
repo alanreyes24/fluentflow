@@ -1,5 +1,5 @@
 import type { Card, Deck, TargetLanguage } from './types.js';
-import { newCardState } from './sm2.js';
+import { newCardState } from './scheduler.js';
 import { uuid } from './id.js';
 
 export interface CreateDeckInput {
@@ -50,6 +50,9 @@ export function createCard(input: CreateCardInput): Card {
     interval: state.interval,
     easeFactor: state.easeFactor,
     repetitions: state.repetitions,
+    phase: state.phase,
+    lapses: state.lapses,
+    learningStep: state.learningStep,
     nextReview: state.nextReview,
     status: state.status,
     lastModified: now.toISOString(),

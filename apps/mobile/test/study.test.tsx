@@ -10,7 +10,7 @@ import { mockSearchParams, renderScreen, TEST_USER } from './setup';
  * The study session, rendered.
  *
  * The repository is real and backed by real SQLite, so "press Good" here runs
- * the same SM-2 code a phone runs and writes the same row. What is asserted is
+ * the same scheduler the app runs and writes the same row. What is asserted is
  * the sequencing the screen is responsible for: what is on screen before the
  * reveal, what appears after it, and that a rating advances the queue.
  */
@@ -88,14 +88,36 @@ describe('StudyScreen', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
 
     await screen.findByText('comer');
-    expect(screen.getByText('2 / 2')).toBeTruthy();
+    // The rated card is still on its learning steps, so the queue grew: it is
+    // waiting at the back rather than being finished for the day.
+    expect(screen.getByText('2 / 3')).toBeTruthy();
     // The next card starts hidden again.
     expect(screen.queryByText('to eat')).toBeNull();
 
     const stored = await repository.getCard(first!.id);
     expect(stored?.repetitions).toBe(1);
-    expect(stored?.interval).toBeGreaterThan(0);
+    expect(stored?.phase).toBe('learning');
     expect(stored?.syncStatus).toBe('pending');
+  });
+
+  it('brings a card still on its learning steps back before the session ends', async () => {
+    await seed([
+      ['hablar', 'to speak'],
+      ['comer', 'to eat'],
+    ]);
+    await show();
+
+    await screen.findByText('hablar');
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+
+    await screen.findByText('comer');
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+
+    // Both cards owe another step, so the first one comes round again.
+    await screen.findByText('hablar');
+    expect(screen.getByText('3 / 4')).toBeTruthy();
   });
 
   it('records the rating that was actually pressed', async () => {
@@ -109,22 +131,32 @@ describe('StudyScreen', () => {
 
     await waitFor(async () => {
       const stored = await repository.getCard(card!.id);
-      // "Easy" raises the ease factor above the 2.5 default; "Good" leaves it.
-      expect(stored?.easeFactor).toBeGreaterThan(2.5);
+      // "Easy" skips the learning steps for the four-day easy interval, where
+      // "Good" would have left the card ten minutes out. Anki fuzzes the exact
+      // number of days, so the assertion is the window, not the midpoint.
+      expect(stored?.phase).toBe('review');
+      expect(stored?.interval).toBeGreaterThanOrEqual(3);
+      expect(stored?.interval).toBeLessThanOrEqual(5);
     });
   });
 
-  it('ends the session after the last card', async () => {
+  it('ends the session once the last card has left the learning steps', async () => {
     await seed([['hablar', 'to speak']]);
     await show();
 
     await screen.findByText('hablar');
     await reveal();
     await screen.findByText('to speak');
+    // Good once is a learning step, so the card returns; good again graduates
+    // it to a one-day interval and the session is over.
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+
+    await screen.findByText('hablar');
+    await reveal();
     await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
 
     await screen.findByText('Nothing left to review');
-    expect(screen.getByText(/1 reviewed/)).toBeTruthy();
+    expect(screen.getByText(/2 reviewed/)).toBeTruthy();
   });
 
   it('offers nothing to review when the queue is empty', async () => {

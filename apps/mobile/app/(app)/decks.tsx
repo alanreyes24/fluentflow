@@ -22,7 +22,7 @@ import {
   Surface,
   useContentStyle,
 } from '../../src/ui/components';
-import { useLayout, useTheme } from '../../src/ui/theme';
+import { useTheme } from '../../src/ui/theme';
 
 /**
  * The deck list, and the home screen in practice.
@@ -30,14 +30,13 @@ import { useLayout, useTheme } from '../../src/ui/theme';
  * The due count is the only number that drives a decision here, so it gets the
  * accent treatment while totals stay muted.
  *
- * On a wide window the sidebar is already showing the decks and the actions
- * that make them, so this screen stops repeating them and answers the question
- * the sidebar cannot: how much is waiting, across everything.
+ * The actions that make decks live in the window's bottom bar, so this screen
+ * does not repeat them. What it adds above the list is the question the bar
+ * cannot answer: how much is waiting, across everything.
  */
 export default function DecksScreen() {
   const { t } = useI18n();
   const theme = useTheme();
-  const { wide } = useLayout();
   const content = useContentStyle();
   const { new: startNew } = useLocalSearchParams<{ new?: string }>();
   const { decks, repository, user, refreshDecks } = useApp();
@@ -45,8 +44,8 @@ export default function DecksScreen() {
   const [progress, setProgress] = useState<Record<string, DeckProgress>>({});
   const [creating, setCreating] = useState(false);
 
-  // The sidebar's "New deck" opens the form that lives on this screen, so the
-  // intent arrives as a route parameter rather than as duplicated state.
+  // The bottom bar's "New deck" opens the form that lives on this screen, so
+  // the intent arrives as a route parameter rather than as duplicated state.
   useEffect(() => {
     if (startNew === '1') setCreating(true);
   }, [startNew]);
@@ -99,32 +98,12 @@ export default function DecksScreen() {
                 router.push({ pathname: '/(app)/deck/[id]', params: { id: deck.id } });
               }}
             />
-          ) : wide ? (
-            decks.length > 0 ? (
-              <View style={styles.actions}>
-                <Summary due={totals.due} cards={totals.cards} />
-                <Spacer size={theme.spacing.lg} />
-              </View>
-            ) : null
-          ) : (
-            <View style={styles.actions}>
-              <Row gap={theme.spacing.sm}>
-                <Button label={t('newDeck')} onPress={() => setCreating(true)} style={styles.grow} />
-                <Button
-                  label={t('pasteText')}
-                  variant="secondary"
-                  onPress={() => router.push('/(app)/text-import')}
-                  style={styles.grow}
-                />
-              </Row>
-              <Spacer size={theme.spacing.sm} />
-              <Button
-                label={t('importDeck')}
-                variant="ghost"
-                onPress={() => router.push('/(app)/import')}
-              />
+          ) : decks.length > 0 ? (
+            <View style={styles.summaryWrap}>
+              <Summary due={totals.due} cards={totals.cards} />
+              <Spacer size={theme.spacing.lg} />
             </View>
-          )
+          ) : null
         }
         ListEmptyComponent={
           creating ? null : (
@@ -140,18 +119,6 @@ export default function DecksScreen() {
         )}
         ItemSeparatorComponent={() => <Spacer size={theme.spacing.sm} />}
       />
-
-      {/* On a wide window Settings is a permanent sidebar row, so this footer
-          would be a second way to the same screen. */}
-      {wide ? null : (
-        <View style={[styles.footer, { borderTopColor: theme.colors.border }]}>
-          <Button
-            label={t('settings')}
-            variant="ghost"
-            onPress={() => router.push('/(app)/settings')}
-          />
-        </View>
-      )}
     </Screen>
   );
 }
@@ -304,7 +271,7 @@ function NewDeckForm({
 }
 
 const styles = StyleSheet.create({
-  actions: { marginBottom: 16 },
+  summaryWrap: { marginBottom: 16 },
   summary: { paddingVertical: 20 },
   grow: { flex: 1 },
   deck: {},
@@ -320,5 +287,4 @@ const styles = StyleSheet.create({
   form: { gap: 16, marginBottom: 16 },
   field: { gap: 6 },
   fieldLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
-  footer: { borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 4 },
 });

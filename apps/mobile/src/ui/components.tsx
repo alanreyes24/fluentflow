@@ -193,11 +193,13 @@ export function useContentStyle(options?: { full?: boolean; maxWidth?: number })
     paddingBottom: theme.spacing.xxl,
     width: '100%',
     maxWidth: options?.full ? undefined : (options?.maxWidth ?? layout.measure),
-    // Leading, not centred. The screen's title is drawn at the leading edge of
-    // the pane by the navigator, and a centred column below it lands about
-    // 70pt to its right — close enough to read as a mistake rather than as a
-    // choice.
-    alignSelf: 'flex-start',
+    // Centred in the window, with the header title centred over it (see the
+    // stack's `headerTitleAlign` in app/(app)/_layout.tsx). The column used to
+    // hug the leading edge because a sidebar sat beside it and the navigator
+    // drew the title there; with the navigation moved to the bottom bar there
+    // is nothing on the left for it to line up with, and a 680pt column pinned
+    // to the left of an 1100pt window reads as content that fell over.
+    alignSelf: 'center',
   };
 }
 

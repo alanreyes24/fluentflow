@@ -24,7 +24,7 @@ import {
 } from 'firebase/firestore';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Card, Deck } from '@fluentflow/core';
+import { normalizeCard, type Card, type Deck } from '@fluentflow/core';
 import { appConfig, isCloudEnabled } from './config';
 
 /**
@@ -141,7 +141,10 @@ export async function fetchRemote(userId: string, since?: string): Promise<Remot
 
   return {
     decks: deckSnap.docs.map((d) => d.data() as Deck),
-    cards: cardSnap.docs.map((d) => d.data() as Card),
+    // A document written by a client older than the Anki scheduler has no
+    // phase; normalizeCard reconstructs one rather than letting it reach the
+    // scheduler half-filled.
+    cards: cardSnap.docs.map((d) => normalizeCard(d.data() as Card)),
   };
 }
 
@@ -209,7 +212,7 @@ export function subscribeRemote(
   const unsubscribeCards = onSnapshot(
     cardsRef(db, userId),
     (snapshot) => {
-      cards = snapshot.docs.map((d) => d.data() as Card);
+      cards = snapshot.docs.map((d) => normalizeCard(d.data() as Card));
       cardReady = true;
       emit();
     },

@@ -1,8 +1,8 @@
 import { unzipSync } from 'fflate';
-import type { Card, Deck, TargetLanguage } from '../types.js';
+import type { Card, CardPhase, Deck, TargetLanguage } from '../types.js';
 import { detectLanguage, type LanguageDetection } from '../language.js';
 import { stableId } from '../id.js';
-import { MASTERED_INTERVAL_DAYS, MIN_EASE_FACTOR, DEFAULT_EASE_FACTOR } from '../sm2.js';
+import { MIN_EASE_FACTOR, DEFAULT_EASE_FACTOR, statusFor } from '../scheduler.js';
 import { extractNote, mapFields, splitFields, type FieldMapping, type NoteTypeField } from './fields.js';
 
 /**
@@ -137,7 +137,8 @@ export async function parseApkg(
     // cloze siblings). Keep the lowest-ordinal card so scheduling comes from
     // the primary template, and count the rest as merged.
     const cardRows = db.all(
-      'SELECT id, nid, did, odid, ord, type, queue, due, ivl, factor, reps, lapses FROM cards',
+      // `left` is a SQL keyword, so it has to be quoted to name Anki's column.
+      'SELECT id, nid, did, odid, ord, type, queue, due, ivl, factor, reps, lapses, "left" FROM cards',
     );
 
     // Card rows arrive unordered (see the collation note above), so the lowest
@@ -469,6 +470,7 @@ function toCard(args: {
   const easeFactor = factor > 0 ? Math.max(MIN_EASE_FACTOR, factor / 1000) : DEFAULT_EASE_FACTOR;
   const reps = num(cardRow.reps);
   const lapses = num(cardRow.lapses);
+  const phase = phaseFor(type);
 
   return {
     id: stableId('card', userId, deck.name, noteId),
@@ -480,24 +482,40 @@ function toCard(args: {
     examples: extracted.examples,
     interval,
     easeFactor: Math.round(easeFactor * 100) / 100,
-    repetitions: repetitionsFor(type, reps, lapses),
+    repetitions: reps,
+    phase,
+    lapses,
+    learningStep: learningStepFor(type, num(cardRow.left)),
     nextReview: nextReviewFor(type, num(cardRow.due), crt, now),
-    status: statusFor(type, interval),
+    status: statusFor(phase, interval),
     lastModified: nowIso,
     syncStatus: 'pending',
   };
 }
 
 /**
- * SM-2 counts *consecutive* successes; Anki records total reps and lapses.
- * The difference is a good enough reconstruction: a graduated review card gets
- * at least 2 so it resumes on the multiplicative branch rather than restarting
- * the 1-day / 6-day ladder.
+ * Anki's `cards.type` column is the scheduling phase, and this app now models
+ * the same four, so the import is a direct mapping rather than a
+ * reconstruction: an imported card resumes exactly where Anki left it.
  */
-function repetitionsFor(type: number, reps: number, lapses: number): number {
-  if (type === 0) return 0; // new
-  if (type === 1 || type === 3) return 0; // (re)learning
-  return Math.max(2, reps - lapses);
+function phaseFor(type: number): CardPhase {
+  if (type === 1) return 'learning';
+  if (type === 2) return 'review';
+  if (type === 3) return 'relearning';
+  return 'new';
+}
+
+/**
+ * `cards.left` packs the steps *remaining* as `remaining + todayRemaining*1000`.
+ * The scheduler wants the step the card sits on instead, and the two step lists
+ * can differ in length between collections, so this only recovers the common
+ * case: a card with one step left is on the last one, anything else restarts.
+ * Getting this wrong costs a repeated learning step, not a lost card.
+ */
+function learningStepFor(type: number, left: number): number {
+  if (type !== 1 && type !== 3) return 0;
+  const remaining = left % 1000;
+  return remaining === 1 ? 1 : 0;
 }
 
 function nextReviewFor(type: number, due: number, crt: number, now: Date): string {
@@ -510,11 +528,6 @@ function nextReviewFor(type: number, due: number, crt: number, now: Date): strin
   // Very small values mean the card was queued by position, not by time.
   const timestamp = due > 1_000_000_000 ? due * 1000 : now.getTime();
   return new Date(timestamp).toISOString();
-}
-
-function statusFor(type: number, interval: number): Card['status'] {
-  if (type === 0) return 'new';
-  return interval >= MASTERED_INTERVAL_DAYS ? 'mastered' : 'learning';
 }
 
 function buildSample(

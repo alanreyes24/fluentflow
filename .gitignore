@@ -1,6 +1,9 @@
 node_modules/
 dist/
 build/
+# ...except the desktop packaging inputs (app icon, entitlements), which are
+# committed source, not build output.
+!apps/desktop/build/
 .expo/
 .expo-shared/
 *.tsbuildinfo
@@ -11,12 +14,6 @@ npm-debug.log*
 yarn-error.log
 .DS_Store
 Thumbs.db
-
-# Bundled model weights (fetched via `npm run prepare-model`)
-apps/mobile/assets/models/*
-!apps/mobile/assets/models/.gitkeep
-!apps/mobile/assets/models/README.md
-!apps/mobile/assets/models/manifest.js
 
 # Firebase service credentials
 **/serviceAccount*.json

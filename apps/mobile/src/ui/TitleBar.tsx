@@ -1,6 +1,6 @@
 import { View } from 'react-native';
+import { useDesktopChrome } from './DesktopChrome';
 import { dragRegionProps, onMacDesktop, TITLE_BAR_HEIGHT } from './shell';
-import { useTheme } from './theme';
 
 /**
  * The strip the window buttons live in.
@@ -10,17 +10,16 @@ import { useTheme } from './theme';
  * This reserves that space and doubles as the window's drag handle — with the
  * title bar hidden there is otherwise nothing to grab.
  *
- * It renders nothing anywhere else: on a phone, in a browser tab and in the
- * render tests there is no shell, so there is no strip.
+ * It renders nothing anywhere else: in a browser tab and in the render tests
+ * there is no shell, so there is no strip. In native full-screen macOS hides
+ * the window buttons, so the strip goes too.
+ *
+ * The strip itself paints no background — on macOS the window is a vibrancy
+ * pane and this sits over it.
  */
 export function TitleBar() {
-  const theme = useTheme();
-  if (!onMacDesktop()) return null;
+  const { fullscreen } = useDesktopChrome();
+  if (!onMacDesktop() || fullscreen) return null;
 
-  return (
-    <View
-      {...dragRegionProps}
-      style={{ height: TITLE_BAR_HEIGHT, backgroundColor: theme.colors.background }}
-    />
-  );
+  return <View {...dragRegionProps} style={{ height: TITLE_BAR_HEIGHT }} />;
 }

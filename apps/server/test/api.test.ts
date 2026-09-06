@@ -194,6 +194,43 @@ test('invalid records are rejected with per-field detail', async () => {
   assert.match(body.details.join(' '), /nextReview must be an ISO-8601 date/);
 });
 
+test('scheduler fields survive a round trip, and a bad phase is rejected', async () => {
+  await json(
+    '/api/sync',
+    {
+      cards: [
+        card({ id: 'sched-1', phase: 'relearning', lapses: 3, learningStep: 1, leech: true }),
+      ],
+    },
+    { user: 'gina' },
+  );
+
+  const body = await (await call('/api/sync', { user: 'gina' })).json();
+  assert.equal(body.cards[0].phase, 'relearning');
+  assert.equal(body.cards[0].lapses, 3);
+  assert.equal(body.cards[0].learningStep, 1);
+  assert.equal(body.cards[0].leech, true);
+
+  const response = await json('/api/sync', { cards: [card({ id: 'sched-2', phase: 'limbo' })] });
+  assert.equal(response.status, 400);
+  const rejected = await response.json();
+  assert.match(rejected.details.join(' '), /phase must be one of/);
+});
+
+test('a card from a client with no scheduler fields is given a phase', async () => {
+  // The old client sent interval, ease and repetitions and nothing else; the
+  // card has to arrive schedulable rather than half-filled.
+  const legacy = card({ id: 'legacy-1', interval: 15, repetitions: 4, status: 'learning' });
+  delete (legacy as Record<string, unknown>).phase;
+
+  await json('/api/sync', { cards: [legacy] }, { user: 'hank' });
+
+  const body = await (await call('/api/sync', { user: 'hank' })).json();
+  assert.equal(body.cards[0].phase, 'review', 'a day-level interval means it graduated');
+  assert.equal(body.cards[0].lapses, 0);
+  assert.equal(body.cards[0].learningStep, 0);
+});
+
 test('a valid batch is rejected whole when any record is invalid', async () => {
   await json('/api/sync', {
     cards: [card({ id: 'good-one' }), card({ id: 'bad-one', interval: -5 })],

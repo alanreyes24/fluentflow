@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import TextImportScreen from '../app/(app)/text-import';
 import { Repository } from '../src/db/repository';
 import { createTestRepository } from './fakes/database';
-import { mockSearchParams, renderScreen, TEST_USER } from './setup';
+import { mockRouter, mockSearchParams, renderScreen, TEST_USER } from './setup';
 
 /**
  * Importing a pasted word list.
@@ -16,6 +16,22 @@ const LIST = 'hablar - to speak\ncasa - house\nniño - child';
 /** A pasted vocabulary list with no meanings on it — the hard case. */
 const WORDS = 'nido\nempapar\nlodazal';
 
+/** What the distilled Wiktionary file returns for these words. */
+const DICTIONARY: Record<string, string> = { nido: 'nest', empapar: 'to drench' };
+/** What a small model actually said about a word it did not know. */
+const GUESSES: Record<string, string> = { lodazal: 'lodestar' };
+
+/** One word's answer, from whichever source this pass is allowed to use. */
+function answer(word: string, useModel?: boolean) {
+  if (DICTIONARY[word]) {
+    return { word, meaning: DICTIONARY[word], source: 'dictionary', needsReview: false };
+  }
+  if (useModel && GUESSES[word]) {
+    return { word, meaning: GUESSES[word], source: 'model', needsReview: true };
+  }
+  return { word, meaning: '', source: 'none', needsReview: false, rejected: 'not-found' };
+}
+
 /**
  * The desktop shell's lookup bridge.
  *
@@ -23,6 +39,11 @@ const WORDS = 'nido\nempapar\nlodazal';
  * screen's own detection runs rather than a mock of it. The answers are real:
  * the dictionary rows are what the distilled Wiktionary file returns, and the
  * model row is what Qwen2.5-1.5B actually said about a word it did not know.
+ *
+ * It honours `useModel`, because the two-press flow is the point: the first
+ * press must be answerable by the dictionary alone, and a fake that answers
+ * with a model row anyway would let a screen that billed on the first press
+ * pass this suite.
  */
 function installBridge(overrides = {}) {
   const bridge = {
@@ -30,15 +51,11 @@ function installBridge(overrides = {}) {
     ai: {
       status: jest.fn(async () => ({
         dictionary: { available: true, languages: { es: true, bs: true }, source: { es: 'Spanish' } },
-        model: { available: true, name: 'Qwen/Qwen2.5-1.5B-Instruct' },
+        cloud: { available: true, configured: true, model: 'gemini-3.1-flash-lite' },
       })),
-      resolve: jest.fn(async () => ({
+      resolve: jest.fn(async (words: string[], _language: string, options?: { useModel?: boolean }) => ({
         ok: true,
-        meanings: [
-          { word: 'nido', meaning: 'nest', source: 'dictionary', needsReview: false },
-          { word: 'empapar', meaning: 'to drench', source: 'dictionary', needsReview: false },
-          { word: 'lodazal', meaning: 'lodestar', source: 'model', needsReview: true },
-        ],
+        meanings: words.map((word) => answer(word, options?.useModel)),
       })),
       onProgress: jest.fn(() => jest.fn()),
       ...overrides,
@@ -127,7 +144,10 @@ describe('TextImportScreen', () => {
     // Every card is new and due, so a session started now would pick them up.
     expect(await repository.dueCards(deck!.id)).toHaveLength(3);
     expect(state.refreshDecks).toHaveBeenCalled();
-    expect(screen.getByText('Import complete')).toBeTruthy();
+    expect(mockRouter.replace).toHaveBeenCalledWith({
+      pathname: '/(app)/deck/[id]',
+      params: { id: deck!.id },
+    });
   });
 
   it('adds to an existing deck without repeating words it already has', async () => {
@@ -163,7 +183,9 @@ describe('TextImportScreen', () => {
 
     // The bug this covers: with no separators and no blank lines, three lines
     // used to become one card with "empapar lodazal" on its back.
-    expect(screen.getByText('3 cards ready')).toBeTruthy();
+    // "0 of 3" rather than "3 cards ready": the Create button is disabled until
+    // the meanings exist, and the count above it should not say otherwise.
+    expect(screen.getByText('0 of 3 ready')).toBeTruthy();
     expect(screen.getByText('Separator: One word per line')).toBeTruthy();
     expect(screen.getByText('3 words with no meaning yet')).toBeTruthy();
   });
@@ -180,13 +202,13 @@ describe('TextImportScreen', () => {
     installBridge({
       status: jest.fn(async () => ({
         dictionary: { available: false, reason: 'No dictionaries in ~/dictionaries' },
-        model: { available: false },
+        cloud: { available: false, configured: false },
       })),
     });
     await renderScreen(<TextImportScreen />, { repository });
     await paste(WORDS);
 
-    await screen.findByText(/No dictionary or model installed/);
+    await screen.findByText(/no dictionary for this language and no API key/);
     expect(screen.queryByRole('button', { name: 'Look up the meanings' })).toBeNull();
   });
 
@@ -194,38 +216,89 @@ describe('TextImportScreen', () => {
     installBridge({
       status: jest.fn(async () => ({
         dictionary: { available: true, languages: { es: true }, source: { es: 'Spanish' } },
-        model: { available: false, reason: 'No model' },
+        cloud: { available: false, configured: false, reason: 'No API key' },
       })),
     });
     await renderScreen(<TextImportScreen />, { repository });
     await paste(WORDS);
 
-    // The dictionary alone is the good case, not a degraded one.
+    // The dictionary alone is the good case, not a degraded one, and the line
+    // above the button promises what the press will actually do.
     await screen.findByRole('button', { name: 'Look up the meanings' });
+    expect(screen.getByText(/offline and free. Nothing is sent anywhere/)).toBeTruthy();
   });
 
-  it('says where every meaning came from, and flags the model ones', async () => {
+  it('answers from the dictionary first, and bills nothing to do it', async () => {
     const bridge = installBridge();
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
     await fireEvent.press(await screen.findByRole('button', { name: 'Look up the meanings' }));
-
     await screen.findByText('Check these before importing');
-    expect(bridge.ai.resolve).toHaveBeenCalledWith(['nido', 'empapar', 'lodazal'], 'es');
 
+    // The press the user cannot avoid is the one that sends nothing anywhere.
+    expect(bridge.ai.resolve).toHaveBeenCalledWith(['nido', 'empapar', 'lodazal'], 'es', {
+      useModel: false,
+    });
     expect(screen.getByLabelText('nido').props.value).toBe('nest');
     expect(screen.getByLabelText('empapar').props.value).toBe('to drench');
+    expect(screen.getByLabelText('lodazal').props.value).toBe('');
+    expect(screen.getByText('2 from the dictionary · 1 with no answer')).toBeTruthy();
+  });
+
+  it('sends only the leftovers to the model, and only when asked to', async () => {
+    const bridge = installBridge();
+    await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
+    await paste(WORDS);
+
+    await fireEvent.press(await screen.findByRole('button', { name: 'Look up the meanings' }));
+    await screen.findByText('Check these before importing');
+
+    // The paid step names the model and the count, so pressing it is a decision
+    // rather than something that happened on the way to asking for meanings.
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
+    );
+
+    await screen.findByText('model — check this');
+    expect(bridge.ai.resolve).toHaveBeenLastCalledWith(['lodazal'], 'es', { useModel: true });
     expect(screen.getByLabelText('lodazal').props.value).toBe('lodestar');
 
     // Two came from the dictionary and can be skimmed; the third is a guess and
     // says so, which is the whole reason the sources are tracked separately.
     expect(screen.getAllByText('dictionary')).toHaveLength(2);
-    expect(screen.getByText('model — check this')).toBeTruthy();
-    expect(screen.getByText('2 from the dictionary, 1 from the model, 0 not found')).toBeTruthy();
+    // The summary names the model that was billed, and leaves out the category
+    // that did not happen — no "0 not found" implying something went missing.
+    expect(
+      screen.getByText('2 from the dictionary · 1 from gemini-3.1-flash-lite'),
+    ).toBeTruthy();
 
     // Still nothing written: the deck is untouched until the user says so.
     expect(await repository.listDecks(TEST_USER.id)).toHaveLength(0);
+  });
+
+  it('lets the meanings be typed in without any lookup at all', async () => {
+    installBridge({
+      status: jest.fn(async () => ({
+        dictionary: { available: false, reason: 'No dictionaries in ~/dictionaries' },
+        cloud: { available: false, configured: false },
+      })),
+    });
+    await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
+    await paste(WORDS);
+
+    // No dictionary and no key used to mean a dead end: a disabled Create
+    // button and a lookup that was not offered. The boxes are the way out.
+    await screen.findByText('Check these before importing');
+    await fireEvent.changeText(screen.getByLabelText('nido'), 'nest');
+    await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');
+    await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));
+
+    await waitFor(async () => {
+      expect(await repository.listDecks(TEST_USER.id)).toHaveLength(1);
+    });
+    const [deck] = await repository.listDecks(TEST_USER.id);
+    expect((await repository.listCards(deck!.id)).map((card) => card.front)).toEqual(['nido']);
   });
 
   it('imports the corrected meanings, not the ones the model gave', async () => {
@@ -234,6 +307,10 @@ describe('TextImportScreen', () => {
     await paste(WORDS);
     await fireEvent.press(await screen.findByRole('button', { name: 'Look up the meanings' }));
     await screen.findByText('Check these before importing');
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
+    );
+    await screen.findByText('model — check this');
 
     // The model's "lodestar" is wrong and the user fixes it; the dictionary's
     // "to drench" is fine but they prefer their own wording.
@@ -272,7 +349,9 @@ describe('TextImportScreen', () => {
     await paste(WORDS);
     await fireEvent.press(await screen.findByRole('button', { name: 'Look up the meanings' }));
     await screen.findByText('Check these before importing');
-    expect(screen.getByText('not found')).toBeTruthy();
+    // Asked and answered with nothing, which is not the same as never asked.
+    expect(screen.getByText('the model had no answer — type one')).toBeTruthy();
+    expect(screen.getByText('2 from the dictionary · 1 with no answer')).toBeTruthy();
 
     await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');
     await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));

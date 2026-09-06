@@ -23,6 +23,15 @@
  *
  *   node scripts/desktop-build.mjs pack
  *   node scripts/desktop-build.mjs dist:mac
+ *
+ * Real macOS signing is off by default (`mac.identity: null` in the desktop
+ * package.json, ad-hoc via scripts/after-pack.cjs). To turn it on, set
+ * `APPLE_IDENTITY` to the Developer ID name — e.g.
+ * "Developer ID Application: Jane Doe (TEAMID)" — and supply the certificate
+ * either in the login keychain or via `CSC_LINK` + `CSC_KEY_PASSWORD`. For
+ * notarization also set `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and
+ * `APPLE_TEAM_ID`. This wrapper then overrides the null identity and enables
+ * `mac.notarize`, and after-pack.cjs steps aside.
  */
 
 import { spawn } from 'node:child_process';
@@ -44,6 +53,18 @@ delete environment.npm_config_allow_scripts;
 // any Electron the packager spawns exit silently as plain Node.
 delete environment.ELECTRON_RUN_AS_NODE;
 
+/**
+ * When a real Developer ID is supplied, override the dormant `identity: null`
+ * and switch notarization on. Passed as `-c.*` config overrides so the
+ * committed package.json stays ad-hoc by default.
+ */
+const signingArgs = [];
+if (environment.APPLE_IDENTITY) {
+  signingArgs.push(`-c.mac.identity=${environment.APPLE_IDENTITY}`, '-c.mac.notarize=true');
+  environment.CSC_IDENTITY_AUTO_DISCOVERY = 'true';
+  console.log(`Signing with "${environment.APPLE_IDENTITY}" and notarizing.`);
+}
+
 function run(args) {
   return new Promise((done, fail) => {
     const child = spawn('npm', args, {
@@ -60,7 +81,7 @@ function run(args) {
 
 try {
   await run(['--prefix', DESKTOP, 'install']);
-  await run(['--prefix', DESKTOP, 'run', target]);
+  await run(['--prefix', DESKTOP, 'run', target, ...(signingArgs.length ? ['--', ...signingArgs] : [])]);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

@@ -3,19 +3,9 @@
     "name": "FluentFlow",
     "slug": "fluentflow",
     "version": "0.1.0",
-    "orientation": "portrait",
     "scheme": "fluentflow",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "platforms": ["ios", "android", "web"],
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.fluentflow.app"
-    },
-    "android": {
-      "package": "com.fluentflow.app",
-      "edgeToEdgeEnabled": true
-    },
+    "platforms": ["web"],
     "web": {
       "bundler": "metro",
       "output": "single"
@@ -43,11 +33,6 @@
         "storageBucket": "",
         "messagingSenderId": "",
         "appId": ""
-      },
-      "ai": {
-        "modelFamily": "tinyllama",
-        "budgetMs": 2000,
-        "maxTokens": 96
       }
     }
   }

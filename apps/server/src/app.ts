@@ -19,12 +19,12 @@ import type { Store } from './store/types.ts';
  * The sync API.
  *
  * The app's normal path to Firestore is the client SDK's real-time listener —
- * that is what makes a review on the phone appear on the laptop a second later.
+ * that is what makes a review on one device appear on another a second later.
  * This service covers the two things the client SDK cannot do well:
  *
  *  - **Anki import.** Parsing a 100 MB `.apkg` means unzipping it and running
- *    SQLite over the result. Doing that server-side keeps a phone from chewing
- *    through memory, and is the only option on the web build.
+ *    SQLite over the result. Doing that server-side keeps the client from
+ *    chewing through memory, and is the only option on the web build.
  *  - **A plain-HTTP fallback.** Useful for scripts, for CI, and for running the
  *    whole app with no Firebase project at all (see local mode in config.ts).
  */

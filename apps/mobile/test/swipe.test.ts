@@ -35,8 +35,8 @@ describe('swipeRating', () => {
     expect(swipeRating({ dx: 0, vx: 5 }, WIDTH)).toBeNull();
   });
 
-  it('scales with the card, so the same gesture works on any screen', () => {
-    // 150px is a commit on a phone and a nudge on a tablet.
+  it('scales with the card, so the same gesture works at any window size', () => {
+    // 150px is a commit on a narrow card and a nudge on a wide one.
     expect(swipeRating({ dx: 150, vx: 0 }, 400)).toBe('good');
     expect(swipeRating({ dx: 150, vx: 0 }, 1024)).toBeNull();
   });

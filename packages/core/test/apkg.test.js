@@ -11,9 +11,11 @@ import {
 } from './helpers/anki-fixture.js';
 
 const NOW = new Date('2024-09-03T10:00:00.000Z');
+/** Learning cards store `due` as epoch seconds; ten minutes from NOW. */
+const EPOCH_SOON = Math.floor(NOW.getTime() / 1000) + 600;
 const base = { open: openWithNodeSqlite, userId: 'user-1', now: NOW };
 
-test('imports a 60-card schema-11 deck and preserves SM-2 scheduling', async () => {
+test('imports a 60-card schema-11 deck and preserves its Anki scheduling', async () => {
   const apkg = buildApkg({
     schema: 11,
     decks: ['Spanish A1'],
@@ -38,7 +40,7 @@ test('imports a 60-card schema-11 deck and preserves SM-2 scheduling', async () 
   assert.equal(mature.easeFactor, 2.75, 'factor 2750 permille becomes ease 2.75');
   assert.equal(mature.status, 'mastered');
   assert.ok(mature.interval >= MASTERED_INTERVAL_DAYS);
-  assert.ok(mature.repetitions >= 2, 'a graduated card must not restart the ladder');
+  assert.equal(mature.phase, 'review', 'a graduated card must not restart in learning');
 
   const young = result.cards.find((c) => c.interval === 5);
   assert.equal(young.easeFactor, 2.3);
@@ -48,6 +50,41 @@ test('imports a 60-card schema-11 deck and preserves SM-2 scheduling', async () 
   assert.equal(brandNew.interval, 0);
   assert.equal(brandNew.easeFactor, 2.5, 'ease 0 in Anki means "never reviewed"');
   assert.equal(brandNew.nextReview, NOW.toISOString(), 'new cards are due now');
+});
+
+test('the four Anki card types import as the four scheduling phases', async () => {
+  const apkg = buildApkg({
+    schema: 18,
+    decks: ['Spanish A1'],
+    fieldNames: ['Front', 'Back'],
+    notes: [
+      { fields: ['nuevo', 'new'], type: 0 },
+      // A learning card on its last step, due in ten minutes.
+      { fields: ['aprender', 'to learn'], type: 1, due: EPOCH_SOON, ivl: -600, left: 1001, reps: 1 },
+      { fields: ['hablar', 'to speak'], type: 2, ivl: 30, factor: 2400, due: 300, reps: 8, lapses: 2 },
+      { fields: ['olvidar', 'to forget'], type: 3, ivl: 4, factor: 2100, due: EPOCH_SOON, reps: 12, lapses: 5 },
+    ],
+  });
+
+  const result = await parseApkg(apkg, { ...base, language: 'es' });
+  const byFront = new Map(result.cards.map((c) => [c.front, c]));
+
+  assert.equal(byFront.get('nuevo').phase, 'new');
+  assert.equal(byFront.get('aprender').phase, 'learning');
+  assert.equal(byFront.get('aprender').learningStep, 1, 'one step left means the last step');
+  assert.equal(byFront.get('aprender').interval, 0, 'a sub-day interval is not a day interval');
+
+  const review = byFront.get('hablar');
+  assert.equal(review.phase, 'review');
+  assert.equal(review.lapses, 2, "Anki's lapse count drives leech detection here too");
+  assert.equal(review.repetitions, 8, 'reps is Anki reps, not a consecutive-success count');
+  assert.equal(review.status, 'mastered');
+
+  const relearning = byFront.get('olvidar');
+  assert.equal(relearning.phase, 'relearning');
+  assert.equal(relearning.learningStep, 0);
+  assert.equal(relearning.interval, 4, 'the interval waiting after relearning is preserved');
+  assert.equal(relearning.status, 'learning');
 });
 
 test('review due dates are rebuilt from the collection creation date', async () => {

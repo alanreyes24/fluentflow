@@ -12,6 +12,14 @@ export const TARGET_LANGUAGES = ['es', 'bs'] as const;
 export type TargetLanguage = (typeof TARGET_LANGUAGES)[number];
 
 export type CardStatus = 'new' | 'learning' | 'mastered';
+
+/**
+ * Anki's four scheduling phases. `status` above is what the UI shows; this is
+ * what the scheduler branches on, and the two are kept in step by
+ * `statusFor()`. Cards written before the Anki scheduler landed have no phase,
+ * so it stays optional and `normalizeCard()` reconstructs it.
+ */
+export type CardPhase = 'new' | 'learning' | 'review' | 'relearning';
 export type SyncStatus = 'synced' | 'pending';
 
 /** ISO-8601 UTC string, e.g. `2024-09-05T10:00:00.000Z`. */
@@ -28,12 +36,20 @@ export interface Card {
   language: TargetLanguage;
   /** Cached AI-generated example sentences, always in `language`. */
   examples: string[];
-  /** SM-2 inter-repetition interval, in days. */
+  /** Day-level interval. Zero while a new card is still on its learning steps. */
   interval: number;
-  /** SM-2 ease factor, clamped to >= 1.3. */
+  /** Anki ease factor, clamped to >= 1.3. */
   easeFactor: number;
-  /** Number of consecutive successful reviews. Drives SM-2's I(1)/I(2) cases. */
+  /** Total answers given, matching Anki's `reps` column. */
   repetitions: number;
+  /** Which scheduling phase the card is in. Absent on pre-v3 records. */
+  phase?: CardPhase;
+  /** Times this card has been failed as a review card (Anki's `lapses`). */
+  lapses?: number;
+  /** Position in the active learning or relearning step list. */
+  learningStep?: number;
+  /** Set once the lapse count crosses the leech threshold. */
+  leech?: boolean;
   nextReview: IsoDate;
   status: CardStatus;
   lastModified: IsoDate;

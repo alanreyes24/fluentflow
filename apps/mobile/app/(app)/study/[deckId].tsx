@@ -25,12 +25,20 @@ import { useLayout, useTheme } from '../../../src/ui/theme';
  * The sequencing here is the whole product:
  *
  *  1. The queue is loaded once and held in state. Re-querying after each answer
- *     would re-surface a card rated "Again" immediately, since its next review
- *     is ten minutes out but the query is "due now".
- *  2. Revealing the answer kicks off example generation, which is bounded by
- *     the AI budget and never blocks the rating buttons. You can answer while
- *     the examples are still arriving.
- *  3. Rating writes to SQLite synchronously from the UI's point of view, then
+ *     would re-surface a card the moment its learning step elapsed, and would
+ *     drop the ordering the session started with.
+ *  2. A card still on its learning steps comes back before the session ends —
+ *     that is what makes Anki's 1m/10m steps mean anything — but at the back of
+ *     the queue rather than immediately. Anki calls the window it will pull a
+ *     learning card forward into the learn-ahead limit; twenty minutes is its
+ *     default, and a session rarely outlasts one.
+ *  3. Examples are generated for the cards *ahead* of the one on screen, not
+ *     at the moment it is revealed. The queue is known from step 1, so there
+ *     is no reason to start the model only once the user is watching it work.
+ *  4. Revealing the answer therefore usually reads a finished result. When it
+ *     does not, generation is still bounded by the AI budget and still never
+ *     blocks the rating buttons — you can answer while examples are arriving.
+ *  5. Rating writes to SQLite synchronously from the UI's point of view, then
  *     advances. Sync happens on its own schedule; a review is never waiting on
  *     the network.
  */
@@ -76,6 +84,15 @@ export default function StudyScreen() {
     };
   }, [repository, deckId, studyAhead, navigation]);
 
+  // Keep the model working a few cards ahead of the user. The window is
+  // re-primed on every advance rather than set up once, so it follows a queue
+  // that grows: a card rated "again" is pushed back onto the end and is picked
+  // up again when it comes round.
+  useEffect(() => {
+    if (!exampleService || queue.length === 0) return;
+    exampleService.prefetch(queue.slice(index));
+  }, [exampleService, queue, index]);
+
   const reveal = useCallback(() => {
     if (revealed || !card || !exampleService) return;
     setRevealed(true);
@@ -96,10 +113,13 @@ export default function StudyScreen() {
       if (!repository || !card || !revealed) return;
 
       void (async () => {
-        await repository.rateCard(card, rating);
+        const answered = await repository.rateCard(card, rating);
         setReviewed((count) => count + 1);
         setRevealed(false);
         setExamples(null);
+        // A card whose next step lands inside the learn-ahead window goes back
+        // on the end of the queue; anything further out is done for today.
+        if (dueWithinSession(answered)) setQueue((current) => [...current, answered]);
         setIndex((current) => current + 1);
         await refreshDecks();
       })();
@@ -314,12 +334,33 @@ function ExampleBlock({
       ))}
 
       {isFallback ? (
-        <Label variant="caption" tone="faint">
-          {t('examplesOfflineHint')}
-        </Label>
+        <>
+          <Label variant="caption" tone="faint">
+            {t('examplesOfflineHint')}
+          </Label>
+          {/* The reason, when there is one worth reading. "Your prepayment
+              credits are depleted" and "that API key was refused" are things
+              the learner can act on, and without this the app knows why the
+              sentences are generic and declines to say — which is the exact
+              complaint this whole section exists to answer. */}
+          {result.error ? (
+            <Label variant="caption" tone="faint">
+              {result.error}
+            </Label>
+          ) : null}
+        </>
       ) : null}
     </View>
   );
+}
+
+/** Anki's learn-ahead limit: how early a learning card may be shown again. */
+const LEARN_AHEAD_MS = 20 * 60 * 1000;
+
+/** True while a card is still on its (re)learning steps and will return today. */
+function dueWithinSession(card: Card): boolean {
+  if (card.phase !== 'learning' && card.phase !== 'relearning') return false;
+  return Date.parse(card.nextReview) - Date.now() <= LEARN_AHEAD_MS;
 }
 
 function statusKey(status: Card['status']): 'statusNew' | 'statusLearning' | 'statusMastered' {

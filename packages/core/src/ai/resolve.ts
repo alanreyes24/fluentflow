@@ -1,6 +1,5 @@
 import type { TargetLanguage } from '../types.js';
 import type { InferenceFn } from './generate.js';
-import type { ModelFamily } from './prompt.js';
 import { buildTranslatePrompt, parseTranslation } from './translate.js';
 
 /**
@@ -74,7 +73,6 @@ export interface ResolvedMeaning {
 export interface ResolveDeps {
   dictionary?: DictionaryLookup | null;
   infer?: InferenceFn | null;
-  family?: ModelFamily;
   maxTokens?: number;
   /** Deadline for the model half of the work. The dictionary is never slow. */
   budgetMs?: number;
@@ -134,10 +132,9 @@ export async function resolveMeanings(
 
     try {
       const raw = await deps.infer({
-        prompt: buildTranslatePrompt(entry.word, language, deps.family ?? 'qwen'),
-        stop: ['\n', '<|im_end|>', '</s>'],
+        prompt: buildTranslatePrompt(entry.word, language),
+        stop: ['\n'],
         maxTokens: deps.maxTokens ?? 12,
-        addBos: false,
         ...(deps.signal ? { signal: deps.signal } : {}),
       });
 

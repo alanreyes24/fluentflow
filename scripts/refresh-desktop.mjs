@@ -37,11 +37,10 @@ const EXPORT_DIR = join(DESKTOP, 'web');
 /**
  * The files that differ between versions. Everything else is the runtime.
  *
- * `node_modules` is deliberately not here: it holds the ONNX Runtime binaries,
- * which are 88 MB and change only when a dependency does. A dependency change
- * needs a real rebuild anyway.
+ * `node_modules` is deliberately not here: it changes only when a dependency
+ * does, and a dependency change needs a real rebuild anyway.
  */
-const PAYLOAD = ['main.js', 'preload.js', 'ai.js', 'dictionary.js', 'web'];
+const PAYLOAD = ['main.js', 'preload.js', 'ai.js', 'cloud.js', 'dictionary.js', 'web'];
 
 const options = {
   run: process.argv.includes('--run'),
