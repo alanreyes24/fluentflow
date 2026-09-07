@@ -3,7 +3,7 @@
 Where each target actually stands. The README says what the app does; this says
 which platforms it has been watched doing it on, which is a shorter list.
 
-Current as of 3 September 2026.
+Current as of 7 September 2026.
 
 ## Stages
 
@@ -20,7 +20,7 @@ collapsing these four into one word:
 | Platform | Builds | Runs | Verified | Distributable |
 | --- | --- | --- | --- | --- |
 | Web | yes | yes | yes, 22 checks | yes, once hosted |
-| Windows | yes | yes | yes, 14 checks | unsigned only |
+| Windows | yes | yes | yes, 35 checks | unsigned only |
 | iOS | yes | **never** | no | no |
 | Android | yes | **never** | no | no |
 | macOS | **never attempted** | no | no | no |
@@ -42,7 +42,10 @@ expo-sqlite's web backend requires. Unknown paths fall back to `index.html` so
 deep links resolve, and anything resolving outside the export directory is
 refused. The CSP is applied as a response header rather than a meta tag, the
 renderer runs with `contextIsolation` on, `nodeIntegration` off and `sandbox` on,
-and `will-attach-webview` is unconditionally blocked.
+and `will-attach-webview` is unconditionally blocked. `connect-src` allows
+Firebase's hosts and loopback — the latter because `app.json` ships pointing at
+`http://localhost:8787`, and without it every request to a sync server the user
+is running fails as a policy violation, which reads as the server being down.
 
 **The artifacts.** `npm run desktop` produces both an NSIS installer and a
 portable executable, 110 MB each. Both currently sit in `apps/desktop/dist/`
@@ -50,34 +53,95 @@ alongside `win-unpacked/`. `asar: false` is deliberate: it is what lets
 `npm run desktop:refresh` push a ~3 MB update into an already-installed copy
 instead of rebuilding a 110 MB installer.
 
+**Anki import runs here, not on the server.** The renderer is the web export, so
+the app's own import path defers to the sync server — a browser has no SQLite
+that can mount a collection from bytes. That made import unreachable on Windows
+in practice: it needed a running server *and* a Firebase account, for a file
+already on the disk, and the shell's CSP did not even allow `localhost`.
+
+Electron 44 ships Node 24, where `node:sqlite` is unflagged, so
+[apps/desktop/src/apkg.js](../apps/desktop/src/apkg.js) runs the same `parseApkg`
+from core that `apps/server/src/sqlite.ts` does. The file reaches it four ways —
+the picker, the File menu, a drop on the window, or a `.apkg` opened in Explorer,
+which starts the app — and the language and subdeck choices are still offered
+before anything is written. The renderer never names a path the user did not
+choose: the main process keeps the set of files that arrived from a dialog, a
+drop or the command line, and refuses anything else.
+
+Core is vendored into the shell by
+[scripts/vendor-core.mjs](../scripts/vendor-core.mjs), because `apps/desktop` is
+installed outside the workspaces and electron-builder copies only what a
+package's own dependencies declare.
+
+**The rest of the shell.** The window remembers its size, position, maximised
+state and zoom, and refuses to restore a position on a monitor that is no longer
+attached. The app tells the shell which theme it rendered, which is what colours
+the window background before the bundle loads and the title bar afterwards —
+`nativeTheme` knows what Windows prefers, not that this user forced light inside
+the app. A single-instance lock means a second launch hands over its command line
+and exits rather than opening a second window over the same SQLite database.
+Settings names the build and says plainly that example sentences here are
+written rather than generated, which is permanent and not an install away.
+
 **The evidence.** [scripts/verify-desktop.mjs](../scripts/verify-desktop.mjs)
 launches the packaged executable with a debugging port and drives the real
-renderer over the DevTools protocol. Fourteen checks, including that the window
-is served over `app://` and not `file://`, that SQLite works at all outside a
-browser tab, that the CSP does not block the app, that the renderer logged no
-errors, and that the process did not crash. It runs against a throwaway
-user-data directory each time, so it sees the empty state rather than the
-previous run's deck. Screenshots land in `.desktop-shots/`.
+renderer over the DevTools protocol. Thirty-five checks, including that the
+window is served over `app://` and not `file://`, that a deep link resolves
+rather than landing on a blank page, that a deck survives a reload because it
+went to SQLite, that the statistics screen reads that review back as a day
+streak — computed from the machine's own calendar days rather than a test's —
+with its retention, rating split and study calendar drawn, that a second copy
+hands over its file and exits, that a 60-card `.apkg` opened from Explorer
+imports with no server and no account, that a relaunch opens at the remembered
+size, that the CSP does not block the app, that the renderer logged no errors,
+and that the process did not crash. It runs against a throwaway user-data
+directory each time, so it sees the empty state rather than the previous run's
+deck. Screenshots land in `.desktop-shots/`.
+
+Twelve more tests run in plain Node against the shell's own modules
+([apps/desktop/test](../apps/desktop/test)): the importer, over real archives
+built by the same fixture helper core and the server use, and the window-bounds
+decision, over monitor arrangements that are awkward to plug in.
+
+One route into the importer is *not* covered: dropping a file on the window.
+Everything downstream of it is — the drop handler resolves a path and then joins
+the same queue the command line does, which the walkthrough drives — but the drop
+itself needs a real `File` with a real path behind it, and neither the DevTools
+protocol nor a synthetic event can produce one. So the handler in `preload.js`
+has been written and reviewed and never watched working, which on the scale at
+the top of this document is "builds", not "runs". Dragging a `.apkg` onto the
+window is the one-minute check nobody has done.
 
 **What is left.**
 
 - **Unsigned.** SmartScreen shows "More info, Run anyway" on first launch. This
-  is the single largest barrier to anyone else installing it.
-- **No version metadata in the executable.** `dist:win:unsigned` passes
-  `signAndEditExecutable=false`, because electron-builder's signing toolchain
-  ships an archive containing macOS symlinks that Windows refuses to extract
-  without Developer Mode. Nothing here is signed anyway, so the resource edit was
-  the cheaper thing to lose.
-- **No auto-update.** No update channel is configured. `desktop:refresh` is a
-  developer tool, not a distribution mechanism, and it cannot touch the portable
-  executable at all, which unpacks itself into a temporary directory on every
-  launch.
+  is the single largest barrier to anyone else installing it, and a certificate
+  is the only thing that removes it.
+- **No auto-update.** No update channel is configured, and no `electron-updater`
+  is wired in. `desktop:refresh` is a developer tool, not a distribution
+  mechanism, and it cannot touch the portable executable at all, which unpacks
+  itself into a temporary directory on every launch.
 - **No on-device AI, permanently.** `onnxruntime-react-native` is a native mobile
-  module, so the desktop build always uses the written-sentence fallback and the
-  UI says so. That is a property of the Electron approach, not a gap to close.
+  module, so the desktop build always uses the written-sentence fallback. Settings
+  now says so in those words rather than "not installed". That is a property of
+  the Electron approach, not a gap to close.
+- **The installer claims no file association, on purpose.** Opening a `.apkg`
+  with FluentFlow works, and Explorer's "Open with" is how you ask for it. The
+  installer does not register `.apkg` itself: that extension is Anki's, and an
+  installer that quietly takes it over from the app the decks were exported from
+  is the wrong default. It is a one-line `fileAssociations` entry if that
+  judgement changes.
 - The README links a GitHub releases page for the packaged builds. Whether a
   release is actually published there, and whether it matches the artifacts in
-  `dist/`, has not been checked.
+  `dist/`, has still not been checked — `gh` is not authenticated on this machine.
+
+**What is no longer left.** The executable used to carry no version metadata and
+Electron's own icon, because `signAndEditExecutable=false` disabled the resource
+edit along with the signing that could not run.
+[apps/desktop/scripts/stamp-executable.js](../apps/desktop/scripts/stamp-executable.js)
+now does that edit with `resedit`, in JavaScript, needing no privileges; the
+packaged `FluentFlow.exe` reports its own name, version, description and
+copyright, and carries the app's icon at seven sizes.
 
 ## macOS: configured, never executed
 
@@ -188,8 +252,10 @@ For contrast, since the above reads as though nothing runs.
 export, serves it, and walks Chrome through the whole brief: continue without an
 account, create a Spanish deck, add cards, reveal, rate with the keyboard,
 reload, read the statistics those reviews produced, and switch the interface to
-Bosnian. Twenty-two checks, screenshots in `.web-export-shots/`. It is also what the Windows build renders, which is why
-Windows inherited a working app rather than needing one built for it.
+Bosnian. Twenty-two checks, screenshots in `.web-export-shots/`. It is also what
+the Windows build renders, which is why Windows inherited a working app rather
+than needing one built for it. The exception is Anki import: the web path needs
+the sync server, and the Windows shell parses the archive itself.
 
 **The sync server** is complete and tested against a local store, but has never
 run against a real Firebase project. The Firestore backend and the security
@@ -203,10 +269,10 @@ Every claim above is meant to be re-verifiable rather than trusted:
 | Claim | Check |
 | --- | --- |
 | Windows artifacts exist | `ls apps/desktop/dist` |
-| Windows runs and works | `npm run verify:desktop`, 14 checks, rewrites `.desktop-shots/` |
+| Windows runs and works | `npm run verify:desktop`, 35 checks, rewrites `.desktop-shots/` |
 | Web runs and works | `npm run verify:web`, 22 checks |
 | The logic is correct across devices | `npm run verify`, 26 checks against the real server |
-| Test counts | `npm test`, 210 unit and integration tests |
+| Test counts | `npm test`, 236 unit and integration tests |
 | The project is ready for a device | `npx expo-doctor`, 21/21 |
 | The iOS bundle still builds | `npx expo export --platform ios`, completes through Hermes |
 | iOS has never been prebuilt | `ls apps/mobile/ios`, no such directory |
@@ -214,3 +280,5 @@ Every claim above is meant to be re-verifiable rather than trusted:
 | Icon and splash are configured | `grep -E "icon\|splash" apps/mobile/app.json`, and `ls apps/mobile/assets/*.png` |
 | ONNX is absent | `grep onnxruntime apps/mobile/package.json`, no matches |
 | macOS has never been built | `ls apps/desktop/dist/mac`, no such directory |
+| The Windows exe names itself | `(Get-Item apps/desktop/dist/win-unpacked/FluentFlow.exe).VersionInfo` |
+| Windows is still unsigned | the same `VersionInfo`, and SmartScreen on a first launch |

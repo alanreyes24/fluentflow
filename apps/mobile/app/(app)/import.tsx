@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import {
@@ -11,6 +11,8 @@ import {
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
 import { importApkg, pickApkg, type PickedFile } from '../../src/anki/import';
+import { canImportLocally } from '../../src/desktop';
+import { onShellImport } from '../../src/desktop-import';
 import {
   Button,
   column,
@@ -30,6 +32,11 @@ import { useTheme } from '../../src/ui/theme';
  * shown before anything is written, it can be overridden, and the summary
  * afterwards reports what was skipped and why. A silent import that quietly
  * drops half a deck is the outcome worth avoiding.
+ *
+ * On the desktop the file can also arrive without anyone opening this screen —
+ * dropped on the window, chosen from the File menu, or double-clicked in
+ * Explorer. It lands in the same place a picked file does, so the language and
+ * subdeck choices are still made before anything is written.
  */
 export default function ImportScreen() {
   const { t } = useI18n();
@@ -43,7 +50,7 @@ export default function ImportScreen() {
   const [summary, setSummary] = useState<ApkgImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const choose = async () => {
+  const choose = useCallback(async () => {
     setError(null);
     setSummary(null);
     try {
@@ -52,7 +59,23 @@ export default function ImportScreen() {
     } catch (cause) {
       setError(describeError(cause, t('importFailed')));
     }
-  };
+  }, [t]);
+
+  // A file the shell handed over, or a bare request to open the picker. Nothing
+  // is subscribed to in a browser or on a phone; there is no shell to ask.
+  useEffect(
+    () =>
+      onShellImport((request) => {
+        if (!request) {
+          void choose();
+          return;
+        }
+        setError(null);
+        setSummary(null);
+        setFile({ name: request.name, uri: request.path, size: request.size });
+      }),
+    [choose],
+  );
 
   const run = async () => {
     if (!file || !repository || !user) return;
@@ -82,6 +105,16 @@ export default function ImportScreen() {
           <Label variant="body" tone="muted">
             {t('importHint')}
           </Label>
+          {/* Only where it is true: in a browser tab the file goes to the sync
+              server, which needs an account. */}
+          {canImportLocally() ? (
+            <>
+              <Spacer size={theme.spacing.xs} />
+              <Label variant="caption" tone="faint">
+                {t('importDesktopHint')}
+              </Label>
+            </>
+          ) : null}
         </Surface>
 
         <Spacer size={theme.spacing.md} />

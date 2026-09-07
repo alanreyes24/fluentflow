@@ -1,2 +1,5 @@
+# All generated: `npm run build` writes them.
+build/
+vendor/
 web/
 dist/

@@ -27,7 +27,19 @@ describe('language packs', () => {
     // nouns, single-token placeholders, and the SI-style abbreviations on the
     // rating buttons — "min" and "d" are the same in all three, while the
     // longer units (mo / mj, y / a / g) are not and are still checked.
-    const shared = new Set(['appName', 'email', 'intervalMinutes', 'intervalDays']);
+    //
+    // The two desktop entries are product names and a version line built from
+    // them. Nobody translates "Electron 44 · Chromium 152"; they stay in the
+    // packs rather than inline so every user-visible string is still in one
+    // place.
+    const shared = new Set([
+      'appName',
+      'email',
+      'intervalMinutes',
+      'intervalDays',
+      'desktopShell',
+      'desktopRuntime',
+    ]);
     const untranslated = keys.filter((key) => !shared.has(key) && pack[key] === en[key]);
     expect(untranslated).toEqual([]);
   });

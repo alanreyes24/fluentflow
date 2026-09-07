@@ -2,39 +2,50 @@
   "name": "@fluentflow/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Windows and macOS desktop shell for FluentFlow",
+  "description": "Spaced-repetition flashcards for language learning",
+  "author": "Alan Reyes",
   "main": "main.js",
   "scripts": {
+    "build:core": "node ../../scripts/vendor-core.mjs",
+    "build:icon": "node ../../scripts/make-icons.mjs",
     "build:web": "cd ../mobile && npx expo export --platform web --output-dir ../desktop/web --clear",
+    "build": "npm run build:icon && npm run build:core && npm run build:web",
+    "test": "node --test \"test/*.test.mjs\"",
     "start": "node scripts/launch.mjs",
     "dev": "cross-env FLUENTFLOW_DEV_URL=http://localhost:8081 node scripts/launch.mjs",
-    "pack": "npm run build:web && electron-builder --win --dir -c.win.signAndEditExecutable=false",
-    "dist": "npm run build:web && electron-builder",
-    "dist:win": "npm run build:web && electron-builder --win",
-    "dist:mac": "npm run build:web && electron-builder --mac",
-    "dist:win:unsigned": "npm run build:web && electron-builder --win -c.win.signAndEditExecutable=false"
+    "pack": "npm run build && electron-builder --win --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
     "electron": "^44.1.1",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "resedit": "^1.7.2"
   },
   "build": {
     "appId": "com.fluentflow.desktop",
     "productName": "FluentFlow",
+    "copyright": "Copyright (c) 2026 Alan Reyes",
+    "afterPack": "./scripts/stamp-executable.js",
     "files": [
       "main.js",
       "preload.js",
+      "src/**/*",
+      "vendor/**/*",
       "web/**/*"
     ],
     "extraMetadata": {
       "main": "main.js"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"
-      ]
+      ],
+      "signAndEditExecutable": false
     },
     "mac": {
       "target": [

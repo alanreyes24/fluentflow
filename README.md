@@ -7,7 +7,7 @@ with example sentences generated on the device rather than by an API, Anki
 ```
 npm install
 npm run build          # build the shared core package
-npm test               # 210 tests
+npm test               # 236 tests
 npm run verify         # end-to-end check of the success criteria
 npm run verify:web     # the same criteria, driven through Chrome
 npm run server         # sync API on :8787 (no Firebase project needed)
@@ -29,7 +29,7 @@ sentences until a model is installed. Both are covered below.
 packages/core      domain logic, no platform dependencies — 109 tests
 apps/server        Express + Firestore sync API and Anki import — 17 tests
 apps/mobile        Expo app (iOS, Android, web)
-apps/desktop       Electron shell for Windows and macOS
+apps/desktop       Electron shell for Windows and macOS - 12 tests
 scripts            model preparation, icon generation, end-to-end verification
 docs               where each platform stands, and how to walk it on a phone
 ```
@@ -57,7 +57,7 @@ misread:
 | AI pipeline | Complete: prompting, parsing, validation, budget, fallback |
 | AI **weights** | **Not bundled.** `npm run prepare-model` fetches and converts them |
 | iOS / Android / web | Expo, standard |
-| Windows / macOS | Electron around the web export, not native RN |
+| Windows / macOS | Electron around the web export, not native RN. Windows imports `.apkg` locally |
 | The views | 84 render tests; the web and desktop builds walked through by a browser |
 
 All three platform bundles build: `npx expo export --platform web` and
@@ -85,6 +85,29 @@ web; desktop would otherwise mean the out-of-tree `react-native-windows` and
 `react-native-macos` forks and a second native project to maintain.
 [apps/desktop](apps/desktop) wraps the web export in Electron instead, which
 gives a real installable app from one codebase and gives up the native model.
+
+What that wrapping costs, and what it buys back, is worth being specific about.
+Inside the shell `Platform.OS` is `web`, so the app takes the browser's path
+everywhere — and the browser's Anki import hands the file to the sync server,
+because a browser has no SQLite that can mount a collection from bytes. On the
+desktop that made import unreachable in practice: it wanted a running server
+*and* a signed-in account, for a `.apkg` already on the disk.
+
+Electron 44 ships Node 24, where `node:sqlite` is unflagged, so the main process
+runs the same `parseApkg` from core that the server does
+([apps/desktop/src/apkg.js](apps/desktop/src/apkg.js)). Import is local, offline
+and account-less: choose a file, drag one onto the window, or double-click a
+`.apkg` in Explorer and the app opens with it. The app branches on a capability
+the shell advertises rather than on `Platform.OS`, which lies in here.
+
+The shell also does the things a wrapped web page cannot do for itself — remember
+its size, position and zoom; paint the right background before the bundle loads,
+by being told which theme the app rendered rather than guessing from the OS;
+refuse to open a second window over the same database. The page's whole view of
+it is one preload bridge
+([apps/desktop/preload.js](apps/desktop/preload.js)); there is no filesystem
+access and no general IPC, because the renderer draws deck content it did not
+write.
 
 ## Statistics and the streak
 
@@ -232,10 +255,10 @@ fails on the second.
 ## Testing
 
 ```
-npm test              # 210 unit and integration tests
+npm test              # 236 unit and integration tests
 npm run verify        # 26 checks end-to-end against the real server
 npm run verify:web    # 22 checks driving the web build through Chrome
-npm run verify:desktop  # 14 checks driving the packaged Windows app
+npm run verify:desktop  # 31 checks driving the packaged Windows app
 ```
 
 `npm run verify` is the one to run when judging whether the *logic* works. It
@@ -304,8 +327,10 @@ see
   it were removed rather than left as a promise the UI does not keep.
 - Import merges reverse and cloze siblings into one card per note and reports
   the count. Studying both directions of a card is not supported yet.
-- Windows builds are unsigned, and `dist:win:unsigned` skips the executable
-  resource edit — see below. macOS has not been packaged at all; it needs a Mac.
+- Windows builds are unsigned. SmartScreen asks for **More info, Run anyway**
+  on first launch, and there is no auto-update channel: `desktop:refresh` is a
+  developer tool, not a distribution mechanism. macOS has not been packaged at
+  all; it needs a Mac.
 - Phase-2 items from the brief (deck sharing, TTS, image occlusion, streaks) are
   not started.
 
@@ -323,8 +348,9 @@ trying a change out.
 
 A packaged FluentFlow is 370 MB on disk, and 367 MB of that is the Electron
 runtime — the same bytes in every version. What actually changes is
-`resources/app`: the web export, `main.js` and `preload.js`, about 3 MB
-together. So a new version is a file copy, not a download.
+`resources/app`: the web export, the shell, and the vendored core build the
+shell parses `.apkg` with, about 3 MB together. So a new version is a file copy,
+not a download.
 
 ```
 npm run desktop:pack               # once: builds dist/win-unpacked, no installer
@@ -350,12 +376,21 @@ so confirm anything shell-shaped with `refresh` before believing it.
 
 ### Two Windows-specific notes, both learned the hard way
 
-**The build skips the executable resource edit.** electron-builder fetches a
-signing toolchain whose archive contains macOS symlinks, and Windows refuses to
-create those without Developer Mode or an elevated prompt, so the extraction
-fails and takes the build with it. Nothing here is signed anyway, and asking
-every contributor to change a Windows setting is worse than losing the version
-metadata stamped into the exe.
+**electron-builder cannot edit the executable here, so the build does it
+itself.** The name, version and icon that Windows shows for an `.exe` live in
+its resource table, and electron-builder writes them with `rcedit` — which ships
+inside the `winCodeSign` package, whose archive contains two macOS symlinks that
+Windows refuses to create without Developer Mode or an elevated prompt. The
+extraction fails and takes the build with it.
+
+Left alone, that ships an app calling itself "Electron, GitHub, Inc. 44.1.1"
+with the Electron atom on the taskbar — which matters more than it sounds for a
+build that is also unsigned, since it leaves SmartScreen and the person reading
+its warning nothing to go on. So `signAndEditExecutable` is off and
+[apps/desktop/scripts/stamp-executable.js](apps/desktop/scripts/stamp-executable.js)
+does the edit in an `afterPack` hook, using `resedit` — a PE resource editor in
+plain JavaScript, needing no external binary and no privileges. Signing is a
+separate matter and still absent.
 
 **`ELECTRON_RUN_AS_NODE` must not be set.** Editors built on Electron — VS Code
 among them — export it for their own child processes, and any Electron binary

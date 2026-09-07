@@ -7,6 +7,7 @@ import { useApp } from '../../src/state/app';
 import { DAILY_GOAL_OPTIONS, usePreferences } from '../../src/state/preferences';
 import { modelStatus, type ModelStatus } from '../../src/ai/model';
 import { modelSizeBytes } from '../../src/ai/assets';
+import { desktopBridge } from '../../src/desktop';
 import {
   Button,
   Chip,
@@ -29,6 +30,10 @@ import { useTheme, useThemeContext, type ThemePreference } from '../../src/ui/th
  * The model section exists because "why are my examples generic?" is the
  * question this app will be asked most, and the answer is nearly always one of
  * three specific things. Saying which one beats a spinner.
+ *
+ * On the desktop it is a fourth thing, and a permanent one: the ONNX runtime is
+ * a native mobile module, so no desktop build will ever have it. That deserves
+ * its own wording — "not installed" invites someone to go install it.
  */
 export default function SettingsScreen() {
   const { t, language, setLanguage } = useI18n();
@@ -40,6 +45,11 @@ export default function SettingsScreen() {
   const [model, setModel] = useState<ModelStatus | null>(null);
   const [modelSize, setModelSize] = useState<number | null>(null);
   const [clearing, setClearing] = useState(false);
+
+  // Read once per render rather than stored: it is a property of the host, and
+  // it is null everywhere except inside the Electron shell.
+  const desktop = desktopBridge();
+  const onDesktop = desktop !== null && !desktop.hasLocalModel;
 
   useEffect(() => {
     void modelStatus().then(setModel);
@@ -105,12 +115,26 @@ export default function SettingsScreen() {
             </>
           ) : (
             <>
+              {/* Amber reads as "pending", which is right on a phone where the
+                  weights can still be installed, and wrong here where they
+                  never can be. On the desktop this is a settled fact. */}
               <Row gap={theme.spacing.sm}>
-                <View style={[styles.dot, { backgroundColor: theme.colors.statusLearning }]} />
-                <Label variant="body">{t('aiModelMissing')}</Label>
+                <View
+                  style={[
+                    styles.dot,
+                    {
+                      backgroundColor: onDesktop
+                        ? theme.colors.textFaint
+                        : theme.colors.statusLearning,
+                    },
+                  ]}
+                />
+                <Label variant="body">
+                  {onDesktop ? t('aiModelDesktopTitle') : t('aiModelMissing')}
+                </Label>
               </Row>
               <Label variant="caption" tone="muted">
-                {model.reason ?? t('aiModelMissingHint')}
+                {onDesktop ? t('aiModelDesktop') : (model.reason ?? t('aiModelMissingHint'))}
               </Label>
             </>
           )}
@@ -193,6 +217,33 @@ export default function SettingsScreen() {
           />
         </Section>
 
+        {/* Only inside the Electron shell. A browser tab has nothing to say
+            here, and the phone build has a different story entirely. */}
+        {desktop ? (
+          <Section title={t('desktopSection')}>
+            <Row justify="space-between" gap={theme.spacing.sm}>
+              <Label variant="body" style={styles.grow}>
+                {t('appName')} {desktop.appVersion}
+              </Label>
+              <Chip label={t('desktopShell')} color={theme.colors.textMuted} />
+            </Row>
+            <Label variant="caption" tone="faint">
+              {t('desktopRuntime', {
+                electron: desktop.electronVersion,
+                chrome: majorVersion(desktop.chromeVersion),
+              })}
+            </Label>
+            {desktop.canImportLocally ? (
+              <>
+                <Spacer size={theme.spacing.xs} />
+                <Label variant="caption" tone="muted">
+                  {t('desktopImportLocal')}
+                </Label>
+              </>
+            ) : null}
+          </Section>
+        ) : null}
+
         <Label variant="caption" tone="faint" align="center">
           {t('appName')}
         </Label>
@@ -210,6 +261,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </Surface>
     </View>
   );
+}
+
+/** Chromium's four-part version, cut to the part anyone quotes. */
+function majorVersion(version: string): string {
+  return version.split('.')[0] ?? version;
 }
 
 function formatBytes(bytes: number): string {

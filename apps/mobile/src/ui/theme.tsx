@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { desktopBridge } from '../desktop';
 
 /**
  * Design tokens and theme switching.
@@ -212,6 +213,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       },
     };
   }, [preference, system]);
+
+  // Tell the Electron shell what was decided.
+  //
+  // It cannot work this out for itself: the OS knows its own preference, not
+  // that this user forced light inside a dark Windows. The shell needs it for
+  // the window background and the title bar, and it stores the answer so the
+  // *next* cold start paints correctly before this bundle has even loaded.
+  // Nothing happens in a browser or on a phone, where there is no bridge.
+  const { name } = value.theme;
+  useEffect(() => {
+    desktopBridge()?.reportTheme(name, preference);
+  }, [name, preference]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

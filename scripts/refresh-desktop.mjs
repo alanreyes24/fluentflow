@@ -5,7 +5,7 @@
  *
  * A packaged FluentFlow is 370 MB on disk, and 367 MB of that is the Electron
  * runtime — the same bytes in every version. The part that actually changes is
- * `resources/app`: the web export, `main.js` and `preload.js`, about 3 MB
+ * `resources/app`: the web export, the shell and the vendored core, about 3 MB
  * together. So a new version is a 3 MB file copy, not a download.
  *
  * That works because `asar: false` is set in the desktop build config, which
@@ -30,8 +30,14 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DESKTOP = join(ROOT, 'apps', 'desktop');
 const EXPORT_DIR = join(DESKTOP, 'web');
 
-/** The files that differ between versions. Everything else is the runtime. */
-const PAYLOAD = ['main.js', 'preload.js', 'web'];
+/**
+ * The files that differ between versions. Everything else is the runtime.
+ *
+ * `vendor` is the core build the main process parses `.apkg` with, and `src` is
+ * the shell's own modules; both change with the app, and leaving either behind
+ * would pair a new bundle with an old importer.
+ */
+const PAYLOAD = ['main.js', 'preload.js', 'src', 'vendor', 'web'];
 
 const options = {
   run: process.argv.includes('--run'),
@@ -66,8 +72,14 @@ async function main() {
   }
 
   if (!options.skipBuild) {
-    console.log('Building the web export…');
-    await runCommand('npm', ['--prefix', DESKTOP, 'run', 'build:web']);
+    console.log('Building the web export and vendoring core…');
+    await runCommand('npm', ['--prefix', DESKTOP, 'run', 'build']);
+  }
+
+  if (!existsSync(join(DESKTOP, 'vendor', 'core', 'index.js'))) {
+    console.error('No vendored core. Run: npm run desktop:vendor');
+    process.exitCode = 1;
+    return;
   }
 
   if (!existsSync(join(EXPORT_DIR, 'index.html'))) {

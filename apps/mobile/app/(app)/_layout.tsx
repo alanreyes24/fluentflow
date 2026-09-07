@@ -1,5 +1,7 @@
-import { Redirect, Stack } from 'expo-router';
+import { useEffect } from 'react';
+import { Redirect, router, Stack } from 'expo-router';
 import { useApp } from '../../src/state/app';
+import { subscribeToShellImports } from '../../src/desktop-import';
 import { useI18n } from '../../src/i18n';
 import { SyncIndicator } from '../../src/ui/SyncIndicator';
 import { useTheme } from '../../src/ui/theme';
@@ -15,6 +17,11 @@ export default function AppLayout() {
   const { user } = useApp();
   const { t } = useI18n();
   const theme = useTheme();
+
+  // The desktop shell can ask for an import from the File menu, a dropped file
+  // or a deck opened with the app. This is the only place mounted for the whole
+  // session, so it is the only place that can route one.
+  useEffect(() => subscribeToShellImports(() => router.push('/(app)/import')), []);
 
   if (!user) return <Redirect href="/sign-in" />;
 

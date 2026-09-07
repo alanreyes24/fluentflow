@@ -78,6 +78,7 @@ export const en = {
   importFailed: 'Import failed',
   importDone: 'Import complete',
   importHint: 'Export a deck from Anki Desktop with File › Export › Anki Deck Package.',
+  importDesktopHint: 'Or drag the file onto this window. The import runs on this computer, offline and without an account.',
   importOverride: 'Import as',
   importDetect: 'Detect',
   importSubdecks: 'Subdecks',
@@ -105,7 +106,15 @@ export const en = {
   aiModelReady: 'Model ready',
   aiModelMissing: 'Model not installed',
   aiModelMissingHint: 'Examples fall back to generic sentences. Run npm run prepare-model.',
+  aiModelDesktopTitle: 'Examples are written, not generated',
+  aiModelDesktop: 'The on-device model is a mobile-only module, so the desktop app writes its own example sentences. This will not change.',
   account: 'Account',
+
+  // Desktop shell
+  desktopSection: 'Desktop app',
+  desktopShell: 'Electron',
+  desktopRuntime: 'Electron {electron} · Chromium {chrome}',
+  desktopImportLocal: 'Anki packages are imported on this computer, offline and without an account.',
 
   // Home
   today: 'Today',
@@ -240,6 +249,7 @@ const es: Strings = {
   importFailed: 'Error al importar',
   importDone: 'Importación completa',
   importHint: 'Exporta un mazo desde Anki Desktop con Archivo › Exportar › Paquete de mazo de Anki.',
+  importDesktopHint: 'O arrastra el archivo a esta ventana. La importación se hace en este ordenador, sin conexión y sin cuenta.',
   importOverride: 'Importar como',
   importDetect: 'Detectar',
   importSubdecks: 'Submazos',
@@ -265,7 +275,15 @@ const es: Strings = {
   aiModelReady: 'Modelo listo',
   aiModelMissing: 'Modelo no instalado',
   aiModelMissingHint: 'Los ejemplos usan frases genéricas. Ejecuta npm run prepare-model.',
+  aiModelDesktopTitle: 'Los ejemplos se escriben, no se generan',
+  aiModelDesktop: 'El modelo en el dispositivo es un módulo solo para móviles, así que la app de escritorio escribe sus propias frases de ejemplo. Esto no va a cambiar.',
   account: 'Cuenta',
+
+  // Desktop shell
+  desktopSection: 'Aplicación de escritorio',
+  desktopShell: 'Electron',
+  desktopRuntime: 'Electron {electron} · Chromium {chrome}',
+  desktopImportLocal: 'Los paquetes de Anki se importan en este ordenador, sin conexión y sin cuenta.',
 
   today: 'Hoy',
   dueToday: 'Para hoy',
@@ -386,6 +404,7 @@ const bs: Strings = {
   importFailed: 'Uvoz nije uspio',
   importDone: 'Uvoz završen',
   importHint: 'Izvezite špil iz Anki Desktopa: Datoteka › Izvoz › Anki Deck Package.',
+  importDesktopHint: 'Ili prevucite datoteku na ovaj prozor. Uvoz se obavlja na ovom računaru, bez interneta i bez naloga.',
   importOverride: 'Uvezi kao',
   importDetect: 'Otkrij',
   importSubdecks: 'Podšpilovi',
@@ -411,7 +430,15 @@ const bs: Strings = {
   aiModelReady: 'Model spreman',
   aiModelMissing: 'Model nije instaliran',
   aiModelMissingHint: 'Primjeri koriste opšte rečenice. Pokrenite npm run prepare-model.',
+  aiModelDesktopTitle: 'Primjeri se pišu, ne generišu',
+  aiModelDesktop: 'Model na uređaju je modul samo za mobilne uređaje, pa desktop aplikacija sama piše primjere rečenica. To se neće mijenjati.',
   account: 'Račun',
+
+  // Desktop shell
+  desktopSection: 'Desktop aplikacija',
+  desktopShell: 'Electron',
+  desktopRuntime: 'Electron {electron} · Chromium {chrome}',
+  desktopImportLocal: 'Anki paketi se uvoze na ovom računaru, bez interneta i bez naloga.',
 
   today: 'Danas',
   dueToday: 'Za danas',

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Draw the app icon, the Android adaptive icon, the splash mark and the
- * favicon.
+ * Draw the app icon, the Android adaptive icon, the splash mark, the favicon
+ * and the Windows `.ico`.
  *
  * A script rather than five checked-in binaries, for the same reason
  * `prepare-model.mjs` is a script: the design is then readable and arguable,
@@ -23,6 +23,18 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSETS = join(ROOT, 'apps', 'mobile', 'assets');
+const DESKTOP_BUILD = join(ROOT, 'apps', 'desktop', 'build');
+
+/**
+ * Sizes inside the Windows icon.
+ *
+ * Windows picks the nearest entry and scales the rest, and it asks for all of
+ * these in different places: 16 in the title bar, 32 in the taskbar, 48 in
+ * Explorer's medium view, 256 for the large view and the installer. Each is
+ * drawn at its own size rather than downscaled from one big one, so the
+ * antialiasing is computed for the pixels it actually occupies.
+ */
+const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256];
 
 /**
  * The palette, kept in step with `apps/mobile/src/ui/theme.tsx` by hand.
@@ -88,6 +100,19 @@ async function main() {
   }
 
   console.log(`\nWritten to ${ASSETS}`);
+
+  // The desktop shell. Without this the packaged Windows app carries Electron's
+  // own atom in the taskbar, the Start menu and the installer.
+  await mkdir(DESKTOP_BUILD, { recursive: true });
+  const ico = encodeIco(
+    ICO_SIZES.map((size) => ({
+      size,
+      png: encodePng(size, size, render({ size, background: ACCENT, ink: CREAM, scale: 0.8 })),
+    })),
+  );
+  await writeFile(join(DESKTOP_BUILD, 'icon.ico'), ico);
+  console.log(`  icon.ico — ${ICO_SIZES.join(', ')}`);
+  console.log(`Written to ${DESKTOP_BUILD}`);
 }
 
 // --- drawing ----------------------------------------------------------------
@@ -211,6 +236,47 @@ function crc32(buffer) {
   let crc = 0xffffffff;
   for (const byte of buffer) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
+}
+
+// --- ICO --------------------------------------------------------------------
+
+/**
+ * A directory of PNGs, which is all a modern `.ico` is.
+ *
+ * The format also allows raw BMP entries, and before Vista that was the only
+ * option — hence most of the complexity in icon writers. Windows 7 onwards
+ * reads PNG entries at every size, and every Windows this app can run on is
+ * well past that, so the images go in exactly as `encodePng` produced them.
+ *
+ * @param images `{ size, png }`, one per entry
+ */
+function encodeIco(images) {
+  const HEADER = 6;
+  const ENTRY = 16;
+
+  const header = Buffer.alloc(HEADER);
+  header.writeUInt16LE(0, 0); // reserved
+  header.writeUInt16LE(1, 2); // 1 = icon, 2 = cursor
+  header.writeUInt16LE(images.length, 4);
+
+  let offset = HEADER + images.length * ENTRY;
+  const directory = [];
+  for (const { size, png } of images) {
+    const entry = Buffer.alloc(ENTRY);
+    // 256 is written as 0: the field is one byte, and 256 does not fit in it.
+    entry[0] = size >= 256 ? 0 : size;
+    entry[1] = size >= 256 ? 0 : size;
+    entry[2] = 0; // palette size, meaningless for 32-bit colour
+    entry[3] = 0; // reserved
+    entry.writeUInt16LE(1, 4); // colour planes
+    entry.writeUInt16LE(32, 6); // bits per pixel
+    entry.writeUInt32LE(png.length, 8);
+    entry.writeUInt32LE(offset, 12);
+    directory.push(entry);
+    offset += png.length;
+  }
+
+  return Buffer.concat([header, ...directory, ...images.map(({ png }) => png)]);
 }
 
 await main();
