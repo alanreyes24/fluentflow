@@ -13,6 +13,7 @@ import {
   schedulingStateFor,
   softDelete,
   touch,
+  uuid,
   type Card,
   type CollectionSummary,
   type DayCount,
@@ -20,6 +21,7 @@ import {
   type DeckProgress,
   type RatingCounts,
   type RatingName,
+  type ReviewEvent,
   type StudyDay,
   type TargetLanguage,
 } from '@fluentflow/core';
@@ -230,8 +232,9 @@ export class Repository {
     await this.db.withTransactionAsync(async () => {
       await this.writeCards([withIntroduction]);
       await this.db.runAsync(
-        `INSERT INTO review_log (cardId, userId, rating, interval, easeFactor, reviewedAt)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO review_log (eventId, cardId, userId, rating, interval, easeFactor, reviewedAt, syncStatus)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        uuid(),
         withIntroduction.id,
         withIntroduction.userId,
         rating,
@@ -334,6 +337,24 @@ export class Repository {
       if (rating) counts[rating] = row.count;
     }
     return counts;
+  }
+
+  /** Review events waiting to be copied to the shared account. */
+  async pendingReviewEvents(userId: string): Promise<ReviewEvent[]> {
+    const rows = await this.db.getAllAsync<ReviewEventRow>(
+      "SELECT eventId, cardId, userId, rating, interval, easeFactor, reviewedAt, syncStatus FROM review_log WHERE userId = ? AND syncStatus = 'pending'",
+      userId,
+    );
+    return rows.map(toReviewEvent);
+  }
+
+  /** All local review events, used for idempotent union with remote history. */
+  async listReviewEvents(userId: string): Promise<ReviewEvent[]> {
+    const rows = await this.db.getAllAsync<ReviewEventRow>(
+      'SELECT eventId, cardId, userId, rating, interval, easeFactor, reviewedAt, syncStatus FROM review_log WHERE userId = ?',
+      userId,
+    );
+    return rows.map(toReviewEvent);
   }
 
   /**
@@ -444,7 +465,8 @@ export class Repository {
     const row = await this.db.getFirstAsync<{ count: number }>(
       `SELECT
          (SELECT COUNT(*) FROM decks WHERE userId = ?1 AND syncStatus = 'pending') +
-         (SELECT COUNT(*) FROM cards WHERE userId = ?1 AND syncStatus = 'pending') AS count`,
+         (SELECT COUNT(*) FROM cards WHERE userId = ?1 AND syncStatus = 'pending') +
+         (SELECT COUNT(*) FROM review_log WHERE userId = ?1 AND syncStatus = 'pending') AS count`,
       userId,
     );
     return row?.count ?? 0;
@@ -455,7 +477,7 @@ export class Repository {
    * upload started. Comparing `lastModified` is what stops a review made during
    * the round trip from being marked synced and then never sent.
    */
-  async markSynced(decks: Deck[], cards: Card[]): Promise<void> {
+  async markSynced(decks: Deck[], cards: Card[], reviewEvents: ReviewEvent[] = []): Promise<void> {
     await this.db.withTransactionAsync(async () => {
       for (const deck of decks) {
         await this.db.runAsync(
@@ -471,14 +493,45 @@ export class Repository {
           card.lastModified,
         );
       }
+      for (const event of reviewEvents) {
+        await this.db.runAsync(
+          "UPDATE review_log SET syncStatus = 'synced' WHERE eventId = ? AND syncStatus = 'pending'",
+          event.eventId,
+        );
+      }
     });
   }
 
   /** Apply records that arrived from the server, already merged by the caller. */
-  async applyRemote(decks: Deck[], cards: Card[]): Promise<void> {
+  async applyRemote(
+    decks: Deck[],
+    cards: Card[],
+    reviewEvents: ReviewEvent[] = [],
+  ): Promise<void> {
     await this.db.withTransactionAsync(async () => {
       await this.writeDecks(decks.map((deck) => ({ ...deck, syncStatus: 'synced' as const })));
       await this.writeCards(cards.map((card) => ({ ...card, syncStatus: 'synced' as const })));
+      for (const event of reviewEvents) {
+        await this.db.runAsync(
+          `INSERT INTO review_log (eventId, cardId, userId, rating, interval, easeFactor, reviewedAt, syncStatus)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+           ON CONFLICT (eventId) DO UPDATE SET
+             cardId = excluded.cardId,
+             userId = excluded.userId,
+             rating = excluded.rating,
+             interval = excluded.interval,
+             easeFactor = excluded.easeFactor,
+             reviewedAt = excluded.reviewedAt,
+             syncStatus = 'synced'`,
+          event.eventId,
+          event.cardId,
+          event.userId,
+          event.rating,
+          event.interval,
+          event.easeFactor,
+          event.reviewedAt,
+        );
+      }
     });
     for (const deckId of new Set(cards.map((card) => card.deckId))) {
       await this.refreshDeckCount(deckId);
@@ -529,7 +582,12 @@ export class Repository {
         now,
         fromUserId,
       );
-      moved = decks.changes + cards.changes;
+      const reviews = await this.db.runAsync(
+        "UPDATE review_log SET userId = ?, syncStatus = 'pending' WHERE userId = ?",
+        toUserId,
+        fromUserId,
+      );
+      moved = decks.changes + cards.changes + reviews.changes;
     });
     return moved;
   }
@@ -654,6 +712,17 @@ interface CardRow {
   deleted: number;
 }
 
+interface ReviewEventRow {
+  eventId: string;
+  cardId: string;
+  userId: string;
+  rating: string;
+  interval: number;
+  easeFactor: number;
+  reviewedAt: string;
+  syncStatus: string;
+}
+
 function toDeck(row: DeckRow): Deck {
   return {
     id: row.id,
@@ -691,6 +760,19 @@ function toCard(row: CardRow): Card {
     ...(row.introducedAt ? { introducedAt: row.introducedAt } : {}),
     ...(row.leech ? { leech: true } : {}),
     ...(row.deleted ? { deleted: true } : {}),
+  };
+}
+
+function toReviewEvent(row: ReviewEventRow): ReviewEvent {
+  return {
+    eventId: row.eventId,
+    cardId: row.cardId,
+    userId: row.userId,
+    rating: row.rating as ReviewEvent['rating'],
+    interval: row.interval,
+    easeFactor: row.easeFactor,
+    reviewedAt: row.reviewedAt,
+    syncStatus: row.syncStatus as ReviewEvent['syncStatus'],
   };
 }
 

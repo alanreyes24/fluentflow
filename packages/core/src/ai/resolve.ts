@@ -1,6 +1,12 @@
 import type { TargetLanguage } from '../types.js';
 import type { InferenceFn } from './generate.js';
-import { buildTranslatePrompt, parseTranslation } from './translate.js';
+import {
+  BATCH_TRANSLATION_SCHEMA,
+  buildTranslateBatchPrompt,
+  parseTranslationBatch,
+  sanitizeWord,
+  wordKey,
+} from './translate.js';
 
 /**
  * Where a word's meaning comes from: the dictionary first, the model only for
@@ -102,7 +108,20 @@ export async function resolveMeanings(
   const unresolved: number[] = [];
 
   // --- the dictionary -------------------------------------------------------
-  for (const word of words) {
+  for (const originalWord of words) {
+    const word = sanitizeWord(originalWord);
+    if (!word) {
+      unresolved.push(results.length);
+      results.push({
+        word,
+        meaning: '',
+        source: 'none',
+        needsReview: false,
+        rejected: 'not-found',
+      });
+      deps.onProgress?.(results.length, words.length);
+      continue;
+    }
     const found = deps.dictionary ? await lookUp(deps.dictionary, word) : null;
     if (found) {
       results.push(found);
@@ -125,39 +144,49 @@ export async function resolveMeanings(
   const deadline = deps.budgetMs ? now() + deps.budgetMs : Infinity;
   let done = words.length - unresolved.length;
 
-  for (const index of unresolved) {
-    const entry = results[index];
-    if (!entry) continue;
-    if (deps.signal?.aborted || now() >= deadline) break;
+  // Duplicate and sanitize before spending a model request. Results are still
+  // copied back to every original position, so card order remains unchanged.
+  const requested = [...new Map(
+    unresolved
+      .map((index) => results[index]?.word ?? '')
+      .filter(Boolean)
+      .map((word) => [wordKey(word), word] as const),
+  ).values()];
 
+  if (requested.length > 0 && !deps.signal?.aborted && now() < deadline) {
     try {
       const raw = await deps.infer({
-        prompt: buildTranslatePrompt(entry.word, language),
-        stop: ['\n'],
-        maxTokens: deps.maxTokens ?? 12,
+        prompt: buildTranslateBatchPrompt(requested, language),
+        stop: [],
+        // JSON metadata makes a batch response materially larger than the old
+        // one-word answer. Keep a ceiling for pathological imports.
+        maxTokens: deps.maxTokens ?? Math.min(8192, Math.max(256, requested.length * 16 + 64)),
+        responseSchema: BATCH_TRANSLATION_SCHEMA,
         ...(deps.signal ? { signal: deps.signal } : {}),
       });
 
-      const parsed = parseTranslation(raw, entry.word);
-      if (parsed.meaning) {
-        results[index] = {
-          word: entry.word,
-          meaning: parsed.meaning,
-          source: 'model',
-          needsReview: true,
-        };
-      } else {
-        // The model was asked and produced nothing usable. Throwing it out is
-        // the point: a word with no meaning is a word the user can type one
-        // for, and a wrong meaning is a card that teaches the wrong thing.
-        results[index] = { ...entry, rejected: 'model-rejected' };
+      const parsed = parseTranslationBatch(raw, requested);
+      const meanings = new Map(parsed.map((entry) => [wordKey(entry.word), entry.meaning]));
+      for (const index of unresolved) {
+        const entry = results[index];
+        if (!entry) continue;
+        const meaning = meanings.get(wordKey(entry.word)) ?? '';
+        results[index] = meaning
+          ? { ...entry, meaning, source: 'model', needsReview: true, rejected: undefined }
+          : { ...entry, rejected: 'model-rejected' };
       }
     } catch {
-      results[index] = { ...entry, rejected: 'model-rejected' };
+      // Preserve the old safety rule: a failed model request never creates a
+      // guessed card, but it should not discard dictionary results either.
+      for (const index of unresolved) {
+        const entry = results[index];
+        if (entry) results[index] = { ...entry, rejected: 'model-rejected' };
+      }
     }
-
-    deps.onProgress?.(++done, words.length);
   }
+
+  done += unresolved.length;
+  deps.onProgress?.(done, words.length);
 
   return results;
 }

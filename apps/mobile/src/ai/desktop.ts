@@ -3,6 +3,7 @@ import type {
   ResolvedMeaning,
   TargetLanguage,
 } from '@fluentflow/core';
+import { webAiAvailable, lookupSourcesOnWeb, resolveMeaningsOnWeb } from './web';
 
 /**
  * The desktop shell's lookup bridge, as the app sees it.
@@ -149,7 +150,9 @@ const NO_SHELL = 'Looking words up needs the desktop app.';
 
 export async function lookupSources(): Promise<LookupSources> {
   const ai = bridge();
-  if (!ai) return { dictionary: { available: false, reason: NO_SHELL } };
+  if (!ai) return webAiAvailable()
+    ? lookupSourcesOnWeb()
+    : { dictionary: { available: false, reason: NO_SHELL } };
 
   try {
     return await ai.status();
@@ -206,7 +209,10 @@ export async function lookUpMeanings(
   options?: LookupOptions,
 ): Promise<ResolvedMeaning[]> {
   const ai = bridge();
-  if (!ai) throw new Error(NO_SHELL);
+  if (!ai) {
+    if (webAiAvailable()) return resolveMeaningsOnWeb(words, language, options);
+    throw new Error(NO_SHELL);
+  }
 
   const unsubscribe = onProgress ? ai.onProgress(onProgress) : null;
   try {

@@ -76,6 +76,103 @@ export interface WordTranslation {
 }
 
 const MAX_WORDS_IN_MEANING = 6;
+const MAX_WORD_LENGTH = 120;
+
+/** Gemini's structured-output shape for a whole unresolved word list. */
+export const BATCH_TRANSLATION_SCHEMA = {
+  type: 'ARRAY',
+  items: {
+    type: 'OBJECT',
+    properties: {
+      word: { type: 'STRING' },
+      meaning: { type: 'STRING' },
+    },
+    required: ['word', 'meaning'],
+  },
+} as const;
+
+/**
+ * Clean one pasted term before it reaches a dictionary or a hosted model.
+ * Keep accents and punctuation that may be part of a real phrase, but remove
+ * list decoration, invisible characters, control characters and excess space.
+ */
+export function sanitizeWord(value: string): string {
+  const cleaned = String(value ?? '')
+    .normalize('NFKC')
+    .replace(/[\u0000-\u001f\u007f\u200b-\u200d\uFEFF]/g, '')
+    .replace(/^(?:\s*(?:\d+\s*[.)]|[-*•·▪◦])\s*)+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["“”«»]+|["“”«»]+$/g, '')
+    .trim();
+  return cleaned.length <= MAX_WORD_LENGTH ? cleaned : '';
+}
+
+/** Case/accent-insensitive key used only for matching and deduplication. */
+export function wordKey(value: string): string {
+  return sanitizeWord(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Build one strict JSON request for the entire unresolved set. */
+export function buildTranslateBatchPrompt(words: string[], language: TargetLanguage): string {
+  const languageName = LANGUAGE_NAMES_EN[language];
+  return [
+    `You are a ${languageName}-English dictionary.`,
+    'Translate every input item below.',
+    'Return only a JSON array, with exactly one object per input item, in the same order.',
+    'Each object must contain exactly these string fields: "word" and "meaning".',
+    'Copy "word" exactly as provided.',
+    'The "meaning" must be a concise English word or short phrase of no more than six words.',
+    'If an item is not a word or you are not sure, use an empty string for "meaning".',
+    'Do not explain, add markdown, omit items, reorder items, or invent a translation.',
+    '',
+    JSON.stringify(words),
+  ].join('\n');
+}
+
+export interface BatchTranslation {
+  word: string;
+  meaning: string;
+}
+
+/**
+ * Parse and validate a batch response. Unknown, extra, duplicate or malformed
+ * rows are ignored; a malformed response never gets applied to another word.
+ */
+export function parseTranslationBatch(raw: string, requested: string[]): BatchTranslation[] {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(decoded)) return [];
+
+  const requestedByKey = new Map(requested.map((word) => [wordKey(word), word]));
+  const seen = new Set<string>();
+  const translations: BatchTranslation[] = [];
+
+  for (const item of decoded) {
+    if (!item || typeof item !== 'object') continue;
+    const candidate = item as { word?: unknown; meaning?: unknown };
+    if (typeof candidate.word !== 'string' || typeof candidate.meaning !== 'string') continue;
+
+    const key = wordKey(candidate.word);
+    const requestedWord = requestedByKey.get(key);
+    if (!requestedWord || seen.has(key)) continue;
+    seen.add(key);
+
+    const parsed = parseTranslation(candidate.meaning, requestedWord);
+    translations.push({ word: requestedWord, meaning: parsed.meaning });
+  }
+
+  return translations;
+}
 
 /**
  * Clean and check one answer.

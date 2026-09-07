@@ -47,31 +47,20 @@ type Translate = ReturnType<typeof useI18n>['t'];
  * seeds the parser with that deck's words so pasting a longer version of the
  * same list adds only what is new.
  *
- * A list with no meanings on it — just words — is filled in by the desktop
- * shell: the bilingual dictionary first, the hosted model only for what the
- * dictionary does not have. Both land in an editable review list rather than in
- * the deck, and each row says where its meaning came from, because the two are
- * not equally trustworthy — the dictionary answered twelve of twelve on the
- * list this was built against, and can say "I don't know", which is the thing
- * no model will do for you.
- *
- * That order is also the screen's main source of confusion, and the shape here
- * is the answer to it. The lookup is two presses, not one. The first asks the
- * dictionary alone: free, offline, instant, and enough for most word lists. Only
- * if it leaves something over does a second button appear, naming the model and
- * the exact number of words it would send. So nothing is ever billed as a side
- * effect of asking for meanings, and — the part that was actually broken —
- * every box can simply be typed into instead, which before this was reachable
- * only by running a lookup first.
+ * A list with no meanings on it — just words — is filled in automatically by
+ * the dictionary. Only words the dictionary misses are offered to Gemini, with
+ * an estimate shown before anything is sent. Meanings are never entered by
+ * hand on this screen.
  */
 export default function TextImportScreen() {
   const { deckId } = useLocalSearchParams<{ deckId?: string }>();
   const { t } = useI18n();
   const theme = useTheme();
   const content = useContentStyle();
-  const { repository, user, refreshDecks, syncNow } = useApp();
+  const { repository, user, decks, refreshDecks, syncNow } = useApp();
 
   const [deck, setDeck] = useState<Deck | null>(null);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [existingFronts, setExistingFronts] = useState<string[]>([]);
   const [text, setText] = useState('');
   const [deckName, setDeckName] = useState('');
@@ -83,21 +72,29 @@ export default function TextImportScreen() {
   const [sources, setSources] = useState<LookupSources | null>(null);
   const [translating, setTranslating] = useState(false);
   const [progress, setProgress] = useState<TranslationProgress | null>(null);
-  /** Word -> meaning, seeded by the lookup and then edited by the user. */
+  /** Word -> meaning, filled by the dictionary or Gemini. */
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  /** Word -> where its meaning came from, so the review list can say. */
+  /** Word -> where its meaning came from, for the automatic-results summary. */
   const [origins, setOrigins] = useState<Record<string, ResolvedMeaning>>({});
   const [reviewing, setReviewing] = useState(false);
+  const [confirmingModel, setConfirmingModel] = useState(false);
+  const [listExpanded, setListExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const targetDeckId = deckId ?? selectedDeckId ?? undefined;
 
   // The target deck, when adding to one. Its words seed the duplicate check.
   useEffect(() => {
-    if (!repository || !deckId) return;
+    if (!repository || !targetDeckId) {
+      setDeck(null);
+      setExistingFronts([]);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       const [loaded, cards] = await Promise.all([
-        repository.getDeck(deckId),
-        repository.listCards(deckId),
+        repository.getDeck(targetDeckId),
+        repository.listCards(targetDeckId),
       ]);
       if (cancelled) return;
       setDeck(loaded);
@@ -106,7 +103,7 @@ export default function TextImportScreen() {
     return () => {
       cancelled = true;
     };
-  }, [repository, deckId]);
+  }, [repository, targetDeckId]);
 
   // What is installed is a property of the shell, not of the paste.
   useEffect(() => {
@@ -133,8 +130,6 @@ export default function TextImportScreen() {
   const targetLanguage = deck?.language ?? language ?? 'es';
   const hasDictionary = Boolean(sources?.dictionary.languages?.[targetLanguage]);
   const hasModel = Boolean(sources?.cloud?.available);
-  /** Either source is enough to be worth offering. */
-  const canLookUp = hasDictionary || hasModel;
 
   // The two names that go into the sentence explaining the lookup. The
   // dictionary's own name matters for Bosnian, which is served by the
@@ -144,22 +139,18 @@ export default function TextImportScreen() {
     sources?.dictionary.source?.[targetLanguage] ?? LANGUAGE_NAMES[targetLanguage];
   const modelName = sources?.cloud?.model ?? '';
 
-  const missingMeanings = useMemo(
+  const meaninglessWords = useMemo(
     () => preview.entries.filter((entry) => !entry.back).map((entry) => entry.front),
     [preview.entries],
   );
 
-  /** How many meanings came from where, once the lookup has run. */
-  const counts = useMemo(() => tally(missingMeanings, origins), [missingMeanings, origins]);
+  const missingMeanings = useMemo(
+    () => meaninglessWords.filter((word) => !drafts[word]?.trim()),
+    [meaninglessWords, drafts],
+  );
 
-  /**
-   * Whether the editable list of meanings is on screen.
-   *
-   * After a lookup, always. Also when there is nothing to look up with, because
-   * otherwise the only thing this screen offers someone with no dictionary and
-   * no key is a dead end — which is exactly what it was.
-   */
-  const editing = reviewing || (sources !== null && !canLookUp);
+  /** How many meanings came from where, once the lookup has run. */
+  const counts = useMemo(() => tally(meaninglessWords, origins), [meaninglessWords, origins]);
 
   /** Words that still have nothing — neither looked up nor typed in. */
   const remaining = useMemo(
@@ -189,7 +180,7 @@ export default function TextImportScreen() {
    */
   const runLookup = useCallback(
     async (useModel: boolean) => {
-      const words = useModel ? unasked : missingMeanings;
+      const words = useModel ? unasked : meaninglessWords;
       if (words.length === 0) return;
       setTranslating(true);
       setProgress({ done: 0, total: words.length });
@@ -221,7 +212,7 @@ export default function TextImportScreen() {
         setProgress(null);
       }
     },
-    [missingMeanings, unasked, deck, language],
+    [meaninglessWords, unasked, deck, language],
   );
 
   /**
@@ -239,17 +230,19 @@ export default function TextImportScreen() {
   // The dictionary pass runs on its own: it is free and sends nothing, so
   // asking permission for it is ceremony. The paid pass still waits to be asked.
   useEffect(() => {
-    if (!text.trim() || missingMeanings.length === 0 || reviewing || translating) return;
+    if (!text.trim() || meaninglessWords.length === 0 || reviewing || translating) return;
     if (!hasDictionary) return; // Only auto-run if dictionary is available.
-    const first = missingMeanings[0];
+    const first = meaninglessWords[0];
     if (!first || origins[first]) return; // Nothing to do, or already looked up.
     if (attempted.current.has(first)) return; // Asked once already, and it failed.
     attempted.current.add(first);
     void runLookup(false);
-  }, [text, missingMeanings, reviewing, translating, hasDictionary, origins, runLookup]);
+  }, [text, meaninglessWords, reviewing, translating, hasDictionary, origins, runLookup]);
+
+  const estimatedModelCost = estimateTranslationCost(unasked.length);
 
   const run = useCallback(async () => {
-    if (!repository || !user || preview.entries.length === 0) return;
+    if (!repository || !user || preview.entries.length === 0 || (targetDeckId && !deck)) return;
     setBusy(true);
     setError(null);
     try {
@@ -302,27 +295,73 @@ export default function TextImportScreen() {
     }
   }, [
     repository, user, preview.entries.length, text, swap, existingFronts, drafts,
-    deck, deckName, language, refreshDecks, syncNow, t,
+    deck, deckName, language, refreshDecks, syncNow, t, targetDeckId,
   ]);
 
   return (
     <Screen>
       <ScrollView contentContainerStyle={content} keyboardShouldPersistTaps="handled">
-        <Surface>
-          <Label variant="body" tone="muted">
-            {t('pasteHint')}
-          </Label>
-          {deck ? (
-            <>
-              <Spacer size={theme.spacing.xs} />
-              <Label variant="caption" tone="faint">
-                {deck.name} · {LANGUAGE_NAMES[deck.language]}
-              </Label>
-            </>
-          ) : null}
-        </Surface>
+        {deck ? (
+          <Surface>
+            <Label variant="caption" tone="faint">
+              {deck.name} · {LANGUAGE_NAMES[deck.language]}
+            </Label>
+          </Surface>
+        ) : null}
 
         <Spacer size={theme.spacing.md} />
+
+        {!deck ? (
+          <Surface style={styles.options}>
+            {decks.length > 0 ? (
+              <>
+                <Label variant="caption" tone="muted">
+                  {t('pasteTargetDeck')}
+                </Label>
+                <SegmentedControl
+                  options={[
+                    { value: 'new', label: t('pasteNewDeck') },
+                    ...decks.map((item) => ({ value: item.id, label: item.name })),
+                  ]}
+                  value={selectedDeckId ?? 'new'}
+                  onChange={(value) => {
+                    const nextDeckId = value === 'new' ? null : value;
+                    setSelectedDeckId(nextDeckId);
+                    // Do not let the previous target receive a fast tap while
+                    // the newly selected deck is being loaded below.
+                    setDeck(null);
+                    setExistingFronts([]);
+                    setDrafts({});
+                    setOrigins({});
+                    setReviewing(false);
+                    setConfirmingModel(false);
+                    attempted.current.clear();
+                  }}
+                />
+              </>
+            ) : null}
+            {!selectedDeckId ? (
+              <Field label={t('deckName')} value={deckName} onChangeText={setDeckName} autoFocus />
+            ) : null}
+            {!selectedDeckId ? (
+              <>
+                <Label variant="caption" tone="muted">
+                  {t('importOverride')}
+                </Label>
+                <SegmentedControl
+                  options={[
+                    { value: 'auto', label: 'Auto' },
+                    ...TARGET_LANGUAGES.map((code) => ({ value: code, label: LANGUAGE_NAMES[code] })),
+                  ]}
+                  value={language ?? 'auto'}
+                  onChange={(value) => setLanguage(value === 'auto' ? null : value)}
+                />
+              </>
+            ) : null}
+          </Surface>
+        ) : null}
+
+        {!deck ? <Spacer size={theme.spacing.md} /> : null}
 
         <Field
           label={t('pasteLabel')}
@@ -330,13 +369,20 @@ export default function TextImportScreen() {
           onChangeText={(value) => {
             setText(value);
             setSummary(null);
+            setConfirmingModel(false);
           }}
           multiline
-          numberOfLines={10}
+          numberOfLines={listExpanded ? 10 : 4}
           autoCapitalize="none"
           autoCorrect={false}
           placeholder={'hablar - to speak\ncasa - house'}
-          style={styles.paste}
+          style={[styles.paste, listExpanded ? styles.pasteExpanded : styles.pasteCollapsed]}
+        />
+        <Button
+          label={listExpanded ? t('pasteCollapse') : t('pasteExpand')}
+          variant="ghost"
+          onPress={() => setListExpanded((expanded) => !expanded)}
+          style={styles.expandList}
         />
 
         {/* A state, not an action: it says how the list is being read, and
@@ -347,28 +393,8 @@ export default function TextImportScreen() {
           onPress={() => setSwap(!swap)}
         />
 
-        {!deck ? (
-          <>
-            <Spacer size={theme.spacing.md} />
-            <Surface style={styles.options}>
-              <Field label={t('deckName')} value={deckName} onChangeText={setDeckName} />
-              <Label variant="caption" tone="muted">
-                {t('importOverride')}
-              </Label>
-              <SegmentedControl
-                options={[
-                  { value: 'auto', label: 'Auto' },
-                  ...TARGET_LANGUAGES.map((code) => ({ value: code, label: LANGUAGE_NAMES[code] })),
-                ]}
-                value={language ?? 'auto'}
-                onChange={(value) => setLanguage(value === 'auto' ? null : value)}
-              />
-            </Surface>
-          </>
-        ) : null}
-
         <Spacer size={theme.spacing.md} />
-        <Preview result={preview} ready={readyCount} />
+        <Preview result={preview} ready={readyCount} meanings={drafts} />
 
         {missingMeanings.length > 0 && !translating ? (
           <>
@@ -382,25 +408,59 @@ export default function TextImportScreen() {
                 <Label variant="caption" tone="faint">
                   {t('loading')}
                 </Label>
-              ) : !canLookUp ? (
+              ) : hasDictionary && !reviewing ? (
                 <Label variant="caption" tone="faint">
-                  {t('aiUnavailable')}
-                  {sources.dictionary.reason ? ` — ${sources.dictionary.reason}` : ''}
+                  {t('aiDictionaryAutomatic', { dictionary: dictionaryName })}
                 </Label>
-              ) : reviewing ? null : (
+              ) : hasModel && unasked.length > 0 ? (
                 <>
                   <Label variant="caption" tone="muted">
-                    {hasDictionary
-                      ? t('aiSourceDictionary', { dictionary: dictionaryName })
-                      : t('aiSourceModelOnly', { dictionary: dictionaryName, model: modelName })}
+                    {t('aiModelEstimate', {
+                      model: modelName,
+                      count: unasked.length,
+                      cost: estimatedModelCost,
+                    })}
                   </Label>
-                  <Button
-                    label={t('aiTranslate')}
-                    variant="secondary"
-                    onPress={() => void runLookup(!hasDictionary)}
-                    disabled={translating}
-                  />
+                  {confirmingModel ? (
+                    <>
+                      <Label variant="caption" tone="faint">
+                        {t('aiModelConfirm', { model: modelName, cost: estimatedModelCost })}
+                      </Label>
+                      <Row gap={theme.spacing.sm}>
+                        <Button
+                          label={t('cancel')}
+                          variant="ghost"
+                          onPress={() => setConfirmingModel(false)}
+                          style={styles.grow}
+                        />
+                        <Button
+                          label={t('aiAskModelConfirm')}
+                          variant="secondary"
+                          onPress={() => {
+                            setConfirmingModel(false);
+                            void runLookup(true);
+                          }}
+                          style={styles.grow}
+                        />
+                      </Row>
+                    </>
+                  ) : (
+                    <Button
+                      label={t('aiAskModel', { model: modelName, count: unasked.length })}
+                      variant="secondary"
+                      onPress={() => setConfirmingModel(true)}
+                      disabled={unasked.length === 0}
+                    />
+                  )}
                 </>
+              ) : hasModel ? (
+                <Label variant="caption" tone="faint">
+                  {t('aiNoMoreAttempts')}
+                </Label>
+              ) : (
+                <Label variant="caption" tone="faint">
+                  {t('aiUnavailableNoManual')}
+                </Label>
               )}
             </Surface>
           </>
@@ -417,77 +477,17 @@ export default function TextImportScreen() {
           </>
         ) : null}
 
-        {editing && missingMeanings.length > 0 ? (
+        {reviewing && meaninglessWords.length > 0 ? (
           <>
             <Spacer size={theme.spacing.md} />
             <Surface style={styles.options}>
-              <Label variant="label">{t('aiReviewTitle')}</Label>
+              <Label variant="label">{t('aiAutomaticResults')}</Label>
               <Label variant="caption" tone="faint">
                 {summaryLine(counts, modelName, t)}
               </Label>
-              {/* The whole point of the screen: a guess the user corrects,
-                  never a card written on the model's say-so. Which is only
-                  worth saying when the model actually wrote something — a list
-                  the dictionary covered outright gets the calmer line. */}
               <Label variant="caption" tone="muted">
-                {counts.model > 0 ? t('aiReviewHint') : t('aiReviewHintDictionary')}
+                {counts.missing > 0 ? t('aiUnresolvedWillSkip', { count: counts.missing }) : t('aiAutomaticReady')}
               </Label>
-
-              {missingMeanings.map((word) => (
-                <View key={word}>
-                  <Field
-                    label={word}
-                    value={drafts[word] ?? ''}
-                    onChangeText={(value) =>
-                      setDrafts((current) => ({ ...current, [word]: value }))
-                    }
-                    placeholder={t('aiNoAnswer')}
-                    autoCapitalize="none"
-                  />
-                  {/* The source, per row. A dictionary entry can be skimmed; a
-                      model guess is the one to actually read. A box the user
-                      has filled in themselves gets no label at all — "not
-                      found" under their own words would be nonsense. */}
-                  {originLabelVisible(origins[word], drafts[word]) ? (
-                    <Label
-                      variant="caption"
-                      tone={origins[word]?.source === 'model' ? 'danger' : 'faint'}
-                    >
-                      {sourceLabel(origins[word], t)}
-                      {origins[word]?.lemma ? ` · ${origins[word]?.lemma}` : ''}
-                    </Label>
-                  ) : null}
-                </View>
-              ))}
-
-              {/* The paid step, and the only one. It appears after the free
-                  pass has left something over, names the model and the exact
-                  number of words it would send, and is never the only way
-                  forward — every box above it can simply be typed into. */}
-              {unasked.length > 0 && hasModel ? (
-                <>
-                  <Button
-                    label={
-                      translating && progress
-                        ? t('aiTranslating', { done: progress.done, total: progress.total })
-                        : t('aiAskModel', { model: modelName, count: unasked.length })
-                    }
-                    variant="secondary"
-                    onPress={() => void runLookup(true)}
-                    loading={translating}
-                    disabled={translating}
-                  />
-                  <Label variant="caption" tone="faint">
-                    {t('aiAskModelHint')}
-                  </Label>
-                </>
-              ) : null}
-
-              {unasked.length > 0 && !hasModel ? (
-                <Label variant="caption" tone="faint">
-                  {t('aiAskModelNoKey')}
-                </Label>
-              ) : null}
             </Surface>
           </>
         ) : null}
@@ -497,7 +497,7 @@ export default function TextImportScreen() {
           label={deck ? t('addToDeck') : t('createCards')}
           onPress={() => void run()}
           loading={busy}
-          disabled={busy || readyCount === 0}
+          disabled={busy || readyCount === 0 || Boolean(targetDeckId && !deck)}
         />
 
         {error ? (
@@ -562,9 +562,11 @@ export default function TextImportScreen() {
 function Preview({
   result,
   ready,
+  meanings,
 }: {
   result: ReturnType<typeof parseTextCards>;
   ready: number;
+  meanings: Record<string, string>;
 }) {
   const { t } = useI18n();
   const theme = useTheme();
@@ -600,7 +602,7 @@ function Preview({
             {entry.front}
           </Label>
           <Label variant="body" tone="muted" style={styles.grow} numberOfLines={1}>
-            {entry.back}
+            {entry.back || meanings[entry.front] || '—'}
           </Label>
         </Row>
       ))}
@@ -657,7 +659,7 @@ function draftsFrom(resolved: ResolvedMeaning[]): Record<string, string> {
   return drafts;
 }
 
-/** How many meanings came from where, for the line above the review list. */
+  /** How many meanings came from where, for the automatic-results summary. */
 function tally(words: string[], origins: Record<string, ResolvedMeaning>) {
   let dictionary = 0;
   let model = 0;
@@ -691,34 +693,21 @@ function summaryLine(
   return parts.join(' · ');
 }
 
-/**
- * Whether a row's source line is worth showing.
- *
- * It is not, for a box the user filled in themselves: they know where that
- * meaning came from, and the lookup's verdict on the word ("not found") stops
- * being true the moment they answer it.
- */
-function originLabelVisible(origin: ResolvedMeaning | undefined, draft: string | undefined): boolean {
-  if (origin?.source === 'dictionary' || origin?.source === 'model') return true;
-  return !draft?.trim();
-}
-
-/**
- * Where one row's meaning came from, or why there isn't one.
- *
- * An empty box because the model was asked and had nothing is a different
- * situation from an empty box because nothing was asked, and only the first
- * tells the user their key was spent on it.
- */
-function sourceLabel(origin: ResolvedMeaning | undefined, t: Translate): string {
-  if (origin?.source === 'dictionary') return t('aiFromDictionary');
-  if (origin?.source === 'model') return t('aiFromModel');
-  if (origin?.rejected === 'model-rejected') return t('aiFromModelNothing');
-  return t('aiFromNothing');
+/** Conservative estimate for one short translation prompt at the default rate. */
+function estimateTranslationCost(count: number): string {
+  if (count <= 0) return '$0.00';
+  // The prompt has roughly 45 input tokens and the request allows 12 output
+  // tokens. These are upper-bound estimates; Gemini bills the actual usage.
+  const dollars = (count * (45 * 0.25 + 12 * 1.5)) / 1_000_000;
+  if (dollars < 0.0001) return '<$0.0001';
+  return `~$${dollars.toFixed(4)}`;
 }
 
 const styles = StyleSheet.create({
-  paste: { minHeight: 180, textAlignVertical: 'top' },
+  paste: { textAlignVertical: 'top' },
+  pasteCollapsed: { minHeight: 88 },
+  pasteExpanded: { minHeight: 220 },
+  expandList: { alignSelf: 'flex-start' },
   options: { gap: 12 },
   preview: { gap: 4 },
   previewHead: { justifyContent: 'space-between' },

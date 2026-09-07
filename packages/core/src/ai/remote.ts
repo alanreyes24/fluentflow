@@ -113,15 +113,16 @@ export function createRemoteInference(options: RemoteInferenceOptions): Inferenc
   let mayDisableThinking = true;
 
   const call = async (request: InferenceRequest, disableThinking: boolean): Promise<Response> => {
+    const responseSchema = request.responseSchema ?? options.responseSchema;
     const generationConfig: Record<string, unknown> = {
       temperature: options.temperature ?? 0.7,
       maxOutputTokens: request.maxTokens,
       candidateCount: 1,
     };
 
-    if (options.responseSchema) {
+    if (responseSchema) {
       generationConfig.responseMimeType = 'application/json';
-      generationConfig.responseSchema = options.responseSchema;
+      generationConfig.responseSchema = responseSchema;
     } else {
       // Gemini takes at most five, and rejects an empty one.
       const stop = request.stop.filter((sequence) => sequence.length > 0).slice(0, 5);

@@ -1,4 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { uuid } from '@fluentflow/core';
 
 /**
  * Local database schema and migrations.
@@ -129,6 +130,26 @@ const migrations: Migration[] = [
     await db.execAsync(`
       ALTER TABLE decks ADD COLUMN newCardsPerDay INTEGER DEFAULT 20;
       ALTER TABLE cards ADD COLUMN introducedAt TEXT;
+    `);
+  },
+
+  // 6 — immutable review events that can be merged across devices.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE review_log ADD COLUMN eventId TEXT;
+      ALTER TABLE review_log ADD COLUMN syncStatus TEXT NOT NULL DEFAULT 'pending';
+    `);
+
+    const rows = await db.getAllAsync<{ id: number }>(
+      'SELECT id FROM review_log WHERE eventId IS NULL',
+    );
+    for (const row of rows) {
+      await db.runAsync('UPDATE review_log SET eventId = ? WHERE id = ?', uuid(), row.id);
+    }
+
+    await db.execAsync(`
+      CREATE UNIQUE INDEX idx_review_log_event_id ON review_log (eventId);
+      CREATE INDEX idx_review_log_pending ON review_log (userId) WHERE syncStatus = 'pending';
     `);
   },
 ];

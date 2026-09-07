@@ -19,6 +19,8 @@ export interface InferenceRequest {
   prompt: string;
   stop: string[];
   maxTokens: number;
+  /** Optional per-request Gemini response schema for structured output. */
+  responseSchema?: unknown;
   signal?: AbortSignal;
 }
 

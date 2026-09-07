@@ -24,7 +24,7 @@ import {
 } from 'firebase/firestore';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { normalizeCard, type Card, type Deck } from '@fluentflow/core';
+import { normalizeCard, type Card, type Deck, type ReviewEvent } from '@fluentflow/core';
 import { appConfig, isCloudEnabled } from './config';
 
 /**
@@ -121,15 +121,20 @@ function cardsRef(db: Firestore, userId: string) {
   return collection(db, 'users', userId, 'cards');
 }
 
+function reviewEventsRef(db: Firestore, userId: string) {
+  return collection(db, 'users', userId, 'reviewEvents');
+}
+
 export interface RemoteSnapshot {
   decks: Deck[];
   cards: Card[];
+  reviewEvents: ReviewEvent[];
 }
 
 /** One-shot read of everything, or of everything newer than `since`. */
 export async function fetchRemote(userId: string, since?: string): Promise<RemoteSnapshot> {
   const db = firestore();
-  if (!db) return { decks: [], cards: [] };
+  if (!db) return { decks: [], cards: [], reviewEvents: [] };
 
   const constrain = (ref: ReturnType<typeof decksRef>) =>
     since ? query(ref, where('lastModified', '>', since)) : query(ref);
@@ -138,6 +143,10 @@ export async function fetchRemote(userId: string, since?: string): Promise<Remot
     getDocs(constrain(decksRef(db, userId))),
     getDocs(constrain(cardsRef(db, userId))),
   ]);
+  // Review history is an append-only set. Reading the full set is deliberate:
+  // reviewedAt comes from a device clock, so using it as an incremental cursor
+  // could miss an offline review after another device has synced.
+  const reviewSnap = await getDocs(reviewEventsRef(db, userId));
 
   return {
     decks: deckSnap.docs.map((d) => d.data() as Deck),
@@ -145,13 +154,19 @@ export async function fetchRemote(userId: string, since?: string): Promise<Remot
     // phase; normalizeCard reconstructs one rather than letting it reach the
     // scheduler half-filled.
     cards: cardSnap.docs.map((d) => normalizeCard(d.data() as Card)),
+    reviewEvents: reviewSnap.docs.map((d) => d.data() as ReviewEvent),
   };
 }
 
 /** Upload records. Idempotent, and chunked to respect Firestore's batch limit. */
-export async function pushRemote(userId: string, decks: Deck[], cards: Card[]): Promise<void> {
+export async function pushRemote(
+  userId: string,
+  decks: Deck[],
+  cards: Card[],
+  reviewEvents: ReviewEvent[] = [],
+): Promise<void> {
   const db = firestore();
-  if (!db || (decks.length === 0 && cards.length === 0)) return;
+  if (!db || (decks.length === 0 && cards.length === 0 && reviewEvents.length === 0)) return;
 
   const writes: { ref: ReturnType<typeof doc>; data: Record<string, unknown> }[] = [
     ...decks.map((deck) => ({
@@ -161,6 +176,10 @@ export async function pushRemote(userId: string, decks: Deck[], cards: Card[]): 
     ...cards.map((card) => ({
       ref: doc(db, 'users', userId, 'cards', card.id),
       data: toRemote(card),
+    })),
+    ...reviewEvents.map((event) => ({
+      ref: doc(db, 'users', userId, 'reviewEvents', event.eventId),
+      data: toRemote(event),
     })),
   ];
 
@@ -190,13 +209,15 @@ export function subscribeRemote(
 
   let decks: Deck[] = [];
   let cards: Card[] = [];
+  let reviewEvents: ReviewEvent[] = [];
   let deckReady = false;
   let cardReady = false;
+  let reviewEventsReady = false;
 
   const emit = () => {
     // Wait for both collections before the first emit, so a merge never sees
     // cards whose deck has not arrived yet.
-    if (deckReady && cardReady) onChange({ decks, cards });
+    if (deckReady && cardReady && reviewEventsReady) onChange({ decks, cards, reviewEvents });
   };
 
   const unsubscribeDecks = onSnapshot(
@@ -219,9 +240,20 @@ export function subscribeRemote(
     onError,
   );
 
+  const unsubscribeReviewEvents = onSnapshot(
+    reviewEventsRef(db, userId),
+    (snapshot) => {
+      reviewEvents = snapshot.docs.map((d) => d.data() as ReviewEvent);
+      reviewEventsReady = true;
+      emit();
+    },
+    onError,
+  );
+
   return () => {
     unsubscribeDecks();
     unsubscribeCards();
+    unsubscribeReviewEvents();
   };
 }
 

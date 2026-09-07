@@ -11,6 +11,7 @@ import {
 } from '@fluentflow/core';
 import type { Config } from './config.ts';
 import { requireAuth, type AuthedRequest } from './auth.ts';
+import { aiStatus, examplesWithAi, resolveWithAi } from './ai.ts';
 import { openAnkiCollection } from './sqlite.ts';
 import { ValidationError, parseCards, parseDecks } from './validate.ts';
 import type { Store } from './store/types.ts';
@@ -44,6 +45,56 @@ export function createApp({ config, store }: AppDeps): express.Express {
 
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', mode: config.mode, time: new Date().toISOString() });
+  });
+
+  /**
+   * Browser AI proxy. The Gemini key stays in the server environment; only
+   * capability metadata and validated results cross the localhost boundary.
+   */
+  app.get('/api/ai/status', auth, (_req: AuthedRequest, res) => {
+    res.json(aiStatus({ config }));
+  });
+
+  app.post('/api/ai/resolve', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const body = req.body as { words?: unknown; language?: unknown; useModel?: unknown };
+      if (!Array.isArray(body.words) || body.words.some((word) => typeof word !== 'string')) {
+        res.status(400).json({ error: 'invalid_request', message: 'words must be an array of strings.' });
+        return;
+      }
+      if (typeof body.language !== 'string') {
+        res.status(400).json({ error: 'invalid_request', message: 'language is required.' });
+        return;
+      }
+      const meanings = await resolveWithAi(
+        { config },
+        body.words as string[],
+        body.language,
+        body.useModel !== false,
+      );
+      res.json({ meanings });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/ai/examples', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const body = req.body as { word?: unknown; meaning?: unknown; language?: unknown; count?: unknown };
+      if (typeof body.word !== 'string' || !body.word.trim() || typeof body.language !== 'string') {
+        res.status(400).json({ error: 'invalid_request', message: 'word and language are required.' });
+        return;
+      }
+      const result = await examplesWithAi({ config }, {
+        word: body.word,
+        meaning: typeof body.meaning === 'string' ? body.meaning : undefined,
+        language: body.language,
+        count: typeof body.count === 'number' ? body.count : undefined,
+      });
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
   });
 
   /**

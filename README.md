@@ -13,6 +13,7 @@ npm run verify         # end-to-end check of the success criteria
 npm run verify:web     # the same criteria, driven through Chrome
 npm run server         # sync API on :8787 (no Firebase project needed)
 npm run web            # the app in a browser tab (Metro dev server)
+npm run dev            # local API + web app, opens Chrome, Fast Refresh enabled
 ```
 
 A packaged Windows build is on the
@@ -171,9 +172,13 @@ desktop story depends on not having one, to draw rectangles.
 ```
 npm run server        # local mode: in-memory store, "Bearer local:<name>" tokens
 npm run web           # the app in a browser tab
+npm run dev            # both together at http://localhost:8081, opened in Chrome
 ```
 
 Local mode exists so the app is demonstrable before anyone provisions Firebase.
+When running `npm run dev`, a `GEMINI_API_KEY` in the repo's gitignored `.env`
+is loaded by the local API and used through a server-side proxy; it is never
+bundled into the browser. Restart the command after changing `.env`.
 It refuses to start with `NODE_ENV=production`. On the sign-in screen, "Continue
 without an account" keeps everything in SQLite; signing in later re-homes that
 data onto the account rather than stranding it.
@@ -192,23 +197,34 @@ Three ways, none of which need an account or a network:
   words already there; from the deck list it creates a deck and guesses the
   language from the words.
 - **Paste just the words.** A list with no meanings on it at all is recognised
-  as a list of words rather than mangled into one card. On the desktop app,
-  "Look up the meanings" fills them in from the bilingual dictionary, free and
-  offline, into an editable review list that says where each meaning came from;
-  anything it misses can be typed in, or sent to the model by a second button
-  that names it and the number of words. See
+  as a list of words rather than mangled into one card. The dictionary fills in
+  meanings automatically, free and offline; anything it misses is offered to
+  Gemini with a cost estimate and confirmation before it is sent. See
   [Looking up a word list](#looking-up-a-word-list).
 - **Import from Anki.** A `.apkg` exported from Anki Desktop; see the collation
   note under Design notes for why that is harder than it sounds.
 
 ### With Firebase
 
-1. Create a project, enable Email/Password auth and Firestore.
-2. Fill `extra.firebase` in [apps/mobile/app.json](apps/mobile/app.json) with the
-   web app config.
-3. Copy `.env.example` to `.env`, set `FIREBASE_PROJECT_ID` and
-   `GOOGLE_APPLICATION_CREDENTIALS`.
-4. `firebase deploy --only firestore:rules,firestore:indexes`
+The free personal sync setup is already configured for the `fluentflow-47e21`
+Firebase project. It uses Spark-plan Hosting, Email/Password auth, and
+Firestore. The public web app is at <https://fluentflow-47e21.web.app>.
+
+For a fresh checkout, copy `.env.example` to `.env` and fill in the Firebase
+web-app values from Firebase Console → Project settings → General → Your apps.
+These are browser-safe Firebase configuration values; never put a service
+account JSON or private key in the app bundle.
+
+Deploy the web app and sync rules with:
+
+```bash
+npx firebase-tools login
+npm run firebase:deploy
+```
+
+The same Firebase configuration is used by the browser export and the Electron
+desktop shell, so signing in with the same account keeps Windows, macOS, and
+browser data synchronized.
 
 Or run against the emulator suite: `firebase emulators:start`, then uncomment
 `FIRESTORE_EMULATOR_HOST` in `.env`.
@@ -238,19 +254,12 @@ npm run fetch-dictionaries      # 45 MB: Spanish and Bosnian
 npm run desktop:pack            # a build that can use them
 ```
 
-**The lookup is two presses, and only the second one costs anything.** "Look up
-the meanings" asks the dictionary alone — free, offline, instant, and enough for
-most word lists outright. Only if it leaves something over does a second button
-appear, naming the model and the exact number of words it would send. Nothing is
-billed as a side effect of asking for meanings, and every box in the review list
-can simply be typed into instead, which is the way through for someone with
-neither a dictionary nor a key.
-
-That shape came out of a real misreading: a single button whose caption
-mentioned Gemini read as "this screen makes me use Gemini", when in fact the
-dictionary had answered every word and nothing had been sent anywhere. The fix
-was not better wording for one button but splitting it in two, so the free part
-and the paid part are separate things a person chooses between.
+**The dictionary runs automatically.** It answers the pasted list for free and
+offline. Only words it cannot find are offered to Gemini, and the screen shows
+the model, the exact number of words, and a conservative cost estimate before
+asking for confirmation. Meanings are assigned automatically; there are no
+manual meaning fields. Words neither source can resolve are skipped instead of
+becoming blank cards.
 
 **The dictionary answers almost everything.** It is built from Wiktionary by way
 of kaikki.org, distilled into SQLite — which the app already reads — and shipped
@@ -288,16 +297,12 @@ with Croatian and Serbian. That is the whole reason this covers both of the
 app's languages: FreeDict's Serbian is 398 headwords and its Croatian release
 has no downloadable build, and WikDict has no bs, hr or sr at all.
 
-**The model is the fallback, and its answers are labelled.** Anything the
-dictionary misses goes to it, and it has two jobs: figure the word out, or fail
-validation and be thrown away so the word comes back empty rather than wrong.
-That ordering has a sharp edge worth stating — the model only ever sees what the
-dictionary could not answer, which is the rare, the inflected and the misspelt,
-and that is exactly where it is least reliable. So every row in the review list
-says where its meaning came from. Dictionary rows can be skimmed; `model — check
-this` is where to actually look. A blank is never imported. Being hosted changes
-none of that: a wrong translation from a large model is still a wrong
-translation, and it is still marked for review.
+**The model is the fallback.** Anything the dictionary misses is sent only after
+the user confirms, and it has two jobs: figure the word out, or fail validation
+and be thrown away so the word comes back unresolved rather than wrong. That
+ordering has a sharp edge worth stating — the model only ever sees what the
+dictionary could not answer, which is the rare, the inflected and the misspelt.
+Unresolved words are skipped rather than becoming blank cards.
 
 The dictionary is read, and the model called, in the Electron **main** process
 ([ai.js](apps/desktop/ai.js), [dictionary.js](apps/desktop/dictionary.js)): the
@@ -515,7 +520,8 @@ every hard case on the weaker source. The model is asked only about words the
 dictionary lacked, which are the rare, the inflected and the misspelt — where it
 confabulates most. A chain that hid its sources would therefore be *worse* than
 either source alone, because its worst answers would be indistinguishable from
-its best. The review list labels every row instead.
+its best. The paste screen makes that boundary visible and asks for confirmation
+before any of those hard cases are sent.
 
 **The on-device model was built, measured, and then deleted.** A BPE tokenizer
 with byte-level and metaspace variants, a decode loop over an ONNX graph with KV
@@ -840,4 +846,3 @@ every contributor to change a Windows setting is worse than losing the version
 metadata stamped into the exe. `signAndEditExecutable: false` now sits in the
 build config rather than in a `dist:win:unsigned` script, so every way of
 building for Windows gets it.
-

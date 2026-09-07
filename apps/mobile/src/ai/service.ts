@@ -6,6 +6,7 @@ import {
 } from '@fluentflow/core';
 import type { Repository } from '../db/repository';
 import { exampleBridgeAvailable, generateExamplesOnDesktop } from './desktop';
+import { generateExamplesOnWeb, webAiAvailable } from './web';
 
 /**
  * Example generation as the UI sees it.
@@ -303,6 +304,15 @@ export class ExampleService {
         // is what a build with no model shows anyway.
         const reason = error instanceof Error ? error.message : String(error);
         console.warn(`The desktop shell could not write examples: ${reason}`);
+      }
+    }
+
+    if (webAiAvailable()) {
+      try {
+        return await generateExamplesOnWeb(request);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        console.warn(`The localhost AI server could not write examples: ${reason}`);
       }
     }
 

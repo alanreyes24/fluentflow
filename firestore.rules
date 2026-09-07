@@ -53,6 +53,17 @@ service cloud.firestore {
         && isIsoTimestamp(card.lastModified);
     }
 
+    function isValidReviewEvent(event) {
+      return event.keys().hasAll(['eventId', 'cardId', 'userId', 'rating',
+                                  'interval', 'easeFactor', 'reviewedAt'])
+        && event.eventId is string && event.eventId.size() > 0 && event.eventId.size() <= 200
+        && event.cardId is string && event.cardId.size() > 0 && event.cardId.size() <= 200
+        && event.rating in ['again', 'hard', 'good', 'easy']
+        && event.interval is number && event.interval >= 0 && event.interval <= 36500
+        && event.easeFactor is number && event.easeFactor >= 1.3 && event.easeFactor <= 10
+        && isIsoTimestamp(event.reviewedAt);
+    }
+
     // The user document itself carries no data yet; it exists so the
     // subcollections have a parent.
     match /users/{userId} {
@@ -76,6 +87,19 @@ service cloud.firestore {
           && request.resource.data.id == cardId
           && request.resource.data.userId == userId;
         allow delete: if isOwner(userId);
+      }
+
+      match /reviewEvents/{eventId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && isValidReviewEvent(request.resource.data)
+          && request.resource.data.eventId == eventId
+          && request.resource.data.userId == userId;
+        allow update: if isOwner(userId)
+          && resource.data == request.resource.data;
+        // Review events are immutable history. The client never needs to
+        // delete one, which prevents statistics disappearing accidentally.
+        allow delete: if false;
       }
     }
 

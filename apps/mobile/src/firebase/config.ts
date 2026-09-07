@@ -37,7 +37,22 @@ export const appConfig: AppConfig = buildConfig();
 
 function buildConfig(): AppConfig {
   const extra = readExtra();
-  const firebase = extra.firebase;
+  // Expo web exports do not reliably preserve `expo-constants`'s `extra`
+  // manifest at runtime. The EXPO_PUBLIC_* values are compile-time inlined by
+  // Expo, with the manifest remaining as the native/Electron fallback.
+  const firebase = {
+    ...extra.firebase,
+    apiKey: process.env.EXPO_PUBLIC_FLUENTFLOW_FIREBASE_API_KEY ?? extra.firebase?.apiKey,
+    authDomain:
+      process.env.EXPO_PUBLIC_FLUENTFLOW_FIREBASE_AUTH_DOMAIN ?? extra.firebase?.authDomain,
+    projectId: process.env.EXPO_PUBLIC_FLUENTFLOW_FIREBASE_PROJECT_ID ?? extra.firebase?.projectId,
+    storageBucket:
+      process.env.EXPO_PUBLIC_FLUENTFLOW_FIREBASE_STORAGE_BUCKET ?? extra.firebase?.storageBucket,
+    messagingSenderId:
+      process.env.EXPO_PUBLIC_FLUENTFLOW_FIREBASE_MESSAGING_SENDER_ID ??
+      extra.firebase?.messagingSenderId,
+    appId: process.env.EXPO_PUBLIC_FLUENTFLOW_FIREBASE_APP_ID ?? extra.firebase?.appId,
+  };
 
   // A partially filled config is worse than none: it fails at the first call
   // with an opaque SDK error instead of at startup with a clear one.

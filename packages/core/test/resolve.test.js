@@ -66,10 +66,8 @@ test('the model is asked only for what the dictionary missed', async () => {
   const resolved = await resolveMeanings(['nido', 'chapurrear', 'anguila'], 'es', {
     dictionary,
     infer: async ({ prompt }) => {
-      // The last user turn is the word being asked about; the earlier ones are
-      // the few-shot examples.
-      asked.push(prompt.split('<|im_start|>user\n').pop().split('<')[0]);
-      return 'to speak badly';
+      asked.push(prompt);
+      return JSON.stringify([{ word: 'chapurrear', meaning: 'to speak badly' }]);
     },
   });
 
@@ -85,7 +83,9 @@ test('a model answer that fails validation is thrown out, not guessed at', async
   const resolved = await resolveMeanings(['almadura'], 'es', {
     dictionary,
     // Observed from the 0.5B: an explanation rather than a translation.
-    infer: async () => 'The Spanish word "almadura" translates to "marinade" in English.',
+    infer: async () => JSON.stringify([
+      { word: 'almadura', meaning: 'The Spanish word almadura translates to marinade in English.' },
+    ]),
   });
 
   assert.equal(resolved[0].meaning, '');
@@ -96,7 +96,7 @@ test('a model answer that fails validation is thrown out, not guessed at', async
 test('a word neither knows comes back empty rather than invented', async () => {
   const resolved = await resolveMeanings(['ponovili'], 'es', {
     dictionary,
-    infer: async () => '?',
+    infer: async () => JSON.stringify([{ word: 'ponovili', meaning: '' }]),
   });
 
   assert.equal(resolved[0].meaning, '');
@@ -114,7 +114,7 @@ test('with no model at all, a miss is simply a miss', async () => {
 test('with no dictionary the model does all of it, and all of it needs review', async () => {
   const resolved = await resolveMeanings(['nido'], 'es', {
     dictionary: null,
-    infer: async () => 'nest',
+    infer: async () => JSON.stringify([{ word: 'nido', meaning: 'nest' }]),
   });
 
   assert.equal(resolved[0].source, 'model');
@@ -127,30 +127,56 @@ test('with neither, every word says so', async () => {
   assert.equal(resolved[0].rejected, 'nothing-to-ask');
 });
 
-test('the model budget bounds the fallback, and dictionary work is kept', async () => {
+test('the model budget is checked before the single batch, and dictionary work is kept', async () => {
   let clock = 0;
   const resolved = await resolveMeanings(['nido', 'aaa', 'bbb', 'ccc'], 'es', {
     dictionary,
-    infer: async () => { clock += 400; return 'something'; },
+    infer: async () => {
+      clock += 400;
+      return JSON.stringify([
+        { word: 'aaa', meaning: 'first' },
+        { word: 'bbb', meaning: 'second' },
+        { word: 'ccc', meaning: 'third' },
+      ]);
+    },
     budgetMs: 700,
     now: () => clock,
   });
 
   assert.equal(resolved[0].meaning, 'nest', 'the dictionary hit survives the deadline');
-  assert.deepEqual(resolved.map((r) => Boolean(r.meaning)), [true, true, true, false]);
+  assert.deepEqual(resolved.map((r) => Boolean(r.meaning)), [true, true, true, true]);
 });
 
 test('a model that throws costs one word, not the run', async () => {
   const resolved = await resolveMeanings(['aaa', 'bbb'], 'es', {
     dictionary,
-    infer: async ({ prompt }) => {
-      if (prompt.includes('aaa')) throw new Error('the runtime fell over');
-      return 'something';
+    infer: async () => {
+      throw new Error('the runtime fell over');
     },
   });
 
   assert.equal(resolved[0].rejected, 'model-rejected');
-  assert.equal(resolved[1].meaning, 'something');
+  assert.equal(resolved[1].rejected, 'model-rejected');
+});
+
+test('the model gets one deduplicated structured batch and results map back safely', async () => {
+  const requests = [];
+  const resolved = await resolveMeanings(['  AAA  ', 'aaa', 'bbb'], 'es', {
+    dictionary,
+    infer: async (request) => {
+      requests.push(request);
+      return JSON.stringify([
+        { word: 'aaa', meaning: 'first answer' },
+        { word: 'unexpected', meaning: 'must be ignored' },
+        { word: 'bbb', meaning: 'second answer' },
+      ]);
+    },
+  });
+
+  assert.equal(requests.length, 1);
+  assert.match(requests[0].prompt, /exactly one object per input item/);
+  assert.equal(requests[0].responseSchema.type, 'ARRAY');
+  assert.deepEqual(resolved.map((r) => r.meaning), ['first answer', 'first answer', 'second answer']);
 });
 
 test('progress counts every word, dictionary hits included', async () => {

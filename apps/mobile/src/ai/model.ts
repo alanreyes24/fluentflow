@@ -1,4 +1,5 @@
 import { cloudBridgeAvailable, exampleBridgeAvailable, lookupSources } from './desktop';
+import { webAiAvailable } from './web';
 
 /**
  * Whether the app can write real example sentences right now, and if not, why.
@@ -30,8 +31,8 @@ const NO_SHELL = 'Example generation runs in the FluentFlow desktop app.';
 const NO_BRIDGE = 'This version of the desktop app cannot reach a model.';
 
 export async function modelStatus(): Promise<ModelStatus> {
-  if (!exampleBridgeAvailable()) return { available: false, reason: NO_SHELL };
-  if (!cloudBridgeAvailable()) return { available: false, reason: NO_BRIDGE };
+  if (!exampleBridgeAvailable() && !webAiAvailable()) return { available: false, reason: NO_SHELL };
+  if (!cloudBridgeAvailable() && !webAiAvailable()) return { available: false, reason: NO_BRIDGE };
 
   const { cloud } = await lookupSources();
   return {

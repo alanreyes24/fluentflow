@@ -101,6 +101,16 @@ describe('TextImportScreen', () => {
     expect(screen.getByText('to speak')).toBeTruthy();
   });
 
+  it('keeps the list editor compact until expanded', async () => {
+    await renderScreen(<TextImportScreen />, { repository });
+
+    expect(screen.getByRole('button', { name: 'Show more' })).toBeTruthy();
+    expect(screen.queryByText(/Paste one word per line/)).toBeNull();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Show more' }));
+    expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
+  });
+
   it('names the lines it could not read instead of dropping them silently', async () => {
     await renderScreen(<TextImportScreen />, { repository });
     await paste('hablar - to speak\ncasa\nniño - child');
@@ -177,6 +187,30 @@ describe('TextImportScreen', () => {
     expect(decks[0]!.cardCount).toBe(3);
   });
 
+  it('lets the generic paste screen target an existing deck', async () => {
+    const deck = await repository.createDeck(TEST_USER.id, 'Spanish A1', 'es');
+
+    await renderScreen(<TextImportScreen />, {
+      repository,
+      user: TEST_USER,
+      decks: [deck],
+    });
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Spanish A1' }));
+    await screen.findByText('Spanish A1 · Español');
+    await paste('casa - house\nniño - child');
+
+    expect(screen.getByRole('button', { name: 'Add to this deck' })).toBeEnabled();
+    await fireEvent.press(screen.getByRole('button', { name: 'Add to this deck' }));
+
+    await waitFor(async () => {
+      const cards = await repository.listCards(deck.id);
+      expect(cards.map((card) => card.front).sort()).toEqual(['casa', 'niño']);
+    });
+
+    expect(await repository.listDecks(TEST_USER.id)).toHaveLength(1);
+  });
+
   it('reads a bare word list as words, not as one enormous card', async () => {
     await renderScreen(<TextImportScreen />, { repository });
     await paste(WORDS);
@@ -198,7 +232,7 @@ describe('TextImportScreen', () => {
     expect(screen.getByRole('button', { name: 'Create cards' })).toBeDisabled();
   });
 
-  it('says why it cannot look anything up when nothing is installed', async () => {
+  it('does not offer manual meanings when Gemini is unavailable', async () => {
     installBridge({
       status: jest.fn(async () => ({
         dictionary: { available: false, reason: 'No dictionaries in ~/dictionaries' },
@@ -208,8 +242,9 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository });
     await paste(WORDS);
 
-    await screen.findByText(/no dictionary for this language and no API key/);
+    await screen.findByText('Gemini is not connected, so unresolved words cannot be added.');
     expect(screen.queryByRole('button', { name: 'Look up the meanings' })).toBeNull();
+    expect(screen.queryByLabelText('nido')).toBeNull();
   });
 
   it('offers the lookup when only a dictionary is installed', async () => {
@@ -222,11 +257,10 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository });
     await paste(WORDS);
 
-    // The dictionary alone is the good case, not a degraded one: it answers
-    // without being asked, and with no key there is nothing further to offer,
-    // so no paid step is dangled.
-    await screen.findByText('Check these before importing');
-    expect(screen.getByLabelText('nido').props.value).toBe('nest');
+    // The dictionary alone is the good case: it answers without being asked,
+    // and with no key there is no paid step to offer.
+    await screen.findByText('Meanings assigned automatically');
+    expect(screen.getByText('nest')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Ask / })).toBeNull();
   });
 
@@ -235,17 +269,17 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
-    // The dictionary pass runs on its own — it is free and sends nothing, so
-    // making the user ask for it would be ceremony. The paid pass still waits.
-    await screen.findByText('Check these before importing');
+    // The dictionary pass runs on its own — it is free and sends nothing. The
+    // paid pass still waits.
+    await screen.findByText('Meanings assigned automatically');
 
     // The press the user cannot avoid is the one that sends nothing anywhere.
     expect(bridge.ai.resolve).toHaveBeenCalledWith(['nido', 'empapar', 'lodazal'], 'es', {
       useModel: false,
     });
-    expect(screen.getByLabelText('nido').props.value).toBe('nest');
-    expect(screen.getByLabelText('empapar').props.value).toBe('to drench');
-    expect(screen.getByLabelText('lodazal').props.value).toBe('');
+    expect(screen.getByText('nest')).toBeTruthy();
+    expect(screen.getByText('to drench')).toBeTruthy();
+    expect(screen.getByText('—')).toBeTruthy();
     expect(screen.getByText('2 from the dictionary · 1 with no answer')).toBeTruthy();
   });
 
@@ -254,25 +288,20 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
-    // The dictionary pass runs on its own — it is free and sends nothing, so
-    // making the user ask for it would be ceremony. The paid pass still waits.
-    await screen.findByText('Check these before importing');
+    // The dictionary pass runs on its own — it is free and sends nothing. The
+    // paid pass first shows its estimate and asks for confirmation.
+    await screen.findByText('Meanings assigned automatically');
 
-    // The paid step names the model and the count, so pressing it is a decision
-    // rather than something that happened on the way to asking for meanings.
+    expect(screen.getByText(/Estimated maximum cost/)).toBeTruthy();
     await fireEvent.press(
       screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
     );
+    await screen.findByText(/Send only these missing words to gemini-3\.1-flash-lite/);
+    await fireEvent.press(screen.getByRole('button', { name: 'Send to Gemini' }));
 
-    await screen.findByText('model — check this');
+    await screen.findByText('Meanings assigned automatically');
     expect(bridge.ai.resolve).toHaveBeenLastCalledWith(['lodazal'], 'es', { useModel: true });
-    expect(screen.getByLabelText('lodazal').props.value).toBe('lodestar');
-
-    // Two came from the dictionary and can be skimmed; the third is a guess and
-    // says so, which is the whole reason the sources are tracked separately.
-    expect(screen.getAllByText('dictionary')).toHaveLength(2);
-    // The summary names the model that was billed, and leaves out the category
-    // that did not happen — no "0 not found" implying something went missing.
+    expect(screen.getByText('lodestar')).toBeTruthy();
     expect(
       screen.getByText('2 from the dictionary · 1 from gemini-3.1-flash-lite'),
     ).toBeTruthy();
@@ -281,7 +310,7 @@ describe('TextImportScreen', () => {
     expect(await repository.listDecks(TEST_USER.id)).toHaveLength(0);
   });
 
-  it('lets the meanings be typed in without any lookup at all', async () => {
+  it('keeps cards with unresolved meanings out of the import', async () => {
     installBridge({
       status: jest.fn(async () => ({
         dictionary: { available: false, reason: 'No dictionaries in ~/dictionaries' },
@@ -291,36 +320,25 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
-    // No dictionary and no key used to mean a dead end: a disabled Create
-    // button and a lookup that was not offered. The boxes are the way out.
-    await screen.findByText('Check these before importing');
-    await fireEvent.changeText(screen.getByLabelText('nido'), 'nest');
+    await screen.findByText('Gemini is not connected, so unresolved words cannot be added.');
     await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');
     await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));
-
-    await waitFor(async () => {
-      expect(await repository.listDecks(TEST_USER.id)).toHaveLength(1);
-    });
-    const [deck] = await repository.listDecks(TEST_USER.id);
-    expect((await repository.listCards(deck!.id)).map((card) => card.front)).toEqual(['nido']);
+    expect(await repository.listDecks(TEST_USER.id)).toHaveLength(0);
   });
 
   it('imports the corrected meanings, not the ones the model gave', async () => {
     installBridge();
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
-    // The dictionary pass runs on its own — it is free and sends nothing, so
-    // making the user ask for it would be ceremony. The paid pass still waits.
-    await screen.findByText('Check these before importing');
+    await screen.findByText('Meanings assigned automatically');
     await fireEvent.press(
       screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
     );
-    await screen.findByText('model — check this');
+    await fireEvent.press(screen.getByRole('button', { name: 'Send to Gemini' }));
+    await screen.findByText('Meanings assigned automatically');
 
-    // The model's "lodestar" is wrong and the user fixes it; the dictionary's
-    // "to drench" is fine but they prefer their own wording.
-    await fireEvent.changeText(screen.getByLabelText('empapar'), 'to soak');
-    await fireEvent.changeText(screen.getByLabelText('lodazal'), 'quagmire');
+    // The meanings are assigned by the dictionary/model; there is no manual
+    // meaning field to edit.
     await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');
     await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));
 
@@ -332,8 +350,8 @@ describe('TextImportScreen', () => {
     const [deck] = await repository.listDecks(TEST_USER.id);
     const cards = await repository.listCards(deck!.id);
     expect(cards.map((card) => `${card.front}=${card.back}`).sort()).toEqual([
-      'empapar=to soak',
-      'lodazal=quagmire',
+      'empapar=to drench',
+      'lodazal=lodestar',
       'nido=nest',
     ]);
   });
@@ -352,11 +370,7 @@ describe('TextImportScreen', () => {
     });
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
-    // The dictionary pass runs on its own — it is free and sends nothing, so
-    // making the user ask for it would be ceremony. The paid pass still waits.
-    await screen.findByText('Check these before importing');
-    // Asked and answered with nothing, which is not the same as never asked.
-    expect(screen.getByText('the model had no answer — type one')).toBeTruthy();
+    await screen.findByText('Meanings assigned automatically');
     expect(screen.getByText('2 from the dictionary · 1 with no answer')).toBeTruthy();
 
     await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');

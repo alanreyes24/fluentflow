@@ -60,6 +60,22 @@ export interface Card {
   deleted?: boolean;
 }
 
+/**
+ * Immutable review history entry. Cards use last-write-wins because there is
+ * one current state per card; reviews are events and must instead be merged by
+ * their unique id so studying on two devices never loses statistics.
+ */
+export interface ReviewEvent {
+  eventId: string;
+  cardId: string;
+  userId: string;
+  rating: RatingName;
+  interval: number;
+  easeFactor: number;
+  reviewedAt: IsoDate;
+  syncStatus: SyncStatus;
+}
+
 export interface Deck {
   id: string;
   userId: string;

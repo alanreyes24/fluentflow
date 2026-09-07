@@ -22,8 +22,11 @@ export function createStore(config: Config): Store {
  */
 class LazyFirestoreStore implements Store {
   private delegate: Promise<Store> | null = null;
+  private readonly config: Config;
 
-  constructor(private readonly config: Config) {}
+  constructor(config: Config) {
+    this.config = config;
+  }
 
   private resolve(): Promise<Store> {
     this.delegate ??= import('./firestore.ts').then(

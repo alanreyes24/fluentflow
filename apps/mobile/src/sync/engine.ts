@@ -155,10 +155,11 @@ export class SyncEngine {
       this.repository.pendingDecks(this.userId),
       this.repository.pendingCards(this.userId),
     ]);
-    if (decks.length === 0 && cards.length === 0) return;
+    const reviewEvents = await this.repository.pendingReviewEvents(this.userId);
+    if (decks.length === 0 && cards.length === 0 && reviewEvents.length === 0) return;
 
-    await pushRemote(this.userId, decks, cards);
-    await this.repository.markSynced(decks, cards);
+    await pushRemote(this.userId, decks, cards, reviewEvents);
+    await this.repository.markSynced(decks, cards, reviewEvents);
   }
 
   private async pull(): Promise<void> {
@@ -188,27 +189,50 @@ export class SyncEngine {
 
   /** Reconcile a remote snapshot against local state and write the winners. */
   private async merge(remote: RemoteSnapshot): Promise<void> {
-    if (remote.decks.length === 0 && remote.cards.length === 0) return;
+    if (
+      remote.decks.length === 0 &&
+      remote.cards.length === 0 &&
+      remote.reviewEvents.length === 0
+    ) return;
 
-    const [localDecks, localCards] = await Promise.all([
+    const [localDecks, localCards, localReviewEvents] = await Promise.all([
       this.repository.listDecks(this.userId),
       this.repository.listAllCards(this.userId),
+      this.repository.listReviewEvents(this.userId),
     ]);
 
     const deckPlan = planMerge<Deck>(localDecks, remote.decks.filter(ownedBy(this.userId)));
     const cardPlan = planMerge<Card>(localCards, remote.cards.filter(ownedBy(this.userId)));
+    const remoteReviewEvents = remote.reviewEvents.filter(ownedBy(this.userId));
+    const localReviewEventIds = new Set(localReviewEvents.map((event) => event.eventId));
+    const reviewEventsToApply = remoteReviewEvents.filter(
+      (event) => !localReviewEventIds.has(event.eventId),
+    );
+    const localReviewEventIdsOnRemote = new Set(remoteReviewEvents.map((event) => event.eventId));
+    const reviewEventsToPush = localReviewEvents.filter(
+      (event) => !localReviewEventIdsOnRemote.has(event.eventId),
+    );
 
-    if (deckPlan.applyLocally.length > 0 || cardPlan.applyLocally.length > 0) {
+    if (
+      deckPlan.applyLocally.length > 0 ||
+      cardPlan.applyLocally.length > 0 ||
+      reviewEventsToApply.length > 0
+    ) {
       await this.repository.applyRemote(
         recomputeCardCounts(deckPlan.applyLocally, cardPlan.merged),
         cardPlan.applyLocally,
+        reviewEventsToApply,
       );
     }
 
     // Records where the local copy won are queued rather than pushed inline:
     // the next cycle's push picks them up, and that keeps one code path
     // responsible for uploads.
-    if (deckPlan.pushRemote.length > 0 || cardPlan.pushRemote.length > 0) {
+    if (
+      deckPlan.pushRemote.length > 0 ||
+      cardPlan.pushRemote.length > 0 ||
+      reviewEventsToPush.length > 0
+    ) {
       this.rerunRequested = true;
     }
   }

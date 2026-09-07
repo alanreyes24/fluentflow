@@ -17,6 +17,10 @@ export interface Config {
   mode: Mode;
   port: number;
   host: string;
+  /** Gemini key used only by the local development AI proxy. */
+  geminiApiKey?: string;
+  /** Hosted model id; defaults to the shared core default. */
+  geminiModel?: string;
   /** Firebase project id; required in firebase mode. */
   projectId?: string;
   /** Path to a service-account JSON file, or undefined to use ADC. */
@@ -52,6 +56,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     mode,
     port: Number(env.PORT ?? 8787),
     host: env.HOST ?? '0.0.0.0',
+    geminiApiKey: env.GEMINI_API_KEY ?? env.GOOGLE_API_KEY ?? undefined,
+    geminiModel: env.GEMINI_MODEL ?? undefined,
     projectId,
     credentialsPath,
     emulatorHost,

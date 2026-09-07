@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildTranslateBatchPrompt,
   buildTranslatePrompt,
   parseTranslation,
+  parseTranslationBatch,
+  sanitizeWord,
   translateWords,
   meaningsFrom,
 } from '../dist/index.js';
@@ -27,6 +30,30 @@ test('each language gets its own few-shot examples', () => {
   assert.match(buildTranslatePrompt('kuća', 'bs'), /^You are a Bosnian-English/);
   assert.match(buildTranslatePrompt('kuća', 'bs'), /govoriti = to speak/);
   assert.doesNotMatch(buildTranslatePrompt('kuća', 'bs'), /hablar/);
+});
+
+test('batch prompts are explicit JSON and preserve the requested words', () => {
+  const prompt = buildTranslateBatchPrompt(['nido', 'a lo lejos'], 'es');
+  assert.match(prompt, /only a JSON array/);
+  assert.match(prompt, /"nido","a lo lejos"/);
+});
+
+test('batch parsing accepts only requested words and validates meanings', () => {
+  const result = parseTranslationBatch(JSON.stringify([
+    { word: 'NÍDO', meaning: 'nest' },
+    { word: 'extra', meaning: 'ignore me' },
+    { word: 'a lo lejos', meaning: 'from a distance' },
+    { word: 'nido', meaning: 'duplicate' },
+  ]), ['nido', 'a lo lejos']);
+
+  assert.deepEqual(result, [
+    { word: 'nido', meaning: 'nest' },
+    { word: 'a lo lejos', meaning: 'from a distance' },
+  ]);
+});
+
+test('sanitizing removes list noise without removing accents', () => {
+  assert.equal(sanitizeWord('  •  12)  “árbol  verde”\u200b '), 'árbol verde');
 });
 
 test('a plain answer is taken as it is', () => {
