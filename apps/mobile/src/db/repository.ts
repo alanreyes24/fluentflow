@@ -10,6 +10,7 @@ import {
   forecast,
   recomputeCardCounts,
   reviewCard,
+  schedulingStateFor,
   softDelete,
   touch,
   type Card,
@@ -81,6 +82,12 @@ export class Repository {
     return updated;
   }
 
+  async setNewCardsPerDay(deck: Deck, newCardsPerDay: number | null): Promise<Deck> {
+    const updated = touch({ ...deck, newCardsPerDay });
+    await this.saveDecks([updated]);
+    return updated;
+  }
+
   async deleteDeck(deck: Deck): Promise<void> {
     const cards = await this.listCards(deck.id);
     await this.db.withTransactionAsync(async () => {
@@ -127,17 +134,44 @@ export class Repository {
    * `limit` exists so a deck with 10 000 cards does not deserialise every one
    * of them to show the next card.
    */
-  async dueCards(deckId: string, now: Date = new Date(), limit = 200): Promise<Card[]> {
-    const rows = await this.db.getAllAsync<CardRow>(
-      `SELECT * FROM cards
-       WHERE deckId = ? AND deleted = 0 AND nextReview <= ?
-       ORDER BY nextReview
-       LIMIT ?`,
-      deckId,
-      now.toISOString(),
-      limit,
-    );
-    return rows.map(toCard);
+  async dueCards(
+    deckId: string,
+    now: Date = new Date(),
+    limit = 200,
+    newCardsPerDay: number | null = 20,
+  ): Promise<Card[]> {
+    const introduced = await this.newCardsIntroducedToday(deckId, now);
+    const remainingNew =
+      newCardsPerDay === null ? limit : Math.min(limit, Math.max(0, newCardsPerDay - introduced));
+
+    const [reviewRows, newRows] = await Promise.all([
+      this.db.getAllAsync<CardRow>(
+        `SELECT * FROM cards
+         WHERE deckId = ? AND deleted = 0 AND nextReview <= ? AND phase <> 'new'
+         ORDER BY nextReview
+         LIMIT ?`,
+        deckId,
+        now.toISOString(),
+        limit,
+      ),
+      remainingNew > 0
+        ? this.db.getAllAsync<CardRow>(
+            `SELECT * FROM cards
+             WHERE deckId = ? AND deleted = 0 AND nextReview <= ?
+               AND phase = 'new' AND introducedAt IS NULL
+             ORDER BY nextReview
+             LIMIT ?`,
+            deckId,
+            now.toISOString(),
+            remainingNew,
+          )
+        : Promise.resolve([] as CardRow[]),
+    ]);
+
+    return [...reviewRows, ...newRows]
+      .sort((a, b) => Date.parse(a.nextReview) - Date.parse(b.nextReview))
+      .slice(0, limit)
+      .map(toCard);
   }
 
   /** Cards that are not due yet, for the "study ahead" path. */
@@ -188,20 +222,39 @@ export class Repository {
   /** Apply a review: update scheduling, and record it for the stats screen. */
   async rateCard(card: Card, rating: RatingName, now: Date = new Date()): Promise<Card> {
     const reviewed = reviewCard(card, rating, { now });
+    const introducedAt =
+      schedulingStateFor(card).phase === 'new' && !card.introducedAt
+        ? now.toISOString()
+        : card.introducedAt;
+    const withIntroduction = introducedAt ? { ...reviewed, introducedAt } : reviewed;
     await this.db.withTransactionAsync(async () => {
-      await this.writeCards([reviewed]);
+      await this.writeCards([withIntroduction]);
       await this.db.runAsync(
         `INSERT INTO review_log (cardId, userId, rating, interval, easeFactor, reviewedAt)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        reviewed.id,
-        reviewed.userId,
+        withIntroduction.id,
+        withIntroduction.userId,
         rating,
-        reviewed.interval,
-        reviewed.easeFactor,
+        withIntroduction.interval,
+        withIntroduction.easeFactor,
         now.toISOString(),
       );
     });
-    return reviewed;
+    return withIntroduction;
+  }
+
+  async newCardsIntroducedToday(deckId: string, now: Date = new Date()): Promise<number> {
+    const modifier = localDayModifier(now);
+    const row = await this.db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM cards
+       WHERE deckId = ? AND deleted = 0 AND introducedAt IS NOT NULL
+         AND date(introducedAt, ?) = date(?, ?)`,
+      deckId,
+      modifier,
+      now.toISOString(),
+      modifier,
+    );
+    return row?.count ?? 0;
   }
 
   async saveCards(cards: Card[]): Promise<void> {
@@ -486,12 +539,13 @@ export class Repository {
   private async writeDecks(decks: Deck[]): Promise<void> {
     for (const deck of decks) {
       await this.db.runAsync(
-        `INSERT INTO decks (id, userId, name, language, cardCount, createdAt, lastModified, syncStatus, deleted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO decks (id, userId, name, language, newCardsPerDay, cardCount, createdAt, lastModified, syncStatus, deleted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            userId = excluded.userId,
            name = excluded.name,
            language = excluded.language,
+           newCardsPerDay = excluded.newCardsPerDay,
            cardCount = excluded.cardCount,
            lastModified = excluded.lastModified,
            syncStatus = excluded.syncStatus,
@@ -500,6 +554,7 @@ export class Repository {
         deck.userId,
         deck.name,
         deck.language,
+        deck.newCardsPerDay ?? 20,
         deck.cardCount,
         deck.createdAt,
         deck.lastModified,
@@ -514,8 +569,8 @@ export class Repository {
       await this.db.runAsync(
         `INSERT INTO cards (id, deckId, userId, front, back, language, examples, interval,
                             easeFactor, repetitions, phase, lapses, learningStep, leech,
-                            nextReview, status, lastModified, syncStatus, deleted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            introducedAt, nextReview, status, lastModified, syncStatus, deleted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            deckId = excluded.deckId,
            userId = excluded.userId,
@@ -530,6 +585,7 @@ export class Repository {
            lapses = excluded.lapses,
            learningStep = excluded.learningStep,
            leech = excluded.leech,
+           introducedAt = excluded.introducedAt,
            nextReview = excluded.nextReview,
            status = excluded.status,
            lastModified = excluded.lastModified,
@@ -549,6 +605,7 @@ export class Repository {
         card.lapses ?? 0,
         card.learningStep ?? 0,
         card.leech ? 1 : 0,
+        card.introducedAt ?? null,
         card.nextReview,
         card.status,
         card.lastModified,
@@ -566,6 +623,7 @@ interface DeckRow {
   userId: string;
   name: string;
   language: string;
+  newCardsPerDay: number | null;
   cardCount: number;
   createdAt: string;
   lastModified: string;
@@ -588,6 +646,7 @@ interface CardRow {
   lapses: number;
   learningStep: number;
   leech: number;
+  introducedAt: string | null;
   nextReview: string;
   status: string;
   lastModified: string;
@@ -601,6 +660,7 @@ function toDeck(row: DeckRow): Deck {
     userId: row.userId,
     name: row.name,
     language: row.language as Deck['language'],
+    newCardsPerDay: row.newCardsPerDay ?? 20,
     cardCount: row.cardCount,
     createdAt: row.createdAt,
     lastModified: row.lastModified,
@@ -628,6 +688,7 @@ function toCard(row: CardRow): Card {
     status: row.status as Card['status'],
     lastModified: row.lastModified,
     syncStatus: row.syncStatus as Card['syncStatus'],
+    ...(row.introducedAt ? { introducedAt: row.introducedAt } : {}),
     ...(row.leech ? { leech: true } : {}),
     ...(row.deleted ? { deleted: true } : {}),
   };

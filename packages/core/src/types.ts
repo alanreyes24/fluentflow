@@ -44,6 +44,8 @@ export interface Card {
   repetitions: number;
   /** Which scheduling phase the card is in. Absent on pre-v3 records. */
   phase?: CardPhase;
+  /** Timestamp for the first answer that introduced this card. */
+  introducedAt?: IsoDate;
   /** Times this card has been failed as a review card (Anki's `lapses`). */
   lapses?: number;
   /** Position in the active learning or relearning step list. */
@@ -63,6 +65,8 @@ export interface Deck {
   userId: string;
   name: string;
   language: TargetLanguage;
+  /** New cards introduced per local day; null means unlimited. */
+  newCardsPerDay: number | null;
   cardCount: number;
   createdAt: IsoDate;
   lastModified: IsoDate;

@@ -1,11 +1,12 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import type { Deck } from '@fluentflow/core';
 import DecksScreen from '../app/(app)/decks';
+import DeckScreen from '../app/(app)/deck/[id]';
 import { BottomBar } from '../src/ui/BottomBar';
 import { SyncIndicator } from '../src/ui/SyncIndicator';
 import { Repository } from '../src/db/repository';
 import { createTestRepository } from './fakes/database';
-import { mockRouter, renderScreen, TEST_USER } from './setup';
+import { mockRouter, mockSearchParams, renderScreen, TEST_USER } from './setup';
 
 /**
  * The deck list, the toolbar under it, and the offline indicator in that
@@ -84,6 +85,31 @@ describe('DecksScreen', () => {
     expect(mockRouter.push).toHaveBeenCalled();
   });
 
+});
+
+describe('DeckScreen', () => {
+  let context: Awaited<ReturnType<typeof createTestRepository>>;
+
+  beforeEach(async () => {
+    context = await createTestRepository();
+  });
+
+  afterEach(async () => {
+    await context.close();
+  });
+
+  it('persists a changed daily new-card limit', async () => {
+    const deck = await context.repository.createDeck(TEST_USER.id, 'Spanish', 'es');
+    mockSearchParams.current = { id: deck.id };
+
+    await renderScreen(<DeckScreen />, { repository: context.repository });
+    await screen.findByText('New cards per day');
+    await fireEvent.press(screen.getByRole('button', { name: '40' }));
+
+    await waitFor(async () => {
+      expect((await context.repository.getDeck(deck.id))?.newCardsPerDay).toBe(40);
+    });
+  });
 });
 
 /**

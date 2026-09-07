@@ -441,6 +441,7 @@ function ensureDeck(
     userId: args.userId,
     name: args.name,
     language,
+    newCardsPerDay: 20,
     cardCount: 0,
     createdAt: args.nowIso,
     lastModified: args.nowIso,

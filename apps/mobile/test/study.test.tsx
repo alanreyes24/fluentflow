@@ -73,6 +73,20 @@ describe('StudyScreen', () => {
     expect(screen.getByRole('button', { name: 'Good' })).toBeTruthy();
   });
 
+  it('starts no more than the deck limit of untouched new cards', async () => {
+    deck = await repository.setNewCardsPerDay(deck, 2);
+    await seed([
+      ['hablar', 'to speak'],
+      ['comer', 'to eat'],
+      ['vivir', 'to live'],
+    ]);
+
+    await show();
+
+    await screen.findByText('hablar');
+    expect(screen.getByText('1 / 2')).toBeTruthy();
+  });
+
   it('schedules the card and advances to the next one', async () => {
     const [first] = await seed([
       ['hablar', 'to speak'],

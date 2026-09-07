@@ -18,6 +18,7 @@ export function createDeck(input: CreateDeckInput): Deck {
     userId: input.userId,
     name: input.name.trim(),
     language: input.language,
+    newCardsPerDay: 20,
     cardCount: 0,
     createdAt: iso,
     lastModified: iso,

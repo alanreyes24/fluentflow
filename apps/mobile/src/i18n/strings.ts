@@ -45,6 +45,9 @@ export const en = {
   delete: 'Delete',
   edit: 'Edit',
   noCardsYet: 'This deck has no cards yet.',
+  newCardsPerDay: 'New cards per day',
+  newCardsPerDayHint: 'How many untouched cards this deck can introduce today.',
+  unlimited: 'Unlimited',
 
   // Study
   study: 'Study',
@@ -270,6 +273,9 @@ const es: Strings = {
   delete: 'Eliminar',
   edit: 'Editar',
   noCardsYet: 'Este mazo aún no tiene tarjetas.',
+  newCardsPerDay: 'Tarjetas nuevas por día',
+  newCardsPerDayHint: 'Cuántas tarjetas sin estudiar puede introducir este mazo hoy.',
+  unlimited: 'Sin límite',
 
   study: 'Estudiar',
   showAnswer: 'Ver respuesta',
@@ -475,6 +481,9 @@ const bs: Strings = {
   delete: 'Obriši',
   edit: 'Uredi',
   noCardsYet: 'Ovaj špil još nema kartica.',
+  newCardsPerDay: 'Nove kartice dnevno',
+  newCardsPerDayHint: 'Koliko neobrađenih kartica ovaj špil može uvesti danas.',
+  unlimited: 'Bez ograničenja',
 
   study: 'Uči',
   showAnswer: 'Prikaži odgovor',

@@ -123,6 +123,14 @@ const migrations: Migration[] = [
       END;
     `);
   },
+
+  // 5 — per-deck daily new-card limits and first-introduction timestamps.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE decks ADD COLUMN newCardsPerDay INTEGER DEFAULT 20;
+      ALTER TABLE cards ADD COLUMN introducedAt TEXT;
+    `);
+  },
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

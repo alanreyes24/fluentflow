@@ -81,10 +81,10 @@ export default function StudyScreen() {
     let cancelled = false;
 
     (async () => {
-      const [loadedDeck, due] = await Promise.all([
-        repository.getDeck(deckId),
-        studyAhead ? repository.upcomingCards(deckId) : repository.dueCards(deckId),
-      ]);
+      const loadedDeck = await repository.getDeck(deckId);
+      const due = studyAhead
+        ? await repository.upcomingCards(deckId)
+        : await repository.dueCards(deckId, new Date(), 200, loadedDeck?.newCardsPerDay ?? 20);
       if (cancelled) return;
       setDeck(loadedDeck);
       setQueue(due);

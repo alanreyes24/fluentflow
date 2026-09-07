@@ -14,12 +14,15 @@ import {
   Row,
   Screen,
   SectionLabel,
+  SegmentedControl,
   Spacer,
   StatusDot,
   Surface,
   useContentStyle,
 } from '../../../src/ui/components';
 import { useTheme } from '../../../src/ui/theme';
+
+const NEW_CARD_LIMIT_OPTIONS = [10, 20, 40, 80] as const;
 
 /** Deck detail: progress, the study entry point, and card management. */
 export default function DeckScreen() {
@@ -130,6 +133,36 @@ export default function DeckScreen() {
               }
               disabled={cards.length === 0}
             />
+
+            <Spacer size={theme.spacing.sm} />
+
+            <Surface style={styles.limitCard}>
+              <SectionLabel>{t('newCardsPerDay')}</SectionLabel>
+              <Spacer size={theme.spacing.xs} />
+              <SegmentedControl<string>
+                options={[
+                  ...NEW_CARD_LIMIT_OPTIONS.map((count) => ({
+                    value: String(count),
+                    label: String(count),
+                  })),
+                  { value: 'unlimited', label: t('unlimited') },
+                ]}
+                value={deck.newCardsPerDay === null ? 'unlimited' : String(deck.newCardsPerDay)}
+                onChange={(value) => {
+                  if (!repository) return;
+                  void repository
+                    .setNewCardsPerDay(deck, value === 'unlimited' ? null : Number(value))
+                    .then((updated) => {
+                      setDeck(updated);
+                      return refreshDecks();
+                    });
+                }}
+              />
+              <Spacer size={theme.spacing.xs} />
+              <Label variant="caption" tone="faint">
+                {t('newCardsPerDayHint')}
+              </Label>
+            </Surface>
 
             <Spacer size={theme.spacing.sm} />
 
@@ -318,5 +351,6 @@ const styles = StyleSheet.create({
   card: { paddingVertical: 12 },
   grow: { flex: 1 },
   form: { gap: 16 },
+  limitCard: { gap: 4 },
   footer: { marginTop: 24 },
 });

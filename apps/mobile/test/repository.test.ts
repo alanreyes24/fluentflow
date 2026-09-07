@@ -22,7 +22,7 @@ describe('Repository', () => {
     const row = await context.database.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version',
     );
-    expect(row?.user_version).toBe(4);
+    expect(row?.user_version).toBe(5);
   });
 
   it('round-trips a deck and its cards', async () => {
@@ -34,6 +34,7 @@ describe('Repository', () => {
     const decks = await repository.listDecks('u1');
     expect(decks).toHaveLength(1);
     expect(decks[0]?.cardCount).toBe(2);
+    expect(decks[0]?.newCardsPerDay).toBe(20);
 
     const cards = await repository.listCards(deck.id);
     expect(cards.map((card) => card.front)).toEqual(['hablar', 'comer']);
@@ -63,6 +64,69 @@ describe('Repository', () => {
     expect(graduated.phase).toBe('review');
     expect(graduated.interval).toBe(1);
     expect(await repository.reviewsSince('u1', new Date(Date.now() - 60_000))).toBe(2);
+  });
+
+  it('persists the per-deck new-card limit and marks the deck pending', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+
+    const updated = await repository.setNewCardsPerDay(deck, 40);
+
+    expect(updated.newCardsPerDay).toBe(40);
+    expect((await repository.getDeck(deck.id))?.newCardsPerDay).toBe(40);
+    expect((await repository.pendingDecks('u1'))[0]?.newCardsPerDay).toBe(40);
+  });
+
+  it('stamps a new card once and enforces the remaining daily allowance', async () => {
+    const { repository } = context;
+    const deck = await repository.setNewCardsPerDay(
+      await repository.createDeck('u1', 'Spanish', 'es'),
+      2,
+    );
+    const cards = await Promise.all([
+      repository.addCard('u1', deck, 'hablar', 'to speak'),
+      repository.addCard('u1', deck, 'comer', 'to eat'),
+      repository.addCard('u1', deck, 'vivir', 'to live'),
+    ]);
+    const now = new Date();
+
+    expect(await repository.dueCards(deck.id, now, 200, deck.newCardsPerDay)).toHaveLength(2);
+
+    const first = await repository.rateCard(cards[0]!, 'good', now);
+    expect(first.introducedAt).toBe(now.toISOString());
+    const second = await repository.rateCard(first, 'good', new Date(now.getTime() + 1_000));
+    expect(second.introducedAt).toBe(now.toISOString());
+    expect(await repository.newCardsIntroducedToday(deck.id, now)).toBe(1);
+
+    // The introduced card is still learning and is allowed through even though
+    // only one untouched new card remains within the daily budget.
+    const dueLearning = await repository.updateCard(second, {
+      nextReview: new Date(now.getTime() - 1_000).toISOString(),
+    });
+    const queue = await repository.dueCards(deck.id, now, 200, deck.newCardsPerDay);
+    expect(queue.map((card) => card.id)).toContain(dueLearning.id);
+    expect(queue.filter((card) => card.phase === 'new')).toHaveLength(1);
+  });
+
+  it('resets the new-card allowance on the next local day and supports unlimited', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const cards = await Promise.all([
+      repository.addCard('u1', deck, 'hablar', 'to speak'),
+      repository.addCard('u1', deck, 'comer', 'to eat'),
+      repository.addCard('u1', deck, 'vivir', 'to live'),
+    ]);
+
+    await repository.rateCard(cards[0]!, 'good', today);
+    expect(await repository.newCardsIntroducedToday(deck.id, today)).toBe(1);
+    expect(await repository.newCardsIntroducedToday(deck.id, tomorrow)).toBe(0);
+
+    const unlimited = await repository.setNewCardsPerDay(deck, null);
+    expect(await repository.dueCards(deck.id, new Date(), 200, unlimited.newCardsPerDay)).toHaveLength(3);
   });
 
   it('drops the ease factor on lapses but never below the floor', async () => {
