@@ -39,6 +39,7 @@ function fakeBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridge {
     importApkg: jest.fn(async () => ({ ok: false as const, code: 'SQLITE_FAILED', message: 'not stubbed' })),
     onImportRequest: jest.fn(() => jest.fn()),
     reportTheme: jest.fn(),
+    theme: { set: jest.fn(), onNativeChange: jest.fn(() => jest.fn()) },
     ...overrides,
   };
 }
@@ -241,7 +242,7 @@ describe('requests from outside the page', () => {
       // user's back.
       await screen.findByText('Dropped.apkg');
       expect(screen.getByText('Import as')).toBeTruthy();
-      expect(screen.getByText('Subdecks')).toBeTruthy();
+      expect(screen.getByText(/^Subdecks:/)).toBeTruthy();
     } finally {
       await context.close();
     }
@@ -288,18 +289,19 @@ describe('what settings says about the shell', () => {
     expect(screen.getByText(/imported on this computer/)).toBeTruthy();
   });
 
-  it('calls the missing model permanent here, not uninstalled', async () => {
+  it('offers the key rather than explaining a missing runtime', async () => {
     installBridge(fakeBridge());
 
     await renderScreen(<SettingsScreen />, { repository: context.repository });
 
-    // "not installed in this build" invites someone to go install it, and so
-    // does the heading above it. On the desktop there is nothing to install:
-    // the runtime is a mobile module.
-    await screen.findByText('Examples are written, not generated');
+    // Examples come from the hosted model, which the shell can call, so there
+    // is no absent runtime to account for — only a key that is not set yet.
+    // Saying "model not installed" here would send someone looking for an
+    // install that does not exist.
+    await screen.findByText('Cloud examples');
+    expect(screen.getByText('Not connected')).toBeTruthy();
     expect(screen.queryByText('Model not installed')).toBeNull();
-    expect(screen.getByText(/mobile-only module/)).toBeTruthy();
-    expect(screen.queryByText('onnxruntime-react-native is not installed in this build.')).toBeNull();
+    expect(screen.queryByText(/mobile-only module/)).toBeNull();
   });
 
   it('says nothing about a shell in a browser tab', async () => {
@@ -307,24 +309,6 @@ describe('what settings says about the shell', () => {
 
     await screen.findByText('onnxruntime-react-native is not installed in this build.');
     expect(screen.queryByText('Desktop app')).toBeNull();
-  });
-});
-
-describe('telling the shell which theme is on screen', () => {
-  it('reports the rendered theme, so the next cold start paints it', async () => {
-    const bridge = fakeBridge();
-    installBridge(bridge);
-
-    const context = await createTestRepository();
-    try {
-      await renderScreen(<SettingsScreen />, { repository: context.repository });
-
-      // The shell cannot work this out: the OS knows its own preference, not
-      // what the app decided.
-      await waitFor(() => expect(bridge.reportTheme).toHaveBeenCalledWith('light', 'system'));
-    } finally {
-      await context.close();
-    }
   });
 });
 

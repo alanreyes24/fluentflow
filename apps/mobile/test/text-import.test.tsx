@@ -222,10 +222,12 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository });
     await paste(WORDS);
 
-    // The dictionary alone is the good case, not a degraded one, and the line
-    // above the button promises what the press will actually do.
-    await screen.findByRole('button', { name: 'Look up the meanings' });
-    expect(screen.getByText(/offline and free. Nothing is sent anywhere/)).toBeTruthy();
+    // The dictionary alone is the good case, not a degraded one: it answers
+    // without being asked, and with no key there is nothing further to offer,
+    // so no paid step is dangled.
+    await screen.findByText('Check these before importing');
+    expect(screen.getByLabelText('nido').props.value).toBe('nest');
+    expect(screen.queryByRole('button', { name: /^Ask / })).toBeNull();
   });
 
   it('answers from the dictionary first, and bills nothing to do it', async () => {
@@ -233,7 +235,8 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
-    await fireEvent.press(await screen.findByRole('button', { name: 'Look up the meanings' }));
+    // The dictionary pass runs on its own — it is free and sends nothing, so
+    // making the user ask for it would be ceremony. The paid pass still waits.
     await screen.findByText('Check these before importing');
 
     // The press the user cannot avoid is the one that sends nothing anywhere.
@@ -251,7 +254,8 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
-    await fireEvent.press(await screen.findByRole('button', { name: 'Look up the meanings' }));
+    // The dictionary pass runs on its own — it is free and sends nothing, so
+    // making the user ask for it would be ceremony. The paid pass still waits.
     await screen.findByText('Check these before importing');
 
     // The paid step names the model and the count, so pressing it is a decision
@@ -305,7 +309,8 @@ describe('TextImportScreen', () => {
     installBridge();
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
-    await fireEvent.press(await screen.findByRole('button', { name: 'Look up the meanings' }));
+    // The dictionary pass runs on its own — it is free and sends nothing, so
+    // making the user ask for it would be ceremony. The paid pass still waits.
     await screen.findByText('Check these before importing');
     await fireEvent.press(
       screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
@@ -347,7 +352,8 @@ describe('TextImportScreen', () => {
     });
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
-    await fireEvent.press(await screen.findByRole('button', { name: 'Look up the meanings' }));
+    // The dictionary pass runs on its own — it is free and sends nothing, so
+    // making the user ask for it would be ceremony. The paid pass still waits.
     await screen.findByText('Check these before importing');
     // Asked and answered with nothing, which is not the same as never asked.
     expect(screen.getByText('the model had no answer — type one')).toBeTruthy();
@@ -372,8 +378,8 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
-    await fireEvent.press(await screen.findByRole('button', { name: 'Look up the meanings' }));
-
+    // The automatic pass is the one that fails here, so the error has to
+    // surface on its own too — there is no press to hang off.
     await screen.findByText('the runtime fell over');
     expect(screen.queryByText('Check these before importing')).toBeNull();
   });

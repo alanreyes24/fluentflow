@@ -12,6 +12,7 @@ import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
 import { importApkg, pickApkg, type PickedFile } from '../../src/anki/import';
 import { onShellImport } from '../../src/desktop-import';
+import { canImportLocally } from '../../src/desktop';
 import {
   Button,
   Label,
@@ -102,6 +103,17 @@ export default function ImportScreen() {
           <Label variant="body" tone="muted">
             {t('importHint')}
           </Label>
+          {/* Only true inside the shell. In a browser tab the import goes to
+              the sync server and needs an account, which is a different
+              promise entirely. */}
+          {canImportLocally() ? (
+            <>
+              <Spacer size={theme.spacing.xs} />
+              <Label variant="caption" tone="faint">
+                {t('importDesktopHint')}
+              </Label>
+            </>
+          ) : null}
         </Surface>
 
         <Spacer size={theme.spacing.md} />

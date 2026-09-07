@@ -167,11 +167,14 @@ describe('StudyScreen', () => {
     await reveal();
     await screen.findByText('to speak');
 
-    // A brand-new card: Again re-queues in ten minutes, and the three passing
-    // grades all start the ladder at one day. The preview runs the same
-    // `review` the button will, so this cannot drift from the scheduler.
+    // A brand-new card walks the learning steps (1m, 10m): Again restarts them,
+    // Hard sits between, Good moves to the next, and Easy graduates straight to
+    // the four-day interval. The preview runs the same `review` the button
+    // will, against the same scheduling state, so it cannot drift from it.
+    expect(screen.getByText('1 min')).toBeTruthy();
+    expect(screen.getByText('6 min')).toBeTruthy();
     expect(screen.getByText('10 min')).toBeTruthy();
-    expect(screen.getAllByText('1 d')).toHaveLength(3);
+    expect(screen.getByText('4 d')).toBeTruthy();
   });
 
   it('summarises the session once the queue runs out', async () => {
@@ -181,6 +184,10 @@ describe('StudyScreen', () => {
     ]);
     await show();
 
+    // Neither of the first two answers ends the card's day: Good and Again both
+    // leave a new card on a learning step inside the twenty-minute learn-ahead
+    // window, so both come back. Easy graduates them, and only then does the
+    // queue actually run out — which is the thing being summarised.
     await screen.findByText('hablar');
     await reveal();
     await screen.findByText('to speak');
@@ -191,10 +198,18 @@ describe('StudyScreen', () => {
     await screen.findByText('to eat');
     await fireEvent.press(screen.getByRole('button', { name: 'Again' }));
 
+    await screen.findByText('hablar');
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Easy' }));
+
+    await screen.findByText('comer');
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Easy' }));
+
     await screen.findByText('Nothing left to review');
-    expect(screen.getByLabelText('Reviews: 2')).toBeTruthy();
+    expect(screen.getByLabelText('Reviews: 4')).toBeTruthy();
     expect(screen.getByLabelText('Again: 1')).toBeTruthy();
-    expect(screen.getByLabelText('Accuracy: 50%')).toBeTruthy();
+    expect(screen.getByLabelText('Accuracy: 75%')).toBeTruthy();
   });
 
   it('offers nothing to review when the queue is empty', async () => {

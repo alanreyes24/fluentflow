@@ -4,6 +4,8 @@ import { router } from 'expo-router';
 import { LANGUAGE_NAMES, SUPPORTED_LANGUAGES, type LanguageCode } from '@fluentflow/core';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
+import { DAILY_GOAL_OPTIONS, usePreferences } from '../../src/state/preferences';
+import { desktopBridge } from '../../src/desktop';
 import { modelStatus, type ModelStatus } from '../../src/ai/model';
 import {
   clearCloudSettings,
@@ -13,6 +15,7 @@ import {
 } from '../../src/ai/desktop';
 import {
   Button,
+  Chip,
   Field,
   Label,
   Row,
@@ -38,7 +41,9 @@ export default function SettingsScreen() {
   const theme = useTheme();
   const { preference, setPreference } = useThemeContext();
   const { user, sync, syncNow, signOut, cloudAvailable } = useApp();
+  const { dailyGoal, setDailyGoal } = usePreferences();
   const content = useContentStyle();
+  const desktop = desktopBridge();
 
   const themeOptions: { value: ThemePreference; label: string }[] = [
     { value: 'system', label: t('themeSystem') },
@@ -49,6 +54,21 @@ export default function SettingsScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={content}>
+        <Section title={t('dailyGoal')}>
+          <SegmentedControl<string>
+            options={DAILY_GOAL_OPTIONS.map((goal) => ({
+              value: String(goal),
+              label: t('goalPerDay', { count: goal }),
+            }))}
+            value={String(dailyGoal)}
+            onChange={(next) => setDailyGoal(Number(next))}
+          />
+          <Spacer size={theme.spacing.sm} />
+          <Label variant="caption" tone="faint">
+            {t('dailyGoalHint')}
+          </Label>
+        </Section>
+
         <Section title={t('interfaceLanguage')}>
           <SegmentedControl
             options={SUPPORTED_LANGUAGES.map((code: LanguageCode) => ({
@@ -102,6 +122,30 @@ export default function SettingsScreen() {
             }}
           />
         </Section>
+        {desktop ? (
+          <Section title={t('desktopSection')}>
+            <Row justify="space-between" gap={theme.spacing.sm}>
+              <Label variant="body" style={styles.grow}>
+                {t('appName')} {desktop.appVersion}
+              </Label>
+              <Chip label={t('desktopShell')} color={theme.colors.textMuted} />
+            </Row>
+            <Label variant="caption" tone="faint">
+              {t('desktopRuntime', {
+                electron: desktop.electronVersion,
+                chrome: majorVersion(desktop.chromeVersion),
+              })}
+            </Label>
+            {desktop.canImportLocally ? (
+              <>
+                <Spacer size={theme.spacing.xs} />
+                <Label variant="caption" tone="muted">
+                  {t('desktopImportLocal')}
+                </Label>
+              </>
+            ) : null}
+          </Section>
+        ) : null}
       </ScrollView>
     </Screen>
   );
@@ -262,6 +306,11 @@ function ExamplesSection() {
       />
     </Section>
   );
+}
+
+/** Chromium reports four components; only the first is worth showing. */
+function majorVersion(version: string | undefined): string {
+  return String(version ?? '').split('.')[0] || '?';
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

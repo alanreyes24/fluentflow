@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
@@ -224,12 +224,27 @@ export default function TextImportScreen() {
     [missingMeanings, unasked, deck, language],
   );
 
-  // Auto-run dictionary lookup when valid text is pasted.
+  /**
+   * Words the automatic pass has already been spent on.
+   *
+   * A failed lookup leaves `origins` empty, which is indistinguishable from
+   * never having asked — so without this the effect re-fires on the same words
+   * for as long as the failure lasts, hammering the shell and never showing the
+   * error long enough to read. Recording the attempt rather than the outcome is
+   * what makes it run once. Editing the paste changes the words, which is a new
+   * attempt and gets one of its own.
+   */
+  const attempted = useRef(new Set<string>());
+
+  // The dictionary pass runs on its own: it is free and sends nothing, so
+  // asking permission for it is ceremony. The paid pass still waits to be asked.
   useEffect(() => {
     if (!text.trim() || missingMeanings.length === 0 || reviewing || translating) return;
     if (!hasDictionary) return; // Only auto-run if dictionary is available.
     const first = missingMeanings[0];
     if (!first || origins[first]) return; // Nothing to do, or already looked up.
+    if (attempted.current.has(first)) return; // Asked once already, and it failed.
+    attempted.current.add(first);
     void runLookup(false);
   }, [text, missingMeanings, reviewing, translating, hasDictionary, origins, runLookup]);
 

@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { RATINGS, type Card, type Deck, type RatingName } from '@fluentflow/core';
+import {
+  RATING_NAMES,
+  RATINGS,
+  review,
+  schedulingStateFor,
+  type Card,
+  type Deck,
+  type RatingName,
+} from '@fluentflow/core';
 import { useI18n } from '../../../src/i18n';
 import { useApp } from '../../../src/state/app';
 import type { ExampleResult } from '../../../src/ai/service';
@@ -15,8 +23,11 @@ import {
   Screen,
   Spacer,
   StatusDot,
+  StatTile,
   Surface,
 } from '../../../src/ui/components';
+import { formatInterval } from '../../../src/ui/format';
+
 import { useCardGestures } from '../../../src/ui/useCardGestures';
 import { useLayout, useTheme } from '../../../src/ui/theme';
 
@@ -59,6 +70,7 @@ export default function StudyScreen() {
   const [examples, setExamples] = useState<ExampleResult | null>(null);
   const [generating, setGenerating] = useState(false);
   const [reviewed, setReviewed] = useState(0);
+  const [lapses, setLapses] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const card = queue[index] ?? null;
@@ -109,6 +121,34 @@ export default function StudyScreen() {
       .finally(() => setGenerating(false));
   }, [revealed, card, exampleService]);
 
+  /**
+   * What each button would schedule, from the card's current state.
+   *
+   * Computed with the same `review` the rating runs, through the same
+   * `schedulingStateFor`, so the number on the button cannot drift from the
+   * scheduler behind it. Anki users expect this, and it is the difference
+   * between grading honestly and guessing which button is safe.
+   */
+  const intervals = useMemo(() => {
+    if (!card) return null;
+    const state = schedulingStateFor(card);
+    const now = Date.now();
+    return Object.fromEntries(
+      RATING_NAMES.map((rating) => {
+        // The gap to the answer's own `nextReview`, not its `interval`: a card
+        // on a learning step has a day-level interval of zero, so reading
+        // `interval` would report every sub-day grade as the same wait.
+        // The midpoint of the fuzz rather than a draw from it. The scheduler
+        // spreads intervals so a day's reviews do not all come back together,
+        // but a preview that changed on every render — or disagreed with the
+        // button beside it — would read as a bug.
+        const answer = review(state, rating, { random: () => 0.5 });
+        const ahead = Math.max(0, Date.parse(answer.nextReview) - now);
+        return [rating, { days: ahead / 86_400_000, minutes: Math.round(ahead / 60_000) }];
+      }),
+    ) as Record<RatingName, { days: number; minutes: number }>;
+  }, [card]);
+
   const rate = useCallback(
     (rating: RatingName) => {
       if (!repository || !card || !revealed) return;
@@ -116,6 +156,7 @@ export default function StudyScreen() {
       void (async () => {
         const answered = await repository.rateCard(card, rating);
         setReviewed((count) => count + 1);
+        if (rating === 'again') setLapses((count) => count + 1);
         setRevealed(false);
         setExamples(null);
         // A card whose next step lands inside the learn-ahead window goes back
@@ -166,6 +207,24 @@ export default function StudyScreen() {
           }
           action={<Button label={t('decks')} onPress={() => router.back()} />}
         />
+        {/* How the session went, while it is still worth knowing. The
+            statistics screen has the long view; this is the one sitting. */}
+        {reviewed > 0 ? (
+          <>
+            <Spacer size={theme.spacing.lg} />
+            <Surface>
+              <Row gap={theme.spacing.md} justify="space-between" align="flex-start">
+                <StatTile value={String(reviewed)} label={t('reviews')} />
+                <StatTile value={String(lapses)} label={t('againLabel')} />
+                <StatTile
+                  value={`${Math.round(((reviewed - lapses) / reviewed) * 100)}%`}
+                  label={t('sessionAccuracy')}
+                  tone="accent"
+                />
+              </Row>
+            </Surface>
+          </>
+        ) : null}
       </Screen>
     );
   }
@@ -250,10 +309,15 @@ export default function StudyScreen() {
           {revealed ? (
             <>
               <Row gap={theme.spacing.xs}>
-                <RatingButton rating="again" tone={theme.colors.again} onPress={rate} />
-                <RatingButton rating="hard" tone={theme.colors.hard} onPress={rate} />
-                <RatingButton rating="good" tone={theme.colors.good} onPress={rate} />
-                <RatingButton rating="easy" tone={theme.colors.easy} onPress={rate} />
+                {RATING_NAMES.map((rating) => (
+                  <RatingButton
+                    key={rating}
+                    rating={rating}
+                    tone={theme.colors[rating]}
+                    interval={intervals?.[rating]}
+                    onPress={rate}
+                  />
+                ))}
               </Row>
               {Platform.OS === 'web' ? (
                 <>
@@ -307,23 +371,31 @@ function CardShell({
 function RatingButton({
   rating,
   tone,
+  interval,
   onPress,
 }: {
   rating: RatingName;
   tone: string;
+  interval?: { days: number; minutes: number };
   onPress: (rating: RatingName) => void;
 }) {
   const { t } = useI18n();
   const label = t(`${rating}Label` as 'againLabel');
 
   return (
-    <Button
-      label={Platform.OS === 'web' ? `${RATINGS[rating]}  ${label}` : label}
-      tone={tone}
-      onPress={() => onPress(rating)}
-      style={styles.flex}
-      accessibilityHint={`Rate this card ${label}`}
-    />
+    <View style={styles.flex}>
+      <Button
+        label={Platform.OS === 'web' ? `${RATINGS[rating]}  ${label}` : label}
+        tone={tone}
+        onPress={() => onPress(rating)}
+        accessibilityHint={`Rate this card ${label}`}
+      />
+      {interval === undefined ? null : (
+        <Label variant="caption" tone="faint" align="center" style={styles.ratingInterval}>
+          {formatInterval(interval.days, interval.minutes, t)}
+        </Label>
+      )}
+    </View>
   );
 }
 
@@ -422,6 +494,7 @@ function statusKey(status: Card['status']): 'statusNew' | 'statusLearning' | 'st
 const STAGE_WIDTH = 620;
 
 const styles = StyleSheet.create({
+  ratingInterval: { marginTop: 4 },
   flex: { flex: 1 },
   stage: { flex: 1 },
   stageWide: {

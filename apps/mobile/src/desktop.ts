@@ -31,7 +31,11 @@ export interface DesktopBridge {
   appVersion: string;
   electronVersion: string;
   chromeVersion: string;
-  /** Always false on desktop: the ONNX runtime is a native mobile module. */
+  /**
+   * Always false. Examples come from the hosted model the shell calls, not from
+   * anything running in this process; kept so a caller can ask without
+   * branching on the platform.
+   */
   hasLocalModel: boolean;
   /** The shell parses `.apkg` itself, so import needs no server and no account. */
   canImportLocally: boolean;
@@ -48,7 +52,28 @@ export interface DesktopBridge {
    * unsubscribe function.
    */
   onImportRequest(handler: (file: DesktopFile | null) => void): () => void;
+  /**
+   * Report the theme the app is rendering.
+   *
+   * Kept for callers that have both halves to hand; it forwards to the same
+   * `theme.set` below, and the main process resolves what "system" actually
+   * rendered before storing it.
+   */
   reportTheme(name: 'light' | 'dark', preference: 'light' | 'dark' | 'system'): void;
+  /**
+   * The window chrome's own channel, used by `src/ui/shell.ts`.
+   *
+   * Optional because a bridge is only ever partly stubbed in tests, and because
+   * `shell.ts` reads it structurally rather than through this type.
+   */
+  theme?: {
+    set(preference: string): void;
+    onNativeChange(listener: (name: 'light' | 'dark') => void): () => void;
+  };
+  /** Window state the page cannot observe for itself, such as full-screen. */
+  window?: {
+    onFullscreenChange(listener: (fullscreen: boolean) => void): () => void;
+  };
 }
 
 declare global {
