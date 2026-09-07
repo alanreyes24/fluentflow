@@ -16,7 +16,7 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -521,10 +521,20 @@ async function run(browser, crashes, app, session) {
     check('the import is offered rather than performed', await hasText(page, 'import as', 5000));
 
     await clickLabel(page, 'Import from Anki');
-    const parsed = await hasText(page, 'import complete', 30000);
+    // An import that creates a deck ends on the deck list, not on an "import
+    // complete" panel: import.tsx replaces the route as soon as the write
+    // lands, and only an import into an existing deck stays to report. So the
+    // evidence is the deck itself, which is the stronger claim anyway.
+    const parsed = await hasText(page, 'spanish a1', 30000);
     check('the shell parses the deck with no server and no account', parsed);
     check('all sixty cards arrive', await hasText(page, '60 cards', 5000));
-    await shoot(page, '09-import-complete');
+    // The language is read off the cards, not guessed from the file name —
+    // proof the shell parsed the collection rather than counting rows in it.
+    check(
+      'the deck arrives with the language its cards are in',
+      await hasText(page, 'Español', 5000),
+    );
+    await shoot(page, '09-imported-deck');
   }
 
   // --- the settings screen's answer about the model ------------------------

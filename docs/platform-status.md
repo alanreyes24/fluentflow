@@ -3,7 +3,8 @@
 Where each target actually stands. The README says what the app does; this says
 which platforms it has been watched doing it on, which is a shorter list.
 
-Current as of 7 September 2026.
+Current as of 7 September 2026, after the statistics work and the emerald
+interface were merged into one line.
 
 ## Stages
 
@@ -19,8 +20,8 @@ collapsing these four into one word:
 
 | Platform | Builds | Runs | Verified | Distributable |
 | --- | --- | --- | --- | --- |
-| Web | yes | yes | yes, 22 checks | yes, once hosted |
-| Windows | yes | yes | yes, 35 checks | unsigned only |
+| Web | yes | yes | yes, 27 checks | yes, once hosted |
+| Windows | yes | yes | yes, 37 checks | unsigned only |
 | iOS | yes | **never** | no | no |
 | Android | yes | **never** | no | no |
 | macOS | **never attempted** | no | no | no |
@@ -85,16 +86,22 @@ written rather than generated, which is permanent and not an install away.
 
 **The evidence.** [scripts/verify-desktop.mjs](../scripts/verify-desktop.mjs)
 launches the packaged executable with a debugging port and drives the real
-renderer over the DevTools protocol. Thirty-five checks, including that the
-window is served over `app://` and not `file://`, that a deep link resolves
-rather than landing on a blank page, that a deck survives a reload because it
-went to SQLite, that the statistics screen reads that review back as a day
-streak — computed from the machine's own calendar days rather than a test's —
-with its retention, rating split and study calendar drawn, that a second copy
-hands over its file and exits, that a 60-card `.apkg` opened from Explorer
-imports with no server and no account, that a relaunch opens at the remembered
-size, that the CSP does not block the app, that the renderer logged no errors,
-and that the process did not crash. It runs against a throwaway user-data
+renderer over the DevTools protocol. Thirty-seven checks, including that the
+window is served over `app://` and not `file://`, that a deck survives a reload
+because it went to SQLite, that a pasted word list becomes cards, that the
+statistics screen reads a review back as a day streak — computed from the
+machine's own calendar days rather than a test's — with its retention, rating
+split and study calendar drawn, that a second copy hands over its file and
+exits, that a 60-card `.apkg` opened from Explorer imports with no server and no
+account and arrives with the language its cards are in, that a relaunch opens at
+the remembered size, that the renderer cannot read the API key back, that the
+CSP does not block the app, that the renderer logged no errors, and that the
+process did not crash.
+
+Each platform is asked only what is true of it. The traffic-light overlap and
+the drag handle are macOS questions — they follow from `titleBarStyle: 'hidden'`,
+which only macOS gets — so on Windows the walkthrough checks the opposite: that
+the native title bar was left alone, and no strip was drawn under it. It runs against a throwaway user-data
 directory each time, so it sees the empty state rather than the previous run's
 deck. Screenshots land in `.desktop-shots/`.
 
@@ -121,10 +128,12 @@ window is the one-minute check nobody has done.
   is wired in. `desktop:refresh` is a developer tool, not a distribution
   mechanism, and it cannot touch the portable executable at all, which unpacks
   itself into a temporary directory on every launch.
-- **No on-device AI, permanently.** `onnxruntime-react-native` is a native mobile
-  module, so the desktop build always uses the written-sentence fallback. Settings
-  now says so in those words rather than "not installed". That is a property of
-  the Electron approach, not a gap to close.
+- **Examples need a key, and there is none in the repository.** Generation runs
+  against a hosted model called from the main process, so the desktop can write
+  real examples — but only once someone pastes their own API key into Settings.
+  Without one the app falls back to written sentences and says so. The key is
+  kept in the OS keychain by the main process and never reaches the renderer,
+  which is checked by the walkthrough.
 - **The installer claims no file association, on purpose.** Opening a `.apkg`
   with FluentFlow works, and Explorer's "Open with" is how you ask for it. The
   installer does not register `.apkg` itself: that extension is Anki's, and an
@@ -145,35 +154,55 @@ copyright, and carries the app's icon at seven sizes.
 
 ## macOS: configured, never executed
 
-Every macOS decision has been made and none of them has been tested.
+Every macOS decision has been made and none of them has been run. Nothing below
+has been watched working; it is a description of code and configuration, which
+is a different claim.
 
-**What exists.** `dist:mac` targets a dmg
-([apps/desktop/package.json:14](../apps/desktop/package.json#L14)) under
-`public.app-category.education`. The shell has real darwin branches rather than
-Windows code that happens to compile: a `hiddenInset` title bar
-([main.js:91](../apps/desktop/main.js#L91)), the `appMenu` role prepended to the
-menu bar ([main.js:162](../apps/desktop/main.js#L162)), and the platform
-convention of staying alive when the last window closes
-([main.js:215](../apps/desktop/main.js#L215)). Both desktop scripts already look
-for `dist/mac/FluentFlow.app`: `verify-desktop.mjs` knows the path to the
-executable inside the bundle, and `refresh-desktop.mjs` knows where
+**What exists.** The shell has real darwin branches rather than Windows code
+that happens to compile. The window is a vibrancy pane
+([main.js:152](../apps/desktop/main.js#L152)) with the native title bar hidden
+([main.js:161](../apps/desktop/main.js#L161)) and the traffic lights positioned
+by hand ([main.js:162](../apps/desktop/main.js#L162)) — which is why the
+renderer keeps a strip clear for them and uses it as the window's drag handle,
+and why the app stays alive with no windows open
+([main.js:687](../apps/desktop/main.js#L687)). The app menu carries "Check for
+Updates…" rather than the bare `appMenu` role. Full-screen is relayed to the
+renderer over IPC, because macOS hides the lights there and the strip has to go
+with them — something the page cannot observe for itself.
+
+The build config is no longer a stub: arm64 `dmg` and `zip`, `darkModeSupport`,
+an `.icns`, `hardenedRuntime`, and an entitlements plist that exists on disk.
+`afterPack` runs ad-hoc signing so the bundle is at least self-consistent —
+`codesign --verify` on an unsigned Electron bundle otherwise complains that it
+promises sealed resources it does not have.
+
+Both desktop scripts already look for `dist/mac/FluentFlow.app`:
+`verify-desktop.mjs` knows the path to the executable inside the bundle, takes
+`FLUENTFLOW_APP=/Applications/FluentFlow.app` to point at an installed copy, and
+checks the signature is self-consistent; `refresh-desktop.mjs` knows where
 `resources/app` sits within it. Neither needs changing. They need a build to
 point at.
 
-**What is missing.** The build config has no `hardenedRuntime`, no entitlements
-plist, no notarization step, no signing identity, and no architecture targets,
-so no arm64/x64 split and no universal binary. A dmg built today would be
-refused by Gatekeeper on any machine except the one that built it.
+The walkthrough's macOS-only checks — that nothing is drawn under the traffic
+lights at two window widths, and that the page supplies a drag handle — are
+written and have never executed, because they are skipped off darwin. On
+Windows the walkthrough asks the opposite question instead.
+
+**What is missing.** `identity` is null and `notarize` is false, so there is no
+Developer ID and nothing is notarized: a dmg built today would be quarantined
+on any machine except the one that built it. There is no x64 or universal
+target, only arm64.
 
 **And it needs a Mac.** electron-builder cannot cross-build a signed and
 notarized macOS target from Windows. That is the blocker; everything else is
 downstream of it.
 
-**Order of work.** Get a Mac, then `npm run desktop` there, which builds the web
-export and packages the dmg. `npm run verify:desktop` should then find the
-`.app` without modification. Decide arm64 versus universal. Finally, and only if
-it is to leave that machine, an Apple Developer certificate, `hardenedRuntime`,
-entitlements and notarization.
+**Order of work.** Get a Mac, then `npm run desktop:pack` there, which builds
+the web export and packages the `.app`. `npm run verify:desktop` should then
+find it without modification, and the three macOS chrome checks would run for
+the first time. Decide arm64 versus universal. Finally, and only if it is to
+leave that machine, an Apple Developer certificate and notarization — set
+`APPLE_IDENTITY`, and the build wrapper turns both on.
 
 ## iOS: code-complete, zero device time
 
@@ -269,8 +298,8 @@ Every claim above is meant to be re-verifiable rather than trusted:
 | Claim | Check |
 | --- | --- |
 | Windows artifacts exist | `ls apps/desktop/dist` |
-| Windows runs and works | `npm run verify:desktop`, 35 checks, rewrites `.desktop-shots/` |
-| Web runs and works | `npm run verify:web`, 22 checks |
+| Windows runs and works | `npm run verify:desktop`, 37 checks, rewrites `.desktop-shots/` |
+| Web runs and works | `npm run verify:web`, 27 checks |
 | The logic is correct across devices | `npm run verify`, 26 checks against the real server |
 | Test counts | `npm test`, 236 unit and integration tests |
 | The project is ready for a device | `npx expo-doctor`, 21/21 |

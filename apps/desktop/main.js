@@ -288,6 +288,80 @@ function describeFile(filePath) {
   }
 }
 
+
+/** The first Anki package named on a command line, if any. */
+function apkgFromArgv(argv) {
+  const candidate = argv
+    .slice(1)
+    .filter((argument) => !argument.startsWith('-'))
+    .find((argument) => EXTENSIONS.test(argument) && existsSync(argument));
+  return candidate ? describeFile(path.resolve(candidate)) : null;
+}
+
+function registerImportHandlers() {
+  // The picker lives here rather than in the page because a sandboxed renderer
+  // gets a browser file input, which hands back a `File` with no usable path —
+  // and the parse happens in this process, from a path.
+  ipcMain.handle('fluentflow:pick-apkg', async () => {
+    const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    const { canceled, filePaths } = await dialog.showOpenDialog(owner, {
+      title: 'Import an Anki deck',
+      buttonLabel: 'Import',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Anki package', extensions: ['apkg', 'colpkg'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+
+    if (canceled || filePaths.length === 0) return { canceled: true };
+
+    const file = describeFile(filePaths[0]);
+    if (!file) return { canceled: true };
+
+    permittedFiles.add(file.path);
+    return { canceled: false, file };
+  });
+
+  ipcMain.handle('fluentflow:import-apkg', async (_event, request) => {
+    const filePath = typeof request?.path === 'string' ? request.path : '';
+    if (!permittedFiles.has(filePath)) {
+      return {
+        ok: false,
+        code: 'NOT_A_ZIP',
+        message: 'Choose the file again — the app can only import a file you picked.',
+      };
+    }
+
+    return importApkg(filePath, {
+      userId: String(request?.userId ?? ''),
+      language: request?.language || undefined,
+      flatten: request?.flatten === true,
+    });
+  });
+
+  // Sent by the preload once the app has somewhere to put an import request.
+  ipcMain.on('fluentflow:import-ready', (event) => {
+    if (mainWindow && event.sender !== mainWindow.webContents) return;
+    rendererReady = true;
+    if (!pendingImport || !mainWindow) return;
+
+    const queued = pendingImport;
+    pendingImport = null;
+    mainWindow.webContents.send('fluentflow:import-request', queued.path ? queued : null);
+  });
+
+  // A file dropped on the window. The preload resolves the path; this decides
+  // whether it is worth handing to the importer.
+  ipcMain.on('fluentflow:dropped-file', (event, filePath) => {
+    if (mainWindow && event.sender !== mainWindow.webContents) return;
+    if (typeof filePath !== 'string' || !EXTENSIONS.test(filePath)) return;
+
+    const file = describeFile(filePath);
+    if (file) requestImport(file);
+  });
+}
+
 // --- menu -------------------------------------------------------------------
 
 function buildMenu() {

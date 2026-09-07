@@ -8,7 +8,7 @@ sync across devices.
 ```
 npm install
 npm run build          # build the shared core package
-npm test               # 232 tests
+npm test               # 326 tests
 npm run verify         # end-to-end check of the success criteria
 npm run verify:web     # the same criteria, driven through Chrome
 npm run server         # sync API on :8787 (no Firebase project needed)
@@ -36,10 +36,10 @@ sentences until a model is installed. Both are covered below.
 ## Layout
 
 ```
-packages/core      domain logic, no platform dependencies
+packages/core      domain logic, no platform dependencies — 168 tests
 apps/server        Express + Firestore sync API and Anki import — 17 tests
 apps/mobile        the app's UI: an Expo app (iOS, Android, web export)
-apps/desktop       Electron shell for Windows and macOS, both packaged — 12 tests
+apps/desktop       Electron shell: Windows packaged, macOS configured — 12 tests
 scripts            dictionaries, icon generation, end-to-end verification
 docs               where each platform stands, and how to walk it on a phone
 ```
@@ -580,10 +580,10 @@ fails on the second.
 ## Testing
 
 ```
-npm test              # 232 unit and integration tests
+npm test              # 326 unit and integration tests
 npm run verify        # 26 checks end-to-end against the real server
-npm run verify:web    # 23 checks driving the web build through Chrome
-npm run verify:desktop  # 23 checks driving the packaged desktop app, 29 with dictionaries
+npm run verify:web    # 27 checks driving the web build through Chrome
+npm run verify:desktop  # 37 checks driving the packaged desktop app
 ```
 
 `npm run verify` is the one to run when judging whether the *logic* works. It
