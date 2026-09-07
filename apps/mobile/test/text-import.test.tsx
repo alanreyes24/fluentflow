@@ -101,14 +101,11 @@ describe('TextImportScreen', () => {
     expect(screen.getByText('to speak')).toBeTruthy();
   });
 
-  it('keeps the list editor compact until expanded', async () => {
+  it('does not show an extra expand control under the list', async () => {
     await renderScreen(<TextImportScreen />, { repository });
 
-    expect(screen.getByRole('button', { name: 'Show more' })).toBeTruthy();
-    expect(screen.queryByText(/Paste one word per line/)).toBeNull();
-
-    await fireEvent.press(screen.getByRole('button', { name: 'Show more' }));
-    expect(screen.getByRole('button', { name: 'Show less' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Show less' })).toBeNull();
   });
 
   it('names the lines it could not read instead of dropping them silently', async () => {
@@ -242,7 +239,7 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository });
     await paste(WORDS);
 
-    await screen.findByText('Gemini is not connected, so unresolved words cannot be added.');
+    await screen.findByText('Gemini is not connected. Add a key or approve skipping unresolved words.');
     expect(screen.queryByRole('button', { name: 'Look up the meanings' })).toBeNull();
     expect(screen.queryByLabelText('nido')).toBeNull();
   });
@@ -320,7 +317,7 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
-    await screen.findByText('Gemini is not connected, so unresolved words cannot be added.');
+    await screen.findByText('Gemini is not connected. Add a key or approve skipping unresolved words.');
     await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');
     await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));
     expect(await repository.listDecks(TEST_USER.id)).toHaveLength(0);
@@ -372,6 +369,10 @@ describe('TextImportScreen', () => {
     await paste(WORDS);
     await screen.findByText('Meanings assigned automatically');
     expect(screen.getByText('2 from the dictionary · 1 with no answer')).toBeTruthy();
+
+    expect(screen.getByRole('button', { name: 'I understand — skip unresolved words' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create cards' })).toBeDisabled();
+    await fireEvent.press(screen.getByRole('button', { name: 'I understand — skip unresolved words' }));
 
     await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');
     await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));

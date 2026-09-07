@@ -113,7 +113,9 @@ const MAX_FRONT = 120;
  */
 const MAX_BLOCK_LINES = 4;
 const MAX_BACK = 500;
-const DEFAULT_MAX_CARDS = 1000;
+// A large vocabulary paste is normal. Keep an explicit safety ceiling, but do
+// not make a 1,000-card cutoff turn a 2,700-line paste into a partial import.
+const DEFAULT_MAX_CARDS = 5000;
 /** How many skipped lines to hand back. The count is reported in full. */
 const SKIPPED_SAMPLE = 25;
 

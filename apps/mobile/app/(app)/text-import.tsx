@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   LANGUAGE_NAMES,
@@ -29,7 +29,6 @@ import {
   lookUpMeanings,
   lookupSources,
   type LookupSources,
-  type TranslationProgress,
 } from '../../src/ai/desktop';
 
 type Translate = ReturnType<typeof useI18n>['t'];
@@ -71,15 +70,16 @@ export default function TextImportScreen() {
   const [importedDeckId, setImportedDeckId] = useState<string | null>(null);
   const [sources, setSources] = useState<LookupSources | null>(null);
   const [translating, setTranslating] = useState(false);
-  const [progress, setProgress] = useState<TranslationProgress | null>(null);
   /** Word -> meaning, filled by the dictionary or Gemini. */
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   /** Word -> where its meaning came from, for the automatic-results summary. */
   const [origins, setOrigins] = useState<Record<string, ResolvedMeaning>>({});
   const [reviewing, setReviewing] = useState(false);
   const [confirmingModel, setConfirmingModel] = useState(false);
-  const [listExpanded, setListExpanded] = useState(false);
+  const [skipApproved, setSkipApproved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Invalidates an in-flight lookup when the pasted list is replaced. */
+  const inputGeneration = useRef(0);
 
   const targetDeckId = deckId ?? selectedDeckId ?? undefined;
 
@@ -182,17 +182,18 @@ export default function TextImportScreen() {
     async (useModel: boolean) => {
       const words = useModel ? unasked : meaninglessWords;
       if (words.length === 0) return;
+      const generation = inputGeneration.current;
       setTranslating(true);
-      setProgress({ done: 0, total: words.length });
       setError(null);
       try {
         // The deck's language when adding to one, otherwise whatever the user
         // picked. Detection cannot help here: it reads the words, and a model
         // asked to translate Spanish as Bosnian answers confidently either way.
         const target = deck?.language ?? language ?? 'es';
-        const results = await lookUpMeanings(words, target, setProgress, { useModel });
+        const results = await lookUpMeanings(words, target, undefined, { useModel });
         // A meaning already in the box wins. The second pass exists to fill
         // blanks, not to overwrite a correction someone has just typed.
+        if (generation !== inputGeneration.current) return;
         setDrafts((current) => {
           const next = { ...current };
           for (const [word, meaning] of Object.entries(draftsFrom(results))) {
@@ -206,10 +207,13 @@ export default function TextImportScreen() {
         }));
         setReviewing(true);
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        if (generation === inputGeneration.current) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+        }
       } finally {
-        setTranslating(false);
-        setProgress(null);
+        if (generation === inputGeneration.current) {
+          setTranslating(false);
+        }
       }
     },
     [meaninglessWords, unasked, deck, language],
@@ -242,7 +246,13 @@ export default function TextImportScreen() {
   const estimatedModelCost = estimateTranslationCost(unasked.length);
 
   const run = useCallback(async () => {
-    if (!repository || !user || preview.entries.length === 0 || (targetDeckId && !deck)) return;
+    if (
+      !repository ||
+      !user ||
+      preview.entries.length === 0 ||
+      (targetDeckId && !deck) ||
+      (missingMeanings.length > 0 && !skipApproved)
+    ) return;
     setBusy(true);
     setError(null);
     try {
@@ -280,6 +290,7 @@ export default function TextImportScreen() {
       setText('');
       setDrafts({});
       setReviewing(false);
+      setSkipApproved(false);
       await refreshDecks();
       void syncNow();
 
@@ -296,6 +307,7 @@ export default function TextImportScreen() {
   }, [
     repository, user, preview.entries.length, text, swap, existingFronts, drafts,
     deck, deckName, language, refreshDecks, syncNow, t, targetDeckId,
+    missingMeanings.length, skipApproved,
   ]);
 
   return (
@@ -335,6 +347,7 @@ export default function TextImportScreen() {
                     setOrigins({});
                     setReviewing(false);
                     setConfirmingModel(false);
+                    setSkipApproved(false);
                     attempted.current.clear();
                   }}
                 />
@@ -367,22 +380,30 @@ export default function TextImportScreen() {
           label={t('pasteLabel')}
           value={text}
           onChangeText={(value) => {
+            if (value !== text) {
+              inputGeneration.current += 1;
+              // A new paste or edit must not inherit model-rejected entries
+              // from the previous list. Otherwise the UI can show 450 missing
+              // words while offering Gemini only one fresh request.
+              if (reviewing || translating || Object.keys(drafts).length > 0 || Object.keys(origins).length > 0) {
+                setDrafts({});
+                setOrigins({});
+                setReviewing(false);
+                setConfirmingModel(false);
+                setSkipApproved(false);
+                attempted.current.clear();
+              }
+            }
             setText(value);
             setSummary(null);
             setConfirmingModel(false);
           }}
           multiline
-          numberOfLines={listExpanded ? 10 : 4}
+          numberOfLines={4}
           autoCapitalize="none"
           autoCorrect={false}
           placeholder={'hablar - to speak\ncasa - house'}
-          style={[styles.paste, listExpanded ? styles.pasteExpanded : styles.pasteCollapsed]}
-        />
-        <Button
-          label={listExpanded ? t('pasteCollapse') : t('pasteExpand')}
-          variant="ghost"
-          onPress={() => setListExpanded((expanded) => !expanded)}
-          style={styles.expandList}
+          style={[styles.paste, styles.pasteCollapsed]}
         />
 
         {/* A state, not an action: it says how the list is being read, and
@@ -462,6 +483,25 @@ export default function TextImportScreen() {
                   {t('aiUnavailableNoManual')}
                 </Label>
               )}
+
+              {sources !== null && (reviewing || !hasDictionary) && counts.missing > 0 ? (
+                <>
+                  <Label variant="caption" tone="muted">
+                    {t('aiNeedsSkipApproval', { count: counts.missing })}
+                  </Label>
+                  {skipApproved ? (
+                    <Label variant="caption" tone="danger">
+                      {t('aiSkipApproved', { count: counts.missing })}
+                    </Label>
+                  ) : (
+                    <Button
+                      label={t('aiApproveSkip')}
+                      variant="ghostDanger"
+                      onPress={() => setSkipApproved(true)}
+                    />
+                  )}
+                </>
+              ) : null}
             </Surface>
           </>
         ) : null}
@@ -470,9 +510,10 @@ export default function TextImportScreen() {
           <>
             <Spacer size={theme.spacing.md} />
             <Surface style={styles.options}>
-              <Label variant="label">
-                {t('aiTranslating', { done: progress?.done ?? 0, total: progress?.total ?? 0 })}
-              </Label>
+              <Row gap={theme.spacing.sm}>
+                <ActivityIndicator color={theme.colors.accent} />
+                <Label variant="label">{t('aiTranslating')}</Label>
+              </Row>
             </Surface>
           </>
         ) : null}
@@ -485,9 +526,11 @@ export default function TextImportScreen() {
               <Label variant="caption" tone="faint">
                 {summaryLine(counts, modelName, t)}
               </Label>
-              <Label variant="caption" tone="muted">
-                {counts.missing > 0 ? t('aiUnresolvedWillSkip', { count: counts.missing }) : t('aiAutomaticReady')}
-              </Label>
+              {counts.missing === 0 ? (
+                <Label variant="caption" tone="muted">
+                  {t('aiAutomaticReady')}
+                </Label>
+              ) : null}
             </Surface>
           </>
         ) : null}
@@ -497,7 +540,12 @@ export default function TextImportScreen() {
           label={deck ? t('addToDeck') : t('createCards')}
           onPress={() => void run()}
           loading={busy}
-          disabled={busy || readyCount === 0 || Boolean(targetDeckId && !deck)}
+          disabled={
+            busy ||
+            readyCount === 0 ||
+            (missingMeanings.length > 0 && !skipApproved) ||
+            Boolean(targetDeckId && !deck)
+          }
         />
 
         {error ? (
@@ -706,8 +754,6 @@ function estimateTranslationCost(count: number): string {
 const styles = StyleSheet.create({
   paste: { textAlignVertical: 'top' },
   pasteCollapsed: { minHeight: 88 },
-  pasteExpanded: { minHeight: 220 },
-  expandList: { alignSelf: 'flex-start' },
   options: { gap: 12 },
   preview: { gap: 4 },
   previewHead: { justifyContent: 'space-between' },

@@ -131,6 +131,16 @@ test('a paste is capped, and says so', () => {
   assert.match(result.warnings.join(' '), /Stopped at 10 cards/);
 });
 
+test('a large paste is accepted by the default limit', () => {
+  const result = parseTextCards(
+    Array.from({ length: 2700 }, (_, index) => `word-${index}`).join('\n'),
+  );
+
+  assert.equal(result.entries.length, 2700);
+  assert.equal(result.skippedCount, 0);
+  assert.doesNotMatch(result.warnings.join(' '), /Stopped at/);
+});
+
 test('an empty paste is empty, not an error', () => {
   const result = parseTextCards('   \n\n# only a comment\n');
 
