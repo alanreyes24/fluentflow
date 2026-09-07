@@ -2,15 +2,17 @@ import { forwardRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
   type TextInputProps,
+  type TextStyle,
 } from 'react-native';
 import type { CardStatus, DeckProgress } from '@fluentflow/core';
-import { layout, useLayout, useTheme, type Theme } from './theme';
+import { layout, useLayout, useTheme, type ElevationLevel, type Theme } from './theme';
 import type { TextStyleProp, ViewStyleProp } from './styles';
 
 /**
@@ -19,7 +21,34 @@ import type { TextStyleProp, ViewStyleProp } from './styles';
  * These exist so no screen reaches for a raw colour: every one of them takes
  * its palette from the theme, which is what makes dark mode a single switch
  * rather than an audit.
+ *
+ * The look is a quiet emerald system — one accent, a neutral surface ramp, and
+ * soft shadows that lift a card off the page without a hard edge. Motion and
+ * focus rings are web-only style props, guarded so the native test preset never
+ * sees a style key it does not know.
  */
+
+const WEB = Platform.OS === 'web';
+
+/** Append an alpha byte to a `#rrggbb`, leave anything else alone. */
+function withAlpha(color: string, alpha: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? `${color}${alpha}` : color;
+}
+
+/**
+ * Web-only style props (CSS transitions, `backdrop-filter`). A no-op on native,
+ * where these keys are not in `ViewStyle` — the cast is the price of using them
+ * without pulling in the react-native-web types across the whole app. `webText`
+ * is the same escape hatch for a `TextInput`'s style, whose element type is
+ * `TextStyle` rather than `ViewStyle` in this React Native version.
+ */
+function web(style: Record<string, string | number>): ViewStyleProp {
+  return WEB ? (style as unknown as ViewStyleProp) : undefined;
+}
+
+function webText(style: Record<string, string | number>): TextStyle | undefined {
+  return WEB ? (style as unknown as TextStyle) : undefined;
+}
 
 // --- text -------------------------------------------------------------------
 
@@ -76,8 +105,10 @@ interface ButtonProps {
   variant?: 'primary' | 'secondary' | 'ghost' | 'ghostDanger' | 'danger';
   disabled?: boolean;
   loading?: boolean;
-  /** Overrides the variant's background, used by the rating buttons. */
+  /** Solid background override — the answer buttons on the flashcard use it. */
   color?: string;
+  /** Tonal override: a soft wash of this colour with the colour as the label. */
+  tone?: string;
   style?: ViewStyleProp;
   accessibilityHint?: string;
 }
@@ -89,6 +120,7 @@ export function Button({
   disabled,
   loading,
   color,
+  tone,
   style,
   accessibilityHint,
 }: ButtonProps) {
@@ -97,25 +129,53 @@ export function Button({
   const [hovered, setHovered] = useState(false);
   const inactive = disabled || loading;
 
-  const background =
-    color ??
-    {
-      primary: theme.colors.accent,
-      secondary: theme.colors.surface,
-      ghost: 'transparent',
-      ghostDanger: 'transparent',
-      danger: theme.colors.danger,
-    }[variant];
+  // Resolve the resting and hover backgrounds. `tone`/`color` overrides win,
+  // then the variant. `primary` moves through real accent steps rather than the
+  // old flat opacity dip, which reads muddy against a coloured override.
+  let background: string;
+  let hoverBackground: string;
+  let textColor: string;
+  let shadow: string = theme.elevation.none;
 
-  // A destructive action drawn in the accent colour reads as the thing to
-  // press. `ghostDanger` exists because "Delete deck" was doing exactly that.
-  const textColor = {
-    primary: theme.colors.accentText,
-    secondary: theme.colors.text,
-    ghost: theme.colors.accent,
-    ghostDanger: theme.colors.danger,
-    danger: theme.colors.accentText,
-  }[variant];
+  if (color) {
+    background = color;
+    hoverBackground = color;
+    textColor = theme.colors.accentText;
+    shadow = theme.elevation.sm;
+  } else if (tone) {
+    background = withAlpha(tone, '26');
+    hoverBackground = withAlpha(tone, '3d');
+    textColor = tone;
+  } else {
+    switch (variant) {
+      case 'primary':
+        background = theme.colors.accent;
+        hoverBackground = theme.colors.accentHover;
+        textColor = theme.colors.accentText;
+        shadow = theme.elevation.sm;
+        break;
+      case 'secondary':
+        background = theme.colors.accentSoft;
+        hoverBackground = withAlpha(theme.colors.accent, '2e');
+        textColor = theme.colors.accent;
+        break;
+      case 'danger':
+        background = theme.colors.danger;
+        hoverBackground = theme.colors.danger;
+        textColor = theme.colors.accentText;
+        shadow = theme.elevation.sm;
+        break;
+      case 'ghostDanger':
+        background = 'transparent';
+        hoverBackground = withAlpha(theme.colors.danger, '1f');
+        textColor = theme.colors.danger;
+        break;
+      default:
+        background = 'transparent';
+        hoverBackground = theme.colors.hover;
+        textColor = theme.colors.accent;
+    }
+  }
 
   return (
     <Pressable
@@ -132,17 +192,17 @@ export function Button({
       onPointerLeave={() => setHovered(false)}
       style={({ pressed }) => [
         styles.button,
+        { borderRadius: theme.radius.md },
         // A 48pt target is sized for a thumb. With a mouse it reads as
         // oversized, and macOS controls are nowhere near it.
-        { minHeight: wide ? 38 : 48, paddingHorizontal: wide ? 16 : 20 },
+        { minHeight: wide ? 38 : 48, paddingHorizontal: wide ? 18 : 22 },
         {
-          backgroundColor: background,
-          borderColor: variant === 'secondary' ? theme.colors.border : 'transparent',
-          borderWidth: variant === 'secondary' ? StyleSheet.hairlineWidth : 0,
-          // Opacity rather than a second palette entry: it reads correctly in
-          // both themes and against the overridden rating colours.
-          opacity: inactive ? 0.45 : pressed ? 0.82 : hovered ? 0.9 : 1,
+          backgroundColor: (pressed || hovered) && !inactive ? hoverBackground : background,
+          opacity: inactive ? 0.4 : pressed ? 0.9 : 1,
+          boxShadow: inactive ? theme.elevation.none : shadow,
+          transform: pressed && !inactive ? [{ translateY: 1 }] : [{ translateY: 0 }],
         },
+        web({ transitionProperty: 'background-color, box-shadow, transform, opacity', transitionDuration: '120ms' }),
         style,
       ]}
     >
@@ -237,12 +297,15 @@ export function Surface({
   children,
   style,
   raised,
+  elevation,
 }: {
   children: ReactNode;
   style?: ViewStyleProp;
   raised?: boolean;
+  elevation?: ElevationLevel;
 }) {
   const theme = useTheme();
+  const level: ElevationLevel = elevation ?? (raised ? 'sm' : 'none');
   return (
     <View
       style={[
@@ -251,12 +314,21 @@ export function Surface({
           backgroundColor: raised ? theme.colors.surfaceRaised : theme.colors.surface,
           borderColor: theme.colors.border,
           borderRadius: theme.radius.md,
+          boxShadow: theme.elevation[level],
         },
         style,
       ]}
     >
       {children}
     </View>
+  );
+}
+
+/** A hairline rule inside a surface. */
+export function Divider({ style }: { style?: ViewStyleProp }) {
+  const theme = useTheme();
+  return (
+    <View style={[{ height: StyleSheet.hairlineWidth, backgroundColor: theme.colors.divider }, style]} />
   );
 }
 
@@ -276,6 +348,137 @@ export function Spacer({ size = 16 }: { size?: number }) {
   return <View style={{ height: size }} />;
 }
 
+/**
+ * A small count or status pill.
+ *
+ * `accent` is the due-count on a deck; `plain` is a neutral tag. Text stays at
+ * caption size so a two-digit number does not stretch the pill out of round.
+ */
+export function Badge({
+  children,
+  tone = 'accent',
+}: {
+  children: ReactNode;
+  tone?: 'accent' | 'plain';
+}) {
+  const theme = useTheme();
+  const accent = tone === 'accent';
+  return (
+    <View
+      style={[
+        styles.badge,
+        {
+          backgroundColor: accent ? theme.colors.accent : theme.colors.surfaceSunken,
+          borderRadius: theme.radius.pill,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          theme.typography.caption,
+          { color: accent ? theme.colors.accentText : theme.colors.textMuted, fontWeight: '700' },
+        ]}
+      >
+        {children}
+      </Text>
+    </View>
+  );
+}
+
+// --- segmented control -----------------------------------------------------
+
+/**
+ * One-of-N choice as a single grooved control.
+ *
+ * Replaces the rows of primary/secondary buttons the pickers used to be: the
+ * selected segment lifts on its own surface, the rest recede into the groove.
+ * Equal-width segments — every option here is one or two words.
+ */
+export function SegmentedControl<T extends string>({
+  options,
+  value,
+  onChange,
+  style,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  style?: ViewStyleProp;
+}) {
+  const theme = useTheme();
+  return (
+    <View
+      style={[
+        styles.segmented,
+        { backgroundColor: theme.colors.surfaceSunken, borderRadius: theme.radius.md },
+        style,
+      ]}
+    >
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <Segment
+            key={option.value}
+            label={option.label}
+            selected={selected}
+            onPress={() => onChange(option.value)}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+function Segment({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const [hovered, setHovered] = useState(false);
+
+  const background = selected
+    ? theme.colors.surfaceRaised
+    : hovered
+      ? theme.colors.hover
+      : 'transparent';
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      style={[
+        styles.segment,
+        {
+          backgroundColor: background,
+          borderRadius: theme.radius.md - 3,
+          borderWidth: selected ? StyleSheet.hairlineWidth : 0,
+          borderColor: theme.colors.border,
+          boxShadow: selected ? theme.elevation.sm : theme.elevation.none,
+        },
+        web({ transitionProperty: 'background-color, box-shadow', transitionDuration: '120ms' }),
+      ]}
+    >
+      <Label
+        variant="label"
+        tone={selected ? 'accent' : 'muted'}
+        align="center"
+        numberOfLines={1}
+      >
+        {label}
+      </Label>
+    </Pressable>
+  );
+}
+
 // --- inputs -----------------------------------------------------------------
 
 interface FieldProps extends TextInputProps {
@@ -285,10 +488,18 @@ interface FieldProps extends TextInputProps {
 }
 
 export const Field = forwardRef<TextInput, FieldProps>(function Field(
-  { label, hint, error, style, ...props },
+  { label, hint, error, style, onFocus, onBlur, ...props },
   ref,
 ) {
   const theme = useTheme();
+  const [focused, setFocused] = useState(false);
+
+  const borderColor = error
+    ? theme.colors.danger
+    : focused
+      ? theme.colors.accent
+      : theme.colors.border;
+
   return (
     <View style={styles.field}>
       {label ? (
@@ -303,15 +514,28 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
         // announced as an unnamed text box.
         accessibilityLabel={props.accessibilityLabel ?? label}
         placeholderTextColor={theme.colors.textFaint}
+        onFocus={(event) => {
+          setFocused(true);
+          onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          setFocused(false);
+          onBlur?.(event);
+        }}
         style={[
           theme.typography.body,
           styles.input,
           {
-            backgroundColor: theme.colors.surface,
-            borderColor: error ? theme.colors.danger : theme.colors.border,
+            backgroundColor: theme.colors.surfaceSunken,
+            borderColor,
             borderRadius: theme.radius.sm,
             color: theme.colors.text,
+            boxShadow: focused && !error
+              ? `0 0 0 3px ${theme.colors.accentSoft}`
+              : theme.elevation.none,
           },
+          { outlineWidth: 0 },
+          webText({ transitionProperty: 'border-color, box-shadow', transitionDuration: '120ms' }),
           style,
         ]}
         {...props}
@@ -342,7 +566,13 @@ export function StatusDot({ status, size = 8 }: { status: CardStatus; size?: num
   return (
     <View
       accessibilityLabel={status}
-      style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: color,
+        boxShadow: `0 0 0 3px ${withAlpha(color, '29')}`,
+      }}
     />
   );
 }
@@ -368,13 +598,20 @@ export function ProgressBar({ progress }: { progress: DeckProgress }) {
     <View
       accessibilityRole="progressbar"
       accessibilityValue={{ min: 0, max: progress.total, now: progress.mastered }}
-      style={[styles.progressTrack, { backgroundColor: theme.colors.border }]}
+      style={[
+        styles.progressTrack,
+        { backgroundColor: theme.colors.surfaceSunken, borderRadius: theme.radius.pill },
+      ]}
     >
       {segments.map((segment) =>
         segment.count > 0 ? (
           <View
             key={segment.key}
-            style={{ flex: segment.count / total, backgroundColor: segment.color }}
+            style={{
+              flex: segment.count / total,
+              backgroundColor: segment.color,
+              borderRadius: theme.radius.pill,
+            }}
           />
         ) : null,
       )}
@@ -423,16 +660,36 @@ export function Loading({ label }: { label?: string }) {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   page: { flex: 1 },
-  sectionLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  sectionLabel: { textTransform: 'uppercase', letterSpacing: 0.8 },
   surface: { borderWidth: StyleSheet.hairlineWidth, padding: 16 },
   row: { flexDirection: 'row', alignItems: 'center' },
   button: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  badge: {
+    minWidth: 24,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmented: {
+    flexDirection: 'row',
+    padding: 3,
+    gap: 3,
+  },
+  segment: {
+    flex: 1,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
   },
   field: { gap: 6 },
-  fieldLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
+  fieldLabel: { textTransform: 'uppercase', letterSpacing: 0.8 },
   fieldHint: {},
   input: {
     minHeight: 48,
@@ -441,10 +698,10 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   progressTrack: {
-    height: 6,
-    borderRadius: 3,
+    height: 8,
     overflow: 'hidden',
     flexDirection: 'row',
+    gap: 2,
   },
   empty: { alignItems: 'center', justifyContent: 'center', padding: 32, gap: 8 },
   emptyHint: { maxWidth: 320 },

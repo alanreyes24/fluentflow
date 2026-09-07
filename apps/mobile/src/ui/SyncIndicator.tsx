@@ -66,10 +66,22 @@ export function SyncIndicator() {
 }
 
 function Dot({ color }: { color: string }) {
-  return <View style={[styles.dot, { backgroundColor: color }]} />;
+  return (
+    <View
+      style={[
+        styles.dot,
+        { backgroundColor: color, boxShadow: `0 0 0 3px ${withAlpha(color, '2e')}` },
+      ]}
+    />
+  );
+}
+
+/** Append an alpha byte to a `#rrggbb`; leave rgba()/keywords alone. */
+function withAlpha(color: string, alpha: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? `${color}${alpha}` : color;
 }
 
 const styles = StyleSheet.create({
-  container: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
+  container: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
+  dot: { width: 7, height: 7, borderRadius: 3.5 },
 });

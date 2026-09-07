@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { RATINGS, type Card, type Deck, type RatingName } from '@fluentflow/core';
@@ -7,6 +7,7 @@ import { useApp } from '../../../src/state/app';
 import type { ExampleResult } from '../../../src/ai/service';
 import {
   Button,
+  Divider,
   EmptyState,
   Label,
   Loading,
@@ -192,14 +193,11 @@ export default function StudyScreen() {
           ]}
           {...gestures.handlers}
         >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={revealed ? card.back : t('showAnswer')}
-            onPress={reveal}
-            disabled={revealed}
-            style={styles.flex}
-          >
-            <Surface raised style={styles.card}>
+          {/* Before the answer, the whole card is the reveal button. After it,
+              the card holds its own controls (Regenerate), so it must not be a
+              button — a button nested in a button is invalid and a11y-hostile. */}
+          <CardShell revealed={revealed} onReveal={reveal} label={revealed ? card.back : t('showAnswer')}>
+            <Surface raised elevation="lg" style={[styles.card, { borderRadius: theme.radius.lg }]}>
               <ScrollView contentContainerStyle={styles.cardContent}>
                 <Label variant="cardFront" align="center" selectable>
                   {card.front}
@@ -207,7 +205,7 @@ export default function StudyScreen() {
 
                 {revealed ? (
                   <>
-                    <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+                    <Divider style={styles.divider} />
                     <Label variant="cardBack" align="center" tone="muted" selectable>
                       {card.back}
                     </Label>
@@ -229,17 +227,33 @@ export default function StudyScreen() {
                 )}
               </ScrollView>
             </Surface>
-          </Pressable>
+            {/* A left/right drag pulls this border toward Again / Good, so the
+                gesture has an answer before the finger lifts. */}
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                styles.swipeHint,
+                {
+                  borderRadius: theme.radius.lg,
+                  borderColor: gestures.progress.interpolate({
+                    inputRange: [-1, 0, 1],
+                    outputRange: [theme.colors.again, 'rgba(0, 0, 0, 0)', theme.colors.good],
+                  }),
+                },
+              ]}
+            />
+          </CardShell>
         </Animated.View>
 
         <View style={styles.controls}>
           {revealed ? (
             <>
-              <Row gap={theme.spacing.sm}>
-                <RatingButton rating="again" color={theme.colors.again} onPress={rate} />
-                <RatingButton rating="hard" color={theme.colors.hard} onPress={rate} />
-                <RatingButton rating="good" color={theme.colors.good} onPress={rate} />
-                <RatingButton rating="easy" color={theme.colors.easy} onPress={rate} />
+              <Row gap={theme.spacing.xs}>
+                <RatingButton rating="again" tone={theme.colors.again} onPress={rate} />
+                <RatingButton rating="hard" tone={theme.colors.hard} onPress={rate} />
+                <RatingButton rating="good" tone={theme.colors.good} onPress={rate} />
+                <RatingButton rating="easy" tone={theme.colors.easy} onPress={rate} />
               </Row>
               {Platform.OS === 'web' ? (
                 <>
@@ -259,13 +273,44 @@ export default function StudyScreen() {
   );
 }
 
+/**
+ * The card container: a reveal button while the answer is hidden, a plain view
+ * once it is showing (so the Regenerate control inside it is not a nested
+ * button). The swipe gesture lives on the parent either way.
+ */
+function CardShell({
+  revealed,
+  onReveal,
+  label,
+  children,
+}: {
+  revealed: boolean;
+  onReveal: () => void;
+  label: string;
+  children: ReactNode;
+}) {
+  if (revealed) {
+    return <View style={styles.flex}>{children}</View>;
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onReveal}
+      style={styles.flex}
+    >
+      {children}
+    </Pressable>
+  );
+}
+
 function RatingButton({
   rating,
-  color,
+  tone,
   onPress,
 }: {
   rating: RatingName;
-  color: string;
+  tone: string;
   onPress: (rating: RatingName) => void;
 }) {
   const { t } = useI18n();
@@ -274,7 +319,7 @@ function RatingButton({
   return (
     <Button
       label={Platform.OS === 'web' ? `${RATINGS[rating]}  ${label}` : label}
-      color={color}
+      tone={tone}
       onPress={() => onPress(rating)}
       style={styles.flex}
       accessibilityHint={`Rate this card ${label}`}
@@ -393,6 +438,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   cardWrap: { flex: 1, paddingHorizontal: 16 },
+  swipeHint: { borderWidth: 3 },
   // Tall enough for a word, its meaning and two examples; short enough that a
   // three-word card is not floating in half a window of nothing. Anything
   // longer scrolls inside the card.

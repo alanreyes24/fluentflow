@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Alert, FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
-import { LANGUAGE_NAMES, type Card, type Deck, type DeckProgress } from '@fluentflow/core';
+import { LANGUAGE_NAMES, type Card, type CardStatus, type Deck, type DeckProgress } from '@fluentflow/core';
 import { useI18n } from '../../../src/i18n';
 import { useApp } from '../../../src/state/app';
 import {
@@ -96,7 +96,7 @@ export default function DeckScreen() {
         contentContainerStyle={content}
         ListHeaderComponent={
           <View style={styles.header}>
-            <Surface>
+            <Surface elevation="sm">
               <Label variant="caption" tone="faint">
                 {LANGUAGE_NAMES[deck.language]}
               </Label>
@@ -106,17 +106,9 @@ export default function DeckScreen() {
                   <ProgressBar progress={progress} />
                   <Spacer size={theme.spacing.sm} />
                   <Row gap={theme.spacing.md}>
-                    <Legend color={theme.colors.statusNew} label={t('statusNew')} value={progress.new} />
-                    <Legend
-                      color={theme.colors.statusLearning}
-                      label={t('statusLearning')}
-                      value={progress.learning}
-                    />
-                    <Legend
-                      color={theme.colors.statusMastered}
-                      label={t('statusMastered')}
-                      value={progress.mastered}
-                    />
+                    <Legend status="new" label={t('statusNew')} value={progress.new} />
+                    <Legend status="learning" label={t('statusLearning')} value={progress.learning} />
+                    <Legend status="mastered" label={t('statusMastered')} value={progress.mastered} />
                   </Row>
                 </>
               ) : (
@@ -201,10 +193,18 @@ export default function DeckScreen() {
   );
 }
 
-function Legend({ color, label, value }: { color: string; label: string; value: number }) {
+function Legend({
+  status,
+  label,
+  value,
+}: {
+  status: CardStatus;
+  label: string;
+  value: number;
+}) {
   return (
     <Row gap={6}>
-      <View style={[styles.legendDot, { backgroundColor: color }]} />
+      <StatusDot status={status} />
       <Label variant="caption" tone="faint">
         {label} {value}
       </Label>
@@ -319,5 +319,4 @@ const styles = StyleSheet.create({
   grow: { flex: 1 },
   form: { gap: 16 },
   footer: { marginTop: 24 },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
 });

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { router, usePathname } from 'expo-router';
 import { useI18n } from '../i18n';
 import { Label } from './components';
@@ -42,6 +42,11 @@ export function BottomBar() {
           backgroundColor: onMacDesktop() ? 'transparent' : theme.colors.bar,
           borderTopColor: theme.colors.border,
         },
+        // A translucent bar over scrolling content needs the blur to stay
+        // legible; harmless where the bar is opaque, and a no-op off web.
+        Platform.OS === 'web' && !onMacDesktop()
+          ? ({ backdropFilter: 'blur(20px)' } as unknown as ViewStyle)
+          : null,
       ]}
     >
       <BarAction
@@ -101,10 +106,15 @@ function BarAction({
       onPointerLeave={() => setHovered(false)}
       style={({ pressed }) => [
         styles.action,
-        { backgroundColor: background, borderRadius: theme.radius.sm, opacity: pressed ? 0.7 : 1 },
+        { backgroundColor: background, borderRadius: theme.radius.pill, opacity: pressed ? 0.7 : 1 },
       ]}
     >
-      <Label variant="caption" tone={selected ? 'default' : 'muted'} numberOfLines={1}>
+      <Label
+        variant="caption"
+        tone={selected ? 'accent' : 'muted'}
+        numberOfLines={1}
+        style={selected ? styles.selectedLabel : undefined}
+      >
         {label}
       </Label>
     </Pressable>
@@ -115,11 +125,12 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  action: { justifyContent: 'center', minHeight: 30, paddingHorizontal: 10 },
+  action: { justifyContent: 'center', minHeight: 32, paddingHorizontal: 12 },
+  selectedLabel: { fontWeight: '700' },
   spacer: { flex: 1, minWidth: 8 },
 });

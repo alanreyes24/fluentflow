@@ -19,6 +19,7 @@ import {
   Label,
   Row,
   Screen,
+  SegmentedControl,
   Spacer,
   Surface,
   useContentStyle,
@@ -227,7 +228,8 @@ export default function TextImportScreen() {
   useEffect(() => {
     if (!text.trim() || missingMeanings.length === 0 || reviewing || translating) return;
     if (!hasDictionary) return; // Only auto-run if dictionary is available.
-    if (origins[missingMeanings[0]]) return; // Already looked up.
+    const first = missingMeanings[0];
+    if (!first || origins[first]) return; // Nothing to do, or already looked up.
     void runLookup(false);
   }, [text, missingMeanings, reviewing, translating, hasDictionary, origins, runLookup]);
 
@@ -338,23 +340,14 @@ export default function TextImportScreen() {
               <Label variant="caption" tone="muted">
                 {t('importOverride')}
               </Label>
-              <Row gap={theme.spacing.sm}>
-                <Button
-                  label="Auto"
-                  variant={language === null ? 'primary' : 'secondary'}
-                  onPress={() => setLanguage(null)}
-                  style={styles.grow}
-                />
-                {TARGET_LANGUAGES.map((code) => (
-                  <Button
-                    key={code}
-                    label={LANGUAGE_NAMES[code]}
-                    variant={language === code ? 'primary' : 'secondary'}
-                    onPress={() => setLanguage(code)}
-                    style={styles.grow}
-                  />
-                ))}
-              </Row>
+              <SegmentedControl
+                options={[
+                  { value: 'auto', label: 'Auto' },
+                  ...TARGET_LANGUAGES.map((code) => ({ value: code, label: LANGUAGE_NAMES[code] })),
+                ]}
+                value={language ?? 'auto'}
+                onChange={(value) => setLanguage(value === 'auto' ? null : value)}
+              />
             </Surface>
           </>
         ) : null}
@@ -495,7 +488,7 @@ export default function TextImportScreen() {
         {error ? (
           <>
             <Spacer size={theme.spacing.md} />
-            <Surface style={[styles.notice, { borderColor: theme.colors.danger }]}>
+            <Surface elevation="sm" style={[styles.notice, { borderColor: theme.colors.danger }]}>
               <Label variant="label" tone="danger">
                 {t('importFailed')}
               </Label>
@@ -509,7 +502,7 @@ export default function TextImportScreen() {
         {summary ? (
           <>
             <Spacer size={theme.spacing.md} />
-            <Surface style={[styles.notice, { borderColor: theme.colors.statusMastered }]}>
+            <Surface elevation="sm" style={[styles.notice, { borderColor: theme.colors.statusMastered }]}>
               <Label variant="label">{t('importDone')}</Label>
               <Spacer size={theme.spacing.xs} />
               <Label variant="body">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Link, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   LANGUAGE_NAMES,
@@ -11,6 +11,7 @@ import {
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
 import {
+  Badge,
   Button,
   EmptyState,
   Field,
@@ -18,6 +19,7 @@ import {
   ProgressBar,
   Row,
   Screen,
+  SegmentedControl,
   Spacer,
   Surface,
   useContentStyle,
@@ -135,7 +137,16 @@ function Summary({ due, cards }: { due: number; cards: number }) {
   const theme = useTheme();
 
   return (
-    <Surface style={styles.summary}>
+    <Surface
+      raised
+      elevation="sm"
+      style={[
+        styles.summary,
+        due > 0
+          ? { backgroundColor: theme.colors.accentSoft, borderColor: 'transparent' }
+          : null,
+      ]}
+    >
       <Label variant="title" tone={due > 0 ? 'accent' : 'default'}>
         {due > 0 ? t('dueCount', { count: due }) : t('sessionComplete')}
       </Label>
@@ -151,6 +162,7 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
   const { t } = useI18n();
   const theme = useTheme();
   const due = progress?.due ?? 0;
+  const [hovered, setHovered] = useState(false);
 
   return (
     <Link
@@ -158,9 +170,19 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
       asChild
       accessibilityLabel={`${deck.name}, ${t('dueCount', { count: due })}`}
     >
-      <Pressable>
+      <Pressable
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+      >
         {({ pressed }) => (
-          <Surface style={[styles.deck, pressed && styles.pressed]}>
+          <Surface
+            elevation={hovered && !pressed ? 'md' : 'sm'}
+            style={[
+              styles.deck,
+              pressed ? styles.pressed : null,
+              Platform.OS === 'web' && hovered && !pressed ? styles.lifted : null,
+            ]}
+          >
             <Row style={styles.deckHeader}>
               <View style={styles.grow}>
                 <Label variant="heading" numberOfLines={2}>
@@ -170,13 +192,7 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
                   {LANGUAGE_NAMES[deck.language]} · {t('cardCount', { count: deck.cardCount })}
                 </Label>
               </View>
-              {due > 0 ? (
-                <View style={[styles.badge, { backgroundColor: theme.colors.accent }]}>
-                  <Label variant="caption" style={{ color: theme.colors.accentText }}>
-                    {due}
-                  </Label>
-                </View>
-              ) : null}
+              {due > 0 ? <Badge>{due}</Badge> : null}
             </Row>
 
             {progress && progress.total > 0 ? (
@@ -243,17 +259,11 @@ function NewDeckForm({
         <Label variant="caption" tone="muted" style={styles.fieldLabel}>
           {t('deckLanguage')}
         </Label>
-        <Row gap={theme.spacing.sm}>
-          {TARGET_LANGUAGES.map((code) => (
-            <Button
-              key={code}
-              label={LANGUAGE_NAMES[code]}
-              variant={language === code ? 'primary' : 'secondary'}
-              onPress={() => setLanguage(code)}
-              style={styles.grow}
-            />
-          ))}
-        </Row>
+        <SegmentedControl
+          options={TARGET_LANGUAGES.map((code) => ({ value: code, label: LANGUAGE_NAMES[code] }))}
+          value={language}
+          onChange={setLanguage}
+        />
       </View>
 
       <Row gap={theme.spacing.sm}>
@@ -277,13 +287,7 @@ const styles = StyleSheet.create({
   deck: {},
   deckHeader: { alignItems: 'flex-start', gap: 12 },
   pressed: { opacity: 0.7 },
-  badge: {
-    minWidth: 28,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 14,
-    alignItems: 'center',
-  },
+  lifted: { transform: [{ translateY: -1 }] },
   form: { gap: 16, marginBottom: 16 },
   field: { gap: 6 },
   fieldLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },

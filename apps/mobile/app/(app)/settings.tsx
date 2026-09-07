@@ -18,6 +18,7 @@ import {
   Row,
   Screen,
   SectionLabel,
+  SegmentedControl,
   Spacer,
   Surface,
   useContentStyle,
@@ -49,31 +50,18 @@ export default function SettingsScreen() {
     <Screen>
       <ScrollView contentContainerStyle={content}>
         <Section title={t('interfaceLanguage')}>
-          <Row gap={theme.spacing.sm}>
-            {SUPPORTED_LANGUAGES.map((code: LanguageCode) => (
-              <Button
-                key={code}
-                label={LANGUAGE_NAMES[code]}
-                variant={language === code ? 'primary' : 'secondary'}
-                onPress={() => setLanguage(code)}
-                style={styles.grow}
-              />
-            ))}
-          </Row>
+          <SegmentedControl
+            options={SUPPORTED_LANGUAGES.map((code: LanguageCode) => ({
+              value: code,
+              label: LANGUAGE_NAMES[code],
+            }))}
+            value={language}
+            onChange={setLanguage}
+          />
         </Section>
 
         <Section title={t('appearance')}>
-          <Row gap={theme.spacing.sm}>
-            {themeOptions.map((option) => (
-              <Button
-                key={option.value}
-                label={option.label}
-                variant={preference === option.value ? 'primary' : 'secondary'}
-                onPress={() => setPreference(option.value)}
-                style={styles.grow}
-              />
-            ))}
-          </Row>
+          <SegmentedControl options={themeOptions} value={preference} onChange={setPreference} />
         </Section>
 
         <ExamplesSection />
@@ -282,7 +270,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <View style={styles.section}>
       <SectionLabel>{title}</SectionLabel>
       <Spacer size={theme.spacing.sm} />
-      <Surface style={styles.card}>{children}</Surface>
+      <Surface elevation="sm" style={styles.card}>
+        {children}
+      </Surface>
     </View>
   );
 }

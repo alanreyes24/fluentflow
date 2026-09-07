@@ -112,7 +112,7 @@ function createWindow() {
     // and the material shows through where the page does not paint — the title
     // strip and the bottom bar. Elsewhere it matches the app's own light
     // background so a cold start does not flash white on a dark desktop.
-    backgroundColor: isMac ? '#00000000' : '#fbfaf8',
+    backgroundColor: isMac ? '#00000000' : nativeTheme.shouldUseDarkColors ? '#0b1512' : '#f4f7f5',
     // `sidebar` is the standard material for app chrome; `followWindow` dims it
     // when the window is not focused, the way native chrome does.
     ...(isMac ? { vibrancy: 'sidebar', visualEffectState: 'followWindow' } : {}),
@@ -255,10 +255,14 @@ function missingBuildPage() {
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>FluentFlow</title>
 <style>
-  body { font: 15px/1.6 system-ui, sans-serif; background: #f6f5f2; color: #1c1a17;
+  body { font: 15px/1.6 system-ui, sans-serif; background: #f4f7f5; color: #0f1c17;
          display: grid; place-items: center; height: 100vh; margin: 0; }
   main { max-width: 34rem; padding: 2rem; }
-  code { background: #e8e5df; padding: .15em .4em; border-radius: 4px; }
+  code { background: #eef2f0; padding: .15em .4em; border-radius: 4px; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0b1512; color: #e8f0ec; }
+    code { background: #16271f; }
+  }
 </style></head>
 <body><main>
   <h1>The web build is missing</h1>

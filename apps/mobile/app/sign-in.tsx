@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../src/i18n';
 import { useApp } from '../src/state/app';
-import { Button, Field, Label, Screen, Spacer, Surface } from '../src/ui/components';
+import { Button, Field, Label, Row, Screen, Spacer, Surface } from '../src/ui/components';
 import { TitleBar } from '../src/ui/TitleBar';
 import { useTheme } from '../src/ui/theme';
 
@@ -64,7 +64,10 @@ export default function SignInScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.header}>
-            <Label variant="title">{t('appName')}</Label>
+            <Row gap={theme.spacing.sm}>
+              <View style={[styles.mark, { backgroundColor: theme.colors.accent }]} />
+              <Label variant="title">{t('appName')}</Label>
+            </Row>
             <Label variant="body" tone="muted">
               {mode === 'signIn' ? t('signIn') : t('signUp')}
             </Label>
@@ -73,7 +76,7 @@ export default function SignInScreen() {
           <Spacer size={theme.spacing.xl} />
 
           {cloudAvailable ? (
-            <Surface style={styles.form}>
+            <Surface elevation="md" style={styles.form}>
               <Field
                 label={t('email')}
                 value={email}
@@ -118,7 +121,7 @@ export default function SignInScreen() {
               />
             </Surface>
           ) : (
-            <Surface style={styles.form}>
+            <Surface elevation="md" style={styles.form}>
               <Label variant="body" tone="muted">
                 {t('offlineAccountNote')}
               </Label>
@@ -180,6 +183,7 @@ const styles = StyleSheet.create({
     maxWidth: 420,
     alignSelf: 'center',
   },
-  header: { gap: 4 },
+  header: { gap: 8 },
+  mark: { width: 14, height: 14, borderRadius: 5 },
   form: { gap: 16 },
 });

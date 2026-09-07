@@ -13,11 +13,10 @@ import { useApp } from '../../src/state/app';
 import { importApkg, pickApkg, type PickedFile } from '../../src/anki/import';
 import {
   Button,
-  Field,
   Label,
   Loading,
-  Row,
   Screen,
+  SegmentedControl,
   Spacer,
   Surface,
   useContentStyle,
@@ -100,28 +99,17 @@ export default function ImportScreen() {
           <>
             <Spacer size={theme.spacing.md} />
             <Surface style={styles.options}>
-              <Field
-                label={t('importOverride')}
-                value={language ? LANGUAGE_NAMES[language] : 'Detect automatically'}
-                editable={false}
+              <Label variant="caption" tone="muted" style={styles.overrideLabel}>
+                {t('importOverride')}
+              </Label>
+              <SegmentedControl
+                options={[
+                  { value: 'auto', label: 'Auto' },
+                  ...TARGET_LANGUAGES.map((code) => ({ value: code, label: LANGUAGE_NAMES[code] })),
+                ]}
+                value={language ?? 'auto'}
+                onChange={(value) => setLanguage(value === 'auto' ? null : value)}
               />
-              <Row gap={theme.spacing.sm}>
-                <Button
-                  label="Auto"
-                  variant={language === null ? 'primary' : 'secondary'}
-                  onPress={() => setLanguage(null)}
-                  style={styles.grow}
-                />
-                {TARGET_LANGUAGES.map((code) => (
-                  <Button
-                    key={code}
-                    label={LANGUAGE_NAMES[code]}
-                    variant={language === code ? 'primary' : 'secondary'}
-                    onPress={() => setLanguage(code)}
-                    style={styles.grow}
-                  />
-                ))}
-              </Row>
 
               <Button
                 label={flatten ? 'Subdecks: merged into one' : 'Subdecks: kept separate'}
@@ -150,7 +138,7 @@ export default function ImportScreen() {
         {error ? (
           <>
             <Spacer size={theme.spacing.md} />
-            <Surface style={[styles.notice, { borderColor: theme.colors.danger }]}>
+            <Surface elevation="sm" style={[styles.notice, { borderColor: theme.colors.danger }]}>
               <Label variant="label" tone="danger">
                 {t('importFailed')}
               </Label>
@@ -165,7 +153,7 @@ export default function ImportScreen() {
         {summary ? (
           <>
             <Spacer size={theme.spacing.md} />
-            <Surface style={[styles.notice, { borderColor: theme.colors.statusMastered }]}>
+            <Surface elevation="sm" style={[styles.notice, { borderColor: theme.colors.statusMastered }]}>
               <Label variant="label">{t('importDone')}</Label>
               <Spacer size={theme.spacing.xs} />
               <Label variant="body">
@@ -214,7 +202,7 @@ function describeError(cause: unknown, fallback: string): string {
 
 const styles = StyleSheet.create({
   options: { gap: 16 },
-  grow: { flex: 1 },
+  overrideLabel: { textTransform: 'uppercase', letterSpacing: 0.8 },
   notice: { gap: 2 },
   spacer: { height: 48 },
 });

@@ -4,6 +4,7 @@ import { useApp } from '../../src/state/app';
 import { useI18n } from '../../src/i18n';
 import { BottomBar } from '../../src/ui/BottomBar';
 import { TitleBar } from '../../src/ui/TitleBar';
+import { Label } from '../../src/ui/components';
 import { onMacDesktop } from '../../src/ui/shell';
 import { useTheme } from '../../src/ui/theme';
 
@@ -43,6 +44,7 @@ export default function AppLayout() {
             headerTintColor: theme.colors.text,
             headerShadowVisible: false,
             contentStyle: { backgroundColor: theme.colors.background },
+            headerTitle: ({ children }) => <Label variant="heading">{children}</Label>,
             // The content column is centred in the window, so the title over it
             // is too — a leading-edge title above a centred column lands far
             // enough left to read as a mistake rather than as a choice.
