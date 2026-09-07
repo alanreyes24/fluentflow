@@ -10,7 +10,8 @@
   ],
   "scripts": {
     "build": "npm run build -w @fluentflow/core",
-    "test": "npm run test -w @fluentflow/core && npm run test -w @fluentflow/server && npm run test -w @fluentflow/mobile",
+    "test": "npm run test -w @fluentflow/core && npm run test -w @fluentflow/server && npm run test -w @fluentflow/mobile && npm run test:desktop",
+    "test:desktop": "node scripts/vendor-core.mjs --skip-build && node --test \"apps/desktop/test/*.test.mjs\"",
     "verify": "npm run build -w @fluentflow/core && node scripts/verify-flow.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "server": "npm run dev -w @fluentflow/server",
@@ -20,9 +21,12 @@
     "desktop:mac": "node scripts/desktop-build.mjs dist:mac",
     "desktop:pack": "node scripts/desktop-build.mjs pack",
     "desktop:refresh": "node scripts/refresh-desktop.mjs",
+    "desktop:vendor": "node scripts/vendor-core.mjs",
     "desktop:dev": "npm --prefix apps/desktop run dev",
     "fetch-dictionaries": "node scripts/fetch-dictionaries.mjs",
     "check-cloud-model": "node scripts/check-cloud-model.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "sample-deck": "npm run build -w @fluentflow/core && node scripts/make-sample-deck.mjs",
     "verify:web": "node scripts/verify-web.mjs",
     "verify:desktop": "node scripts/verify-desktop.mjs"
   },

@@ -16,6 +16,9 @@ import { syncDesktopTheme } from './shell';
 export type ThemeName = 'light' | 'dark';
 export type ThemePreference = ThemeName | 'system';
 
+/** The study calendar's ramp: index 0 is an untouched day, 4 the busiest. */
+export type HeatRamp = readonly [string, string, string, string, string];
+
 export interface Palette {
   background: string;
   surface: string;
@@ -52,6 +55,16 @@ export interface Palette {
   easy: string;
   danger: string;
   offline: string;
+  /**
+   * The streak card's ground. Deliberately the one warm note in an otherwise
+   * green interface: the flame has to read as its own thing, not as another
+   * accent-coloured tile.
+   */
+  /** The flame itself. Warm on purpose; see `streakSoft`. */
+  streak: string;
+  streakSoft: string;
+  /** Five steps from an untouched day to the busiest, for the study calendar. */
+  heat: HeatRamp;
 }
 
 const light: Palette = {
@@ -81,6 +94,12 @@ const light: Palette = {
   easy: '#0ea5e9',
   danger: '#dc2626',
   offline: '#7c8a83',
+  streak: '#c2410c',
+  streakSoft: '#f7e6d8',
+  // Anchored to the palette it sits in: step 0 is `surfaceSunken`, so an empty
+  // day reads as part of the card, and step 4 is `accent`, so the busiest day
+  // is the same green as everything else the app calls progress.
+  heat: ['#eef2f0', '#c6e9d9', '#8ed6b6', '#45b487', '#059669'],
 };
 
 const dark: Palette = {
@@ -110,6 +129,9 @@ const dark: Palette = {
   easy: '#38bdf8',
   danger: '#f87171',
   offline: '#6b7f76',
+  streak: '#fb923c',
+  streakSoft: '#38251a',
+  heat: ['#0c1a15', '#124634', '#1a6b4f', '#22996e', '#34d399'],
 };
 
 export const spacing = {
@@ -158,6 +180,12 @@ export type ElevationLevel = keyof (typeof elevation)['light'];
 export type ElevationRamp = Record<ElevationLevel, string>;
 
 export const typography = {
+  /** The streak count, and nothing else — one number the screen is built around. */
+  display: { fontSize: 44, lineHeight: 50, fontWeight: '700', letterSpacing: -0.8, fontFamily: FONT_STACK },
+  /** A statistic's headline number, in a tile beside three others. */
+  metric: { fontSize: 28, lineHeight: 32, fontWeight: '700', letterSpacing: -0.3, fontFamily: FONT_STACK },
+  /** A section's name above the thing it names. Uppercased by `Label`. */
+  overline: { fontSize: 11, lineHeight: 14, fontWeight: '700', letterSpacing: 0.8, fontFamily: FONT_STACK },
   cardFront: { fontSize: 40, lineHeight: 48, fontWeight: '600', letterSpacing: -0.4, fontFamily: FONT_STACK },
   cardBack: { fontSize: 26, lineHeight: 34, fontWeight: '500', letterSpacing: -0.2, fontFamily: FONT_STACK },
   title: { fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: -0.4, fontFamily: FONT_STACK },

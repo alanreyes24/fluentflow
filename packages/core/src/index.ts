@@ -2,6 +2,7 @@ export * from './types.js';
 export * from './id.js';
 export * from './factory.js';
 export * from './scheduler.js';
+export * from './stats.js';
 export * from './language.js';
 
 export * from './ai/prompt.js';

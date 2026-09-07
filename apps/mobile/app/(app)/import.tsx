@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import {
@@ -11,6 +11,7 @@ import {
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
 import { importApkg, pickApkg, type PickedFile } from '../../src/anki/import';
+import { onShellImport } from '../../src/desktop-import';
 import {
   Button,
   Label,
@@ -44,7 +45,7 @@ export default function ImportScreen() {
   const [summary, setSummary] = useState<ApkgImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const choose = async () => {
+  const choose = useCallback(async () => {
     setError(null);
     setSummary(null);
     try {
@@ -53,7 +54,24 @@ export default function ImportScreen() {
     } catch (cause) {
       setError(describeError(cause, t('importFailed')));
     }
-  };
+  }, [t]);
+
+  // A file the shell handed over — the File menu, a drop on the window, or a
+  // deck double-clicked in Explorer — or a bare request to open the picker.
+  // Nothing is subscribed to in a browser or on a phone; there is no shell.
+  useEffect(
+    () =>
+      onShellImport((request) => {
+        if (!request) {
+          void choose();
+          return;
+        }
+        setError(null);
+        setSummary(null);
+        setFile({ name: request.name, uri: request.path, size: request.size });
+      }),
+    [choose],
+  );
 
   const run = async () => {
     if (!file || !repository || !user) return;

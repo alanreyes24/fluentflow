@@ -106,6 +106,18 @@ describe('SettingsScreen', () => {
     });
   });
 
+  it('sets the daily goal the streak card measures against', async () => {
+    await renderScreen(<SettingsScreen />, { repository });
+
+    // 20 a day is the default until someone says otherwise.
+    expect(screen.getByRole('button', { name: '20 a day', selected: true })).toBeTruthy();
+
+    await fireEvent.press(screen.getByRole('button', { name: '40 a day' }));
+
+    expect(screen.getByRole('button', { name: '40 a day', selected: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '20 a day', selected: false })).toBeTruthy();
+  });
+
   it('changes the appearance preference', async () => {
     await renderScreen(<SettingsScreen />, { repository });
 

@@ -36,11 +36,12 @@ sentences until a model is installed. Both are covered below.
 ## Layout
 
 ```
-packages/core      domain logic, no platform dependencies — 136 tests
+packages/core      domain logic, no platform dependencies
 apps/server        Express + Firestore sync API and Anki import — 17 tests
-apps/mobile        the app's UI: a React web build (Expo web export)
-apps/desktop       Electron shell for Windows and macOS, both packaged
-scripts            model download, end-to-end verification
+apps/mobile        the app's UI: an Expo app (iOS, Android, web export)
+apps/desktop       Electron shell for Windows and macOS, both packaged — 12 tests
+scripts            dictionaries, icon generation, end-to-end verification
+docs               where each platform stands, and how to walk it on a phone
 ```
 
 `packages/core` holds everything that is neither UI nor I/O: Anki's scheduler,
@@ -64,16 +65,25 @@ misread:
 | Dictionaries | Complete: Spanish and Bosnian, from Wiktionary, `npm run fetch-dictionaries` |
 | Local SQLite | Complete: migrations, indexes, soft deletes, review log |
 | Sync | Complete: LWW, offline queue, real-time listeners, tombstones |
+| Statistics | Complete: streaks, retention, study calendar, forecast, per-deck mastery |
 | Localisation | Complete: English, Spanish, Bosnian UI packs |
 | AI pipeline | Complete: prompting, parsing, validation, budget, fallback |
 | AI **key** | **Yours**, and optional. Paste it into Settings; free tier covers a personal deck |
 | Generation | Real: Gemini 3.1 Flash-Lite, called from the main process — meanings *and* examples, measured below |
-| Windows / macOS | Electron around the web export; both packaged |
-| The views | 79 render tests; the web and desktop builds walked through by a browser |
+| iOS / Android / web | Expo, standard |
+| Windows / macOS | Electron around the web export, not native RN. Both packaged; the shell imports `.apkg` locally |
+| The views | render tests, and the web and desktop builds walked through by a browser |
 
 The web build and both desktop builds are driven end to end by a real browser —
 see Testing — so what is claimed below has been watched running, not only
 compiled.
+
+Where each platform actually stands — built, run, verified, shippable — and what
+is left on each, is in [docs/platform-status.md](docs/platform-status.md). iOS
+and Android build but have never run on hardware;
+[docs/device-checklist.md](docs/device-checklist.md) is the walkthrough for
+changing that with Expo Go, and `npm run sample-deck` writes the Anki archive it
+needs.
 
 The AI integration is real code — prompt construction per language, a response
 schema, a parser that degrades through four extraction strategies, and
@@ -100,6 +110,59 @@ every one of those axes except working on a plane.
 installable app for Windows and macOS from one codebase. The same shell ships for
 both: a `.dmg` for macOS alongside the Windows installers, packaged and driven
 through the same 17-check walkthrough.
+
+What that wrapping costs, and what it buys back, is worth being specific about.
+Inside the shell `Platform.OS` is `web`, so the app takes the browser's path
+everywhere — and the browser's Anki import hands the file to the sync server,
+because a browser has no SQLite that can mount a collection from bytes. On the
+desktop that made import unreachable in practice: it wanted a running server
+*and* a signed-in account, for a `.apkg` already on the disk.
+
+Electron 44 ships Node 24, where `node:sqlite` is unflagged, so the main process
+runs the same `parseApkg` from core that the server does
+([apps/desktop/src/apkg.js](apps/desktop/src/apkg.js)). Import is local, offline
+and account-less: choose a file, drag one onto the window, or double-click a
+`.apkg` in Explorer and the app opens with it. The app branches on a capability
+the shell advertises rather than on `Platform.OS`, which lies in here.
+
+The shell also does the things a wrapped web page cannot do for itself — remember
+its size, position and zoom; paint the right background before the bundle loads,
+by being told which theme the app rendered rather than guessing from the OS;
+refuse to open a second window over the same database. The page's whole view of
+it is one preload bridge
+([apps/desktop/preload.js](apps/desktop/preload.js)); there is no filesystem
+access and no general IPC, because the renderer draws deck content it did not
+write.
+
+## Statistics and the streak
+
+Every rating writes a row to `review_log`, and the statistics screen is that
+table read back — the streak, the retention, the calendar and the rating split
+are all counted, never estimated. The maths lives in
+[packages/core/src/stats.ts](packages/core/src/stats.ts) as pure functions over
+day-keyed rows, so a streak can be argued with in a unit test rather than by
+changing the system clock.
+
+Three decisions in there are worth stating, because each has a wrong answer
+that looks right:
+
+- **Days are local, not UTC.** A review at half past eleven at night belongs to
+  the day the learner had. The grouping happens in SQL, but with an offset the
+  repository passes in rather than SQLite's own `localtime` modifier — that
+  modifier needs a timezone database the wasm build on the web does not
+  reliably carry, so the same query would bucket by UTC in the browser and by
+  local time on a phone, and a streak would disagree with itself across one
+  person's devices.
+- **A streak survives an untouched today.** It counts back from today, or from
+  yesterday if today is still empty, and reports `atRisk` when it did the
+  latter. The alternative resets every streak at midnight and shows the user a
+  zero over breakfast.
+- **Retention is defined as 1 for an empty history.** "You have forgotten
+  nothing" is truer on a first launch than "you have failed everything".
+
+The charts are plain views — bars, a meter and a contribution grid built from
+flexbox. `react-native-svg` would add a native module to a project whose whole
+desktop story depends on not having one, to draw rectangles.
 
 ## Running it
 

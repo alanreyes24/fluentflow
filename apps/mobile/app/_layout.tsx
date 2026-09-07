@@ -5,6 +5,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { I18nProvider, useI18n } from '../src/i18n';
 import { AppProvider, useApp } from '../src/state/app';
+import { PreferencesProvider } from '../src/state/preferences';
 import { ThemeProvider, useTheme } from '../src/ui/theme';
 import { DesktopChromeProvider } from '../src/ui/DesktopChrome';
 import { installWindowDragRegions } from '../src/ui/shell';
@@ -25,9 +26,11 @@ export default function RootLayout() {
       <ThemeProvider>
         <DesktopChromeProvider>
           <I18nProvider>
-            <AppProvider>
-              <Gate />
-            </AppProvider>
+            <PreferencesProvider>
+              <AppProvider>
+                <Gate />
+              </AppProvider>
+            </PreferencesProvider>
           </I18nProvider>
         </DesktopChromeProvider>
       </ThemeProvider>

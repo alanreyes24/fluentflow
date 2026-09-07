@@ -19,14 +19,17 @@
  *    same-origin navigation check meaningless.
  *
  * The renderer never gets Node access, because it renders user-supplied deck
- * content.
+ * content. What it does get is a narrow bridge (see `preload.js`) for the three
+ * things a wrapped web page cannot do for itself: import an Anki package from
+ * disk, tell the shell which theme it is rendering, and name the build.
  */
 
 const {
   app,
   BrowserWindow,
-  Menu,
+  dialog,
   ipcMain,
+  Menu,
   nativeTheme,
   net,
   protocol,
@@ -35,11 +38,12 @@ const {
 } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { existsSync } = require('node:fs');
+const { existsSync, statSync } = require('node:fs');
 const ai = require('./ai');
 const cloud = require('./cloud');
-const windowState = require('./window-state');
+const windowState = require('./src/window-state');
 const updater = require('./updater');
+const { importApkg, EXTENSIONS } = require('./src/apkg');
 
 // The name Electron derives every per-user path from. Without this it takes the
 // package name, `@fluentflow/desktop`, and the scope's slash turns into a
@@ -57,6 +61,7 @@ const INDEX_HTML = path.join(WEB_ROOT, 'index.html');
 
 const SCHEME = 'app';
 const APP_ORIGIN = `${SCHEME}://fluentflow`;
+const REPOSITORY_URL = 'https://github.com/alanreyes24/fluentflow';
 
 /** Hosts the renderer may talk to. Firebase needs several. */
 const ALLOWED_CONNECT_HOSTS = [
@@ -64,7 +69,30 @@ const ALLOWED_CONNECT_HOSTS = [
   'https://*.firebaseio.com',
   'https://*.cloudfunctions.net',
   'wss://*.firebaseio.com',
+  // The sync server. `app.json` ships pointing at `http://localhost:8787`, and
+  // without this the packaged app cannot reach a server the user is running on
+  // their own machine: every request fails as a policy violation, which reads
+  // as the server being down. Loopback only; nothing else plaintext is allowed.
+  'http://localhost:*',
+  'http://127.0.0.1:*',
 ];
+
+/** The one window. Kept so the menu and second-instance handler can find it. */
+let mainWindow = null;
+
+/**
+ * Files the *user* chose, by path.
+ *
+ * The renderer names a path when it asks for an import, and the renderer draws
+ * deck content it did not write. So a path is only importable if it arrived
+ * from a file dialog, a drop on the window, or the command line — the renderer
+ * cannot invent one and have the main process read it.
+ */
+const permittedFiles = new Set();
+
+/** An import asked for before the app finished booting, held until it can land. */
+let pendingImport = null;
+let rendererReady = false;
 
 // Must be called before `app.whenReady`. Registering the scheme as standard is
 // what gives it a real origin; without `secure`, the renderer is treated as an
@@ -102,17 +130,23 @@ function registerProtocolHandler() {
 const isMac = process.platform === 'darwin';
 
 function createWindow() {
-  const { bounds, maximized } = windowState.initialState();
+  const restored = windowState.restore();
+
+  // The app's own setting wins over the system's. `nativeTheme` knows what
+  // Windows prefers; it does not know that this user forced light inside the
+  // app. On Windows this is also what colours the title bar.
+  nativeTheme.themeSource = restored.themeSource;
 
   const window = new BrowserWindow({
-    ...bounds,
-    minWidth: 480,
-    minHeight: 520,
+    ...restored.bounds,
+    minWidth: windowState.MIN_WIDTH,
+    minHeight: windowState.MIN_HEIGHT,
     // On macOS the window is a vibrancy pane, so its background is transparent
     // and the material shows through where the page does not paint — the title
-    // strip and the bottom bar. Elsewhere it matches the app's own light
-    // background so a cold start does not flash white on a dark desktop.
-    backgroundColor: isMac ? '#00000000' : nativeTheme.shouldUseDarkColors ? '#0b1512' : '#f4f7f5',
+    // strip and the bottom bar. Everywhere else it matches the background the
+    // app itself last rendered, so a cold start does not flash a light page on
+    // a dark desktop or the reverse.
+    backgroundColor: isMac ? '#00000000' : restored.backgroundColor,
     // `sidebar` is the standard material for app chrome; `followWindow` dims it
     // when the window is not focused, the way native chrome does.
     ...(isMac ? { vibrancy: 'sidebar', visualEffectState: 'followWindow' } : {}),
@@ -132,15 +166,22 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      // Applied before the first paint rather than after load, so the app does
+      // not visibly re-lay-out into someone's chosen zoom on every launch.
+      zoomFactor: restored.zoomFactor,
+      // Read back in the preload. The version is in `app`, which a preload
+      // cannot reach, and an extra IPC round trip for a constant is silly.
+      additionalArguments: [`--fluentflow-app-version=${app.getVersion()}`],
     },
   });
 
-  windowState.track(window);
+  // Maximise before showing: Electron has no constructor option for it, and
+  // doing it after `show` is a visible resize.
+  if (restored.maximized) window.maximize();
+  if (restored.fullScreen) window.setFullScreen(true);
 
-  window.once('ready-to-show', () => {
-    if (maximized) window.maximize();
-    window.show();
-  });
+  window.once('ready-to-show', () => window.show());
+  windowState.track(window);
 
   // The renderer keeps a strip clear for the traffic lights and uses it as the
   // drag handle. macOS hides the lights in full-screen, so the strip has to go
@@ -178,6 +219,18 @@ function createWindow() {
     if (/^https?:/.test(new URL(url).protocol)) void shell.openExternal(url);
   });
 
+  // A reload drops the renderer's subscription, so anything queued for it has
+  // to wait for the new page to say it is listening again.
+  window.webContents.on('did-start-navigation', (details) => {
+    if (!details.isSameDocument) rendererReady = false;
+  });
+
+  window.on('closed', () => {
+    mainWindow = null;
+    rendererReady = false;
+  });
+
+  mainWindow = window;
   return window;
 }
 
@@ -208,6 +261,35 @@ function applyContentSecurityPolicy() {
   });
 }
 
+// --- Anki import ------------------------------------------------------------
+
+/**
+ * Ask the app to import a file, or — with no file — to open its own picker.
+ *
+ * Held rather than dropped if the renderer is not listening yet: on Windows,
+ * opening a `.apkg` with the app *starts* the app, so the request always
+ * arrives before there is anything to receive it.
+ */
+function requestImport(file) {
+  if (file) permittedFiles.add(file.path);
+
+  if (!mainWindow || !rendererReady) {
+    pendingImport = file ?? { path: null };
+    return;
+  }
+  mainWindow.webContents.send('fluentflow:import-request', file);
+}
+
+function describeFile(filePath) {
+  try {
+    return { path: filePath, name: path.basename(filePath), size: statSync(filePath).size };
+  } catch {
+    return null;
+  }
+}
+
+// --- menu -------------------------------------------------------------------
+
 function buildMenu() {
   return Menu.buildFromTemplate([
     ...(isMac
@@ -232,10 +314,21 @@ function buildMenu() {
           },
         ]
       : []),
-    { role: 'fileMenu' },
+    {
+      label: '&File',
+      submenu: [
+        {
+          label: 'Import Anki deck…',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => requestImport(null),
+        },
+        { type: 'separator' },
+        isMac ? { role: 'close' } : { role: 'quit' },
+      ],
+    },
     { role: 'editMenu' },
     {
-      label: 'View',
+      label: '&View',
       submenu: [
         { role: 'reload' },
         { role: 'toggleDevTools' },
@@ -248,7 +341,35 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
+    {
+      role: 'help',
+      submenu: [
+        { label: 'Source and releases', click: () => void shell.openExternal(REPOSITORY_URL) },
+        { type: 'separator' },
+        { label: `About ${app.getName()}`, click: showAbout },
+      ],
+    },
   ]);
+}
+
+function showAbout() {
+  void dialog.showMessageBox(mainWindow ?? undefined, {
+    type: 'info',
+    title: `About ${app.getName()}`,
+    message: `${app.getName()} ${app.getVersion()}`,
+    detail: [
+      'Spaced-repetition flashcards for language learning.',
+      '',
+      `Electron ${process.versions.electron} · Chromium ${process.versions.chrome} · Node ${process.versions.node}`,
+      '',
+      // Said plainly, because "why are my examples generic?" is the question
+      // this build will be asked most, and on desktop the answer never changes.
+      'Example sentences here are written, not generated: the on-device model',
+      'is a native mobile module and is not part of the desktop build.',
+    ].join('\n'),
+    buttons: ['Close'],
+    noLink: true,
+  });
 }
 
 function missingBuildPage() {
@@ -399,6 +520,7 @@ function registerThemeSync() {
   ipcMain.on('theme:set', (_event, preference) => {
     nativeTheme.themeSource =
       preference === 'light' || preference === 'dark' ? preference : 'system';
+    rememberRenderedTheme();
   });
 
   nativeTheme.on('updated', () => {
@@ -406,7 +528,25 @@ function registerThemeSync() {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('theme:native-changed', name);
     }
+    // Following the system means following it while the app is open, too.
+    rememberRenderedTheme();
   });
+}
+
+/**
+ * Persist what the window is actually showing.
+ *
+ * `themeSource` is the preference; `shouldUseDarkColors` is what it resolves to
+ * once "system" has been asked. The resolved name is what the *next* cold start
+ * paints before any bundle has loaded, and on Windows it is what colours the
+ * title bar — so it has to be stored, not just applied.
+ */
+function rememberRenderedTheme() {
+  const name = nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+  windowState.rememberTheme(name, nativeTheme.themeSource);
+  // On macOS the window is a vibrancy pane; painting it would cover the
+  // material the title strip and bottom bar show through.
+  if (!isMac) mainWindow?.setBackgroundColor(windowState.BACKGROUNDS[name]);
 }
 
 if (isMac) {
@@ -421,23 +561,63 @@ if (isMac) {
   });
 }
 
-app.whenReady().then(() => {
-  registerProtocolHandler();
-  applyContentSecurityPolicy();
-  registerAiHandlers();
-  registerThemeSync();
-  Menu.setApplicationMenu(buildMenu());
-  createWindow();
+// --- lifecycle --------------------------------------------------------------
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+/**
+ * One copy at a time.
+ *
+ * Two windows over one SQLite database in one profile is a corruption risk, and
+ * on Windows a second copy is easy to start by accident — a second click on the
+ * Start menu tile, or opening a `.apkg` while the app is already running. The
+ * second process hands its command line to the first and exits.
+ */
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+    const file = apkgFromArgv(argv);
+    if (file) requestImport(file);
   });
-});
+
+  // macOS delivers "open with" through an event rather than the command line,
+  // and can fire it before the app is ready.
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault();
+    const file = describeFile(filePath);
+    if (file) requestImport(file);
+  });
+
+  app.whenReady().then(() => {
+    registerProtocolHandler();
+    applyContentSecurityPolicy();
+    registerAiHandlers();
+    registerImportHandlers();
+    registerThemeSync();
+    Menu.setApplicationMenu(buildMenu());
+    createWindow();
+
+    // Launched by double-clicking a deck, or from the command line.
+    const opened = apkgFromArgv(process.argv);
+    if (opened) requestImport(opened);
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   // macOS keeps the app running with no windows; every other platform quits.
   if (process.platform !== 'darwin') app.quit();
 });
+
+// The window state writer debounces, so a quit between the last resize and the
+// next tick would otherwise lose it.
+app.on('before-quit', () => windowState.flush());
 
 // Refuse to create a renderer with Node access, whatever a future edit asks for.
 app.on('web-contents-created', (_event, contents) => {

@@ -105,6 +105,9 @@ describe('BottomBar', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Import' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/import');
 
+    await fireEvent.press(screen.getByRole('button', { name: 'Statistics' }));
+    expect(mockRouter.push).toHaveBeenCalledWith('/(app)/stats');
+
     await fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/settings');
   });

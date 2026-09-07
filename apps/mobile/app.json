@@ -3,16 +3,43 @@
     "name": "FluentFlow",
     "slug": "fluentflow",
     "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "scheme": "fluentflow",
     "userInterfaceStyle": "automatic",
-    "platforms": ["web"],
+    "platforms": ["ios", "android", "web"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fluentflow.app"
+    },
+    "android": {
+      "package": "com.fluentflow.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#059669"
+      }
+    },
     "web": {
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
       "expo-localization",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 180,
+          "resizeMode": "contain",
+          "backgroundColor": "#f4f7f5",
+          "dark": {
+            "image": "./assets/splash-icon-dark.png",
+            "backgroundColor": "#0b1512"
+          }
+        }
+      ],
       [
         "expo-sqlite",
         {

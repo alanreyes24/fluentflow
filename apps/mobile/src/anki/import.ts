@@ -16,6 +16,7 @@ import {
   type TargetLanguage,
 } from '@fluentflow/core';
 import type { Repository } from '../db/repository';
+import { desktopBridge } from '../desktop';
 import { authApi } from '../firebase/client';
 import { appConfig } from '../firebase/config';
 
@@ -31,6 +32,14 @@ import { appConfig } from '../firebase/config';
  * has to be stripped from the stored schema before the collection can be read
  * at all, and the connection that performs that rewrite keeps the old, unusable
  * schema cached. See `collation.ts` in core for why the collation is a problem.
+ *
+ * Three hosts, in order of preference:
+ *
+ *  1. **The desktop shell**, when there is one. It has Node's SQLite, so the
+ *     parse is local even though `Platform.OS` says `web` inside Electron.
+ *  2. **Native**, with expo-sqlite's own deserialisation.
+ *  3. **The sync server**, which is the only option left in a browser tab —
+ *     and which needs a server *and* an account for a file already on disk.
  */
 
 export interface PickedFile {
@@ -40,6 +49,16 @@ export interface PickedFile {
 }
 
 export async function pickApkg(): Promise<PickedFile | null> {
+  // The shell's own dialog, so the file arrives with a path the main process
+  // can read. A sandboxed renderer's file input hands back a `File` whose path
+  // is deliberately hidden, which is no use to a parser in another process.
+  const desktop = desktopBridge();
+  if (desktop) {
+    const { canceled, file } = await desktop.pickApkg();
+    if (canceled || !file) return null;
+    return { name: file.name, uri: file.path, size: file.size };
+  }
+
   const result = await DocumentPicker.getDocumentAsync({
     // Anki packages have no registered MIME type on most platforms, so the
     // filter stays wide and the extension is checked afterwards.
@@ -66,7 +85,10 @@ export interface ImportOptions {
   userId: string;
   language?: TargetLanguage;
   flatten?: boolean;
-  /** Prefer the sync server. Required on web, where there is no native SQLite. */
+  /**
+   * Force the sync server. Required in a browser tab, where there is neither a
+   * native SQLite nor a desktop shell to borrow one from.
+   */
   useServer?: boolean;
 }
 
@@ -80,21 +102,57 @@ export async function importApkg(
   repository: Repository,
   options: ImportOptions,
 ): Promise<ApkgImportResult> {
-  const bytes = await readFileBytes(file.uri);
+  const result = await parse(file, options);
+  await repository.importDecks(result.decks, result.cards);
+  return result;
+}
 
+/** Whichever of the three hosts can read this collection. */
+async function parse(file: PickedFile, options: ImportOptions): Promise<ApkgImportResult> {
+  const desktop = desktopBridge();
+  if (desktop && options.useServer !== true) {
+    return importViaShell(desktop, file, options);
+  }
+
+  const bytes = await readFileBytes(file.uri);
   const onServer = options.useServer ?? Platform.OS === 'web';
-  const result = onServer
-    ? await importViaServer(bytes, file.name, options)
-    : await parseApkg(bytes, {
+
+  return onServer
+    ? importViaServer(bytes, file.name, options)
+    : parseApkg(bytes, {
         open: openExtractedCollection,
         userId: options.userId,
         filename: file.name,
         language: options.language,
         flatten: options.flatten,
       });
+}
 
-  await repository.importDecks(result.decks, result.cards);
-  return result;
+/**
+ * Hand the path to the Electron main process, which parses it with Node's
+ * SQLite — the same `parseApkg` the server runs, in a process that has one.
+ *
+ * The bridge resolves rather than rejects on failure, because an IPC rejection
+ * arrives wrapped in "Error invoking remote method" and would bury the message.
+ * Rethrowing as `ApkgError` here puts it back on the path the screen already
+ * knows how to show.
+ */
+async function importViaShell(
+  desktop: NonNullable<ReturnType<typeof desktopBridge>>,
+  file: PickedFile,
+  options: ImportOptions,
+): Promise<ApkgImportResult> {
+  const result = await desktop.importApkg({
+    path: file.uri,
+    userId: options.userId,
+    language: options.language,
+    flatten: options.flatten,
+  });
+
+  if (!result.ok) {
+    throw new ApkgError(result.code as ConstructorParameters<typeof ApkgError>[0], result.message);
+  }
+  return { decks: result.decks, cards: result.cards, summary: result.summary };
 }
 
 async function readFileBytes(uri: string): Promise<Uint8Array> {

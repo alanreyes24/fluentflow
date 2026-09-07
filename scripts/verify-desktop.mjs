@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
+import { buildApkg, spanishNotes } from '../packages/core/test/helpers/anki-fixture.js';
 
 // The API key lives in a gitignored `.env` at the repo root. Loading it here
 // means `npm run verify:desktop` exercises the real hosted path without anyone
@@ -36,6 +37,13 @@ try {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SHOTS_DIR = join(ROOT, '.desktop-shots');
 const DEBUG_PORT = 9222;
+const APP_ORIGIN = 'app://fluentflow';
+
+/** Deliberately unlike the 1100x800 default, so a restore is unambiguous. */
+const REMEMBERED_BOUNDS = { x: 80, y: 60, width: 940, height: 720 };
+const APP_VERSION = JSON.parse(
+  readFileSync(join(ROOT, 'apps', 'desktop', 'package.json'), 'utf8'),
+).version;
 
 const options = { headed: process.argv.includes('--headed') };
 const checks = [];
@@ -92,7 +100,7 @@ async function main() {
   let browser;
   try {
     browser = await connectWhenReady();
-    await run(browser, crashes, app);
+    await run(browser, crashes, app, { app, executable, profile, environment });
   } catch (error) {
     check('the app started and was reachable', false, String(error?.message ?? error));
   } finally {
@@ -107,7 +115,7 @@ async function main() {
   report();
 }
 
-async function run(browser, crashes, app) {
+async function run(browser, crashes, app, session) {
   check('the packaged app launches', app.exitCode === null);
 
   const pages = await browser.pages();
@@ -455,6 +463,70 @@ async function run(browser, crashes, app) {
     );
   }
 
+  // --- the statistics those reviews produced -------------------------------
+  //
+  // The web walkthrough covers this screen too, but over a different database:
+  // there it reads wa-sqlite in OPFS, here it reads the shell's SQLite. The
+  // streak is the number worth watching in the packaged build specifically —
+  // it is computed from local calendar days, so it depends on the machine's
+  // clock and timezone rather than a test's, and a review rated a moment ago
+  // has to land on today for the count to be right.
+  await clickLabel(page, 'Statistics');
+  const statsReady = await hasText(page, 'Day streak', 15000);
+  check('the statistics screen opens from the toolbar', statsReady);
+
+  if (statsReady) {
+    const stats = await bodyText(page);
+    check(
+      'the streak counts the review rated in the packaged app',
+      /kept up today/i.test(stats),
+      stats.match(/Best \d+/)?.[0],
+    );
+    check(
+      'retention and the rating split are reported',
+      /retention/i.test(stats) && /how you rated/i.test(stats),
+    );
+    check(
+      'the study calendar is drawn',
+      await hasSelector(page, '[aria-label^="Study calendar"]'),
+    );
+    await shoot(page, '08-statistics');
+  }
+
+  // --- opening a deck with the app -----------------------------------------
+  //
+  // The whole reason this path exists: in a browser tab an import needs the
+  // sync server *and* an account, for a file already on the disk. Here a second
+  // copy of the app is started with a `.apkg` on its command line, which is what
+  // double-clicking one in Explorer does. It should hand the file to the copy
+  // already running and exit, rather than opening a second window over the same
+  // database.
+  const deckPath = writeSampleDeck();
+  const second = spawn(session.executable, [deckPath, `--user-data-dir=${session.profile}`], {
+    stdio: 'ignore',
+    env: session.environment,
+  });
+  const secondExit = await waitForExit(second, 20000);
+  check(
+    'a second copy hands over its file and exits instead of opening a window',
+    secondExit === 0,
+    secondExit === null ? 'still running after 20s' : `exit ${secondExit}`,
+  );
+
+  const reachedImport = await hasText(page, 'spanish a1.apkg', 20000);
+  check('the deck opened from Explorer reaches the import screen', reachedImport);
+
+  if (reachedImport) {
+    // Named, not imported: the language and subdeck choices are still the user's.
+    check('the import is offered rather than performed', await hasText(page, 'import as', 5000));
+
+    await clickLabel(page, 'Import from Anki');
+    const parsed = await hasText(page, 'import complete', 30000);
+    check('the shell parses the deck with no server and no account', parsed);
+    check('all sixty cards arrive', await hasText(page, '60 cards', 5000));
+    await shoot(page, '09-import-complete');
+  }
+
   // --- the settings screen's answer about the model ------------------------
   //
   // "Why are my examples generic?" is the question this app gets asked most,
@@ -484,6 +556,35 @@ async function run(browser, crashes, app) {
     }),
   );
   await shoot(page, '10-settings');
+
+  // --- the window remembers itself -----------------------------------------
+  //
+  // The app tells the shell which theme it rendered, and the shell stores it
+  // alongside the window's size. Neither is something the shell can work out on
+  // its own: `nativeTheme` knows what the OS prefers, not that this user forced
+  // light inside the app.
+  await delay(1200); // the state writer debounces
+  const state = readWindowState(session.profile);
+
+  check('the window state is written to the profile', state !== null);
+  check(
+    'the app reported the theme it is rendering',
+    state?.theme === 'light' || state?.theme === 'dark',
+    state?.theme,
+  );
+
+  // Restoring it is the half a user sees, so it is checked against a real
+  // relaunch: a stored size is written into the profile and the app is started
+  // again over it. Electron does not implement the DevTools `Browser` domain,
+  // so there is no way to resize the window from here and watch it be recorded —
+  // `apps/desktop/test/window-state.test.mjs` covers the decision instead.
+  const restored = await relaunchWith(session, { ...state, bounds: REMEMBERED_BOUNDS });
+  check(
+    'a relaunch opens at the remembered size',
+    Math.abs((restored?.width ?? 0) - REMEMBERED_BOUNDS.width) <= 2 &&
+      Math.abs((restored?.height ?? 0) - REMEMBERED_BOUNDS.height) <= 2,
+    restored ? `${restored.width}x${restored.height}` : 'the app did not come back',
+  );
 
   // --- nothing broke -------------------------------------------------------
   const blocked = consoleErrors.filter((message) => /Content Security Policy/i.test(message));
@@ -599,6 +700,85 @@ function checkMacBundle(executable) {
   check('the code signature is self-consistent', verified);
 }
 
+function writeSampleDeck() {
+  const path = join(mkdtempSync(join(tmpdir(), 'fluentflow-deck-')), 'Spanish A1.apkg');
+  writeFileSync(
+    path,
+    buildApkg({
+      schema: 18,
+      decks: ['Spanish A1'],
+      fieldNames: ['Front', 'Back', 'Example'],
+      notes: spanishNotes(60),
+    }),
+  );
+  return path;
+}
+
+/** Resolves to the exit code, or null if the process outlived the wait. */
+function waitForExit(child, timeout) {
+  return new Promise((done) => {
+    const timer = setTimeout(() => done(null), timeout);
+    child.on('exit', (code) => {
+      clearTimeout(timer);
+      done(code ?? 0);
+    });
+  });
+}
+
+/**
+ * Stop the app, write a state file, start it again, and measure the window.
+ *
+ * `outerWidth` is the window rather than the page, so it is what the shell
+ * actually opened — the point being that a restore is measured, not assumed.
+ * The relaunch shares the profile, so it also proves the single-instance lock
+ * released when the first copy exited.
+ */
+async function relaunchWith(session, state) {
+  session.app.kill();
+  await delay(1500);
+  writeFileSync(join(session.profile, 'window-state.json'), JSON.stringify(state, null, 2));
+
+  const relaunched = spawn(
+    session.executable,
+    [`--remote-debugging-port=${DEBUG_PORT}`, `--user-data-dir=${session.profile}`],
+    { stdio: 'ignore', env: session.environment },
+  );
+
+  let browser;
+  try {
+    browser = await connectWhenReady();
+    const pages = await browser.pages();
+    const page = pages.find((candidate) => !candidate.url().startsWith('devtools://'));
+    if (!page) return null;
+
+    await waitForText(page, 'FluentFlow');
+    return await page.evaluate(() => ({ width: window.outerWidth, height: window.outerHeight }));
+  } catch {
+    return null;
+  } finally {
+    await browser?.disconnect();
+    // Under --headed this is the copy left on screen, since the first one had
+    // to be stopped to write the state file it restores from.
+    if (!options.headed) {
+      relaunched.kill();
+      await delay(500);
+    }
+  }
+}
+
+/** What the shell will read on the next launch. */
+function readWindowState(profile) {
+  try {
+    return JSON.parse(readFileSync(join(profile, 'window-state.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function hasSelector(page, selector) {
+  return (await page.$(selector)) !== null;
+}
+
 /** Kill any FluentFlow left holding the debugging port from an earlier run. */
 async function killStaleInstances() {
   const pidsOnPort = () => {
@@ -669,6 +849,16 @@ async function connectWhenReady(attempts = 40) {
   throw lastError;
 }
 
+/**
+ * Click a control by its accessibility label.
+ *
+ * The last *visible* match, which is not the same as the last match. Earlier
+ * screens stay mounted and hidden behind the current one, so a label that also
+ * appears on a previous screen — "Import from Anki" is on both the deck list and
+ * the import screen — would otherwise resolve to something nobody can click, and
+ * `waitForSelector` checks the first match rather than searching for a usable
+ * one.
+ */
 async function clickLabel(page, label) {
   const handle = await visibleMatch(page, `[aria-label="${label}"]`);
   await handle.click();

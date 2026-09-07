@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { Deck } from '@fluentflow/core';
 import { AppContext, type AppState, type AuthUser } from '../src/state/app';
+import { PreferencesProvider } from '../src/state/preferences';
 import { I18nProvider } from '../src/i18n';
 import { ThemeProvider } from '../src/ui/theme';
 import type { Repository } from '../src/db/repository';
@@ -228,7 +229,9 @@ export async function renderScreen(ui: ReactElement, options: HarnessOptions = {
       <SafeAreaProvider initialMetrics={TEST_METRICS}>
         <I18nProvider>
           <ThemeProvider>
-            <AppContext.Provider value={state}>{children}</AppContext.Provider>
+            <PreferencesProvider>
+              <AppContext.Provider value={state}>{children}</AppContext.Provider>
+            </PreferencesProvider>
           </ThemeProvider>
         </I18nProvider>
       </SafeAreaProvider>

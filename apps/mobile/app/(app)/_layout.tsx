@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { View } from 'react-native';
-import { Redirect, Stack } from 'expo-router';
+import { Redirect, router, Stack } from 'expo-router';
 import { useApp } from '../../src/state/app';
+import { subscribeToShellImports } from '../../src/desktop-import';
 import { useI18n } from '../../src/i18n';
 import { BottomBar } from '../../src/ui/BottomBar';
 import { TitleBar } from '../../src/ui/TitleBar';
@@ -24,6 +26,11 @@ export default function AppLayout() {
   const { user } = useApp();
   const { t } = useI18n();
   const theme = useTheme();
+
+  // The desktop shell can ask for an import from the File menu, a dropped file
+  // or a deck opened with the app. This is the only place mounted for the whole
+  // session, so it is the only place that can route one.
+  useEffect(() => subscribeToShellImports(() => router.push('/(app)/import')), []);
 
   if (!user) return <Redirect href="/sign-in" />;
 
@@ -58,6 +65,7 @@ export default function AppLayout() {
           <Stack.Screen name="study/[deckId]" options={{ title: t('study') }} />
           <Stack.Screen name="import" options={{ title: t('importDeck') }} />
           <Stack.Screen name="text-import" options={{ title: t('pasteText') }} />
+          <Stack.Screen name="stats" options={{ title: t('statistics') }} />
           <Stack.Screen name="settings" options={{ title: t('settings') }} />
         </Stack>
       </View>

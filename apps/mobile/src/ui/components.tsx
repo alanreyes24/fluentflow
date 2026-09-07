@@ -54,14 +54,17 @@ function webText(style: Record<string, string | number>): TextStyle | undefined 
 
 type TextVariant = keyof Theme['typography'];
 
+export type Tone = 'default' | 'muted' | 'faint' | 'accent' | 'danger' | 'streak' | 'inverse';
+
 interface LabelProps {
   children: ReactNode;
   variant?: TextVariant;
-  tone?: 'default' | 'muted' | 'faint' | 'accent' | 'danger';
+  tone?: Tone;
   align?: 'left' | 'center' | 'right';
   style?: TextStyleProp;
   numberOfLines?: number;
   selectable?: boolean;
+  accessibilityLabel?: string;
 }
 
 export function Label({
@@ -72,22 +75,28 @@ export function Label({
   style,
   numberOfLines,
   selectable,
+  accessibilityLabel,
 }: LabelProps) {
   const theme = useTheme();
-  const colors = {
+  const colors: Record<Tone, string> = {
     default: theme.colors.text,
     muted: theme.colors.textMuted,
     faint: theme.colors.textFaint,
     accent: theme.colors.accent,
     danger: theme.colors.danger,
+    streak: theme.colors.streak,
+    inverse: theme.colors.accentText,
   };
 
   return (
     <Text
       numberOfLines={numberOfLines}
       selectable={selectable}
+      accessibilityLabel={accessibilityLabel}
       style={[
         theme.typography[variant],
+        // Uppercasing in the component rather than at every call site.
+        variant === 'overline' && styles.overline,
         { color: colors[tone], textAlign: align },
         style,
       ]}
@@ -335,13 +344,163 @@ export function Divider({ style }: { style?: ViewStyleProp }) {
 export function Row({
   children,
   gap = 8,
+  align = 'center',
+  justify,
+  wrap,
   style,
 }: {
   children: ReactNode;
   gap?: number;
+  align?: 'center' | 'flex-start' | 'flex-end' | 'baseline' | 'stretch';
+  justify?: 'flex-start' | 'center' | 'space-between' | 'flex-end';
+  wrap?: boolean;
   style?: ViewStyleProp;
 }) {
-  return <View style={[styles.row, { gap }, style]}>{children}</View>;
+  return (
+    <View
+      style={[
+        styles.row,
+        { gap, alignItems: align },
+        justify ? { justifyContent: justify } : null,
+        wrap ? styles.wrap : null,
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
+/**
+ * A section's name, above the thing it names.
+ *
+ * `SectionLabel` is the plain version; this one takes a trailing action, which
+ * the statistics screen uses for its range switch.
+ */
+export function SectionHeader({
+  title,
+  action,
+  style,
+}: {
+  title: string;
+  action?: ReactNode;
+  style?: ViewStyleProp;
+}) {
+  return (
+    <View style={[styles.sectionHeader, style]}>
+      <Label variant="overline" tone="faint" style={styles.grow}>
+        {title}
+      </Label>
+      {action}
+    </View>
+  );
+}
+
+/** A small standalone tag. Carries its own colour so a legend can key to it. */
+export function Chip({
+  label,
+  color,
+  background,
+  style,
+}: {
+  label: string;
+  color?: string;
+  background?: string;
+  style?: ViewStyleProp;
+}) {
+  const theme = useTheme();
+  return (
+    <View
+      style={[
+        styles.chip,
+        {
+          backgroundColor: background ?? theme.colors.surfaceSunken,
+          borderRadius: theme.radius.pill,
+        },
+        style,
+      ]}
+    >
+      <Label variant="caption" style={color ? { color } : undefined}>
+        {label}
+      </Label>
+    </View>
+  );
+}
+
+/**
+ * A proportion, drawn as a bar.
+ *
+ * `ProgressBar` shows a deck's three card states at once; this is the single
+ * ratio — retention, a share of a goal — that the statistics screen repeats.
+ */
+export function Meter({
+  value,
+  color,
+  height = 8,
+  accessibilityLabel,
+}: {
+  value: number;
+  color?: string;
+  height?: number;
+  accessibilityLabel?: string;
+}) {
+  const theme = useTheme();
+  // A NaN width silently renders as zero; clamping says so deliberately.
+  const clamped = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+
+  return (
+    <View
+      accessibilityRole="progressbar"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityValue={{ min: 0, max: 100, now: Math.round(clamped * 100) }}
+      style={[
+        styles.meterTrack,
+        { backgroundColor: theme.colors.surfaceSunken, height, borderRadius: height / 2 },
+      ]}
+    >
+      <View
+        style={{
+          width: `${clamped * 100}%`,
+          height: '100%',
+          backgroundColor: color ?? theme.colors.accent,
+          borderRadius: height / 2,
+        }}
+      />
+    </View>
+  );
+}
+
+/** One headline number with its caption. The unit of the statistics screen. */
+export function StatTile({
+  value,
+  label,
+  hint,
+  tone = 'default',
+  style,
+}: {
+  value: string;
+  label: string;
+  hint?: string;
+  tone?: Tone;
+  style?: ViewStyleProp;
+}) {
+  return (
+    // One accessibility node, not three: "75%" and "Retention" are separate
+    // text nodes on screen and a screen reader has no way to pair them.
+    <View accessible accessibilityLabel={`${label}: ${value}`} style={[styles.statTile, style]}>
+      <Label variant="metric" tone={tone}>
+        {value}
+      </Label>
+      <Label variant="overline" tone="faint">
+        {label}
+      </Label>
+      {hint ? (
+        <Label variant="caption" tone="muted">
+          {hint}
+        </Label>
+      ) : null}
+    </View>
+  );
 }
 
 export function Spacer({ size = 16 }: { size?: number }) {
@@ -584,7 +743,13 @@ export function StatusDot({ status, size = 8 }: { status: CardStatus; size?: num
  * this deck is mastered", which is a proportion. The numbers are still there
  * underneath for anyone who wants them.
  */
-export function ProgressBar({ progress }: { progress: DeckProgress }) {
+export function ProgressBar({
+  progress,
+  height,
+}: {
+  progress: DeckProgress;
+  height?: number;
+}) {
   const theme = useTheme();
   const total = Math.max(progress.total, 1);
 
@@ -601,6 +766,7 @@ export function ProgressBar({ progress }: { progress: DeckProgress }) {
       style={[
         styles.progressTrack,
         { backgroundColor: theme.colors.surfaceSunken, borderRadius: theme.radius.pill },
+        height ? { height } : null,
       ]}
     >
       {segments.map((segment) =>
@@ -620,16 +786,23 @@ export function ProgressBar({ progress }: { progress: DeckProgress }) {
 }
 
 export function EmptyState({
+  icon,
   title,
   hint,
   action,
 }: {
+  icon?: string;
   title: string;
   hint?: string;
   action?: ReactNode;
 }) {
   return (
     <View style={styles.empty}>
+      {icon ? (
+        <Text accessibilityElementsHidden importantForAccessibility="no" style={styles.emptyIcon}>
+          {icon}
+        </Text>
+      ) : null}
       <Label variant="heading" align="center">
         {title}
       </Label>
@@ -658,6 +831,20 @@ export function Loading({ label }: { label?: string }) {
 }
 
 const styles = StyleSheet.create({
+  emptyIcon: { fontSize: 40, textAlign: 'center' },
+  wrap: { flexWrap: 'wrap' },
+  overline: { textTransform: 'uppercase' },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+    paddingBottom: 8,
+  },
+  grow: { flex: 1 },
+  chip: { paddingHorizontal: 10, paddingVertical: 4 },
+  meterTrack: { width: '100%', overflow: 'hidden' },
+  statTile: { flex: 1, minWidth: 92, gap: 2 },
   screen: { flex: 1 },
   page: { flex: 1 },
   sectionLabel: { textTransform: 'uppercase', letterSpacing: 0.8 },

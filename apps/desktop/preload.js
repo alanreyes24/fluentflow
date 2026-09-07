@@ -1,19 +1,36 @@
 'use strict';
 
 /**
- * Preload script.
+ * Preload script: the whole surface the page gets from the shell.
  *
- * The renderer needs almost nothing from Node — the app talks to Firestore over
- * HTTPS and keeps local state in IndexedDB via expo-sqlite's web backend. The
- * exception is the on-device model: it needs a native module and a gigabyte of
- * weights, so it runs in the main process and the renderer asks for results.
- * Nothing else is exposed — no filesystem, no `require`, no arbitrary IPC.
+ * The app is the Expo *web* export, so it assumes a browser and mostly gets
+ * one. What it cannot do as a browser tab is exposed here, and nothing else —
+ * no filesystem, no general IPC, no `require`:
+ *
+ *  - **Look words up and write examples.** The dictionary is a 40 MB SQLite
+ *    file and the model is hosted behind a key the page must never hold, so
+ *    both run in the main process and the renderer asks for results.
+ *  - **Import an Anki package.** On web that call goes to the sync server,
+ *    because a browser has no SQLite that can mount a collection from bytes.
+ *    Here the main process has Node's, so the parse happens locally and works
+ *    signed out and offline. The page never names a path: it asks for a picker,
+ *    or receives one the user dropped or double-clicked.
+ *  - **Say which theme it is rendering**, so the shell can paint the window
+ *    background and the Windows title bar before any bundle has loaded.
+ *  - **Name the build**, so Settings can say what this is.
  *
  * `contextBridge` rather than assigning to `window`: with contextIsolation on,
  * a direct assignment lands in the isolated world and the page never sees it.
  */
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+
+/** Anki's own two extensions, matching `src/apkg.js`. */
+const EXTENSIONS = /\.(apkg|colpkg)$/i;
+
+/** Passed down by the main process, which is the only side that knows it. */
+const APP_VERSION =
+  process.argv.find((argument) => argument.startsWith('--fluentflow-app-version='))?.split('=')[1] ?? '';
 
 /**
  * The one thing the renderer cannot do for itself: run the model.
@@ -26,6 +43,7 @@ const { contextBridge, ipcRenderer } = require('electron');
  */
 contextBridge.exposeInMainWorld('fluentflowDesktop', {
   platform: process.platform,
+  appVersion: APP_VERSION,
   electronVersion: process.versions.electron,
 
   ai: {
@@ -87,6 +105,7 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
       return () => ipcRenderer.removeListener('ai:progress', handler);
     },
   },
+  chromeVersion: process.versions.chrome,
 
   /**
    * The window chrome follows the in-app theme.
@@ -118,4 +137,86 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
       return () => ipcRenderer.removeListener('window:fullscreen', handler);
     },
   },
+  hasLocalModel: false,
+
+  /**
+   * Import runs in this process, not against the sync server. The app branches
+   * on this rather than on `Platform.OS`, which says "web" in here.
+   */
+  canImportLocally: true,
+
+  /** Open the system file dialog. Resolves to `{ canceled }` or `{ file }`. */
+  pickApkg: () => ipcRenderer.invoke('fluentflow:pick-apkg'),
+
+  /**
+   * Parse a file the user chose. Resolves to `{ ok: true, decks, cards, summary }`
+   * or `{ ok: false, code, message }` — a rejection would arrive wrapped in
+   * "Error invoking remote method", burying a message written to be read.
+   */
+  importApkg: (request) => ipcRenderer.invoke('fluentflow:import-apkg', request),
+
+  /**
+   * Subscribe to import requests from outside the page: the File menu, a file
+   * dropped on the window, or a `.apkg` opened with the app. `null` means the
+   * user asked for the picker without naming a file.
+   *
+   * Returns an unsubscribe function. Telling the main process we are listening
+   * is what releases anything queued before the app finished booting — which is
+   * every launch that started by double-clicking a deck.
+   */
+  onImportRequest: (handler) => {
+    const listener = (_event, file) => handler(file ?? null);
+    ipcRenderer.on('fluentflow:import-request', listener);
+    ipcRenderer.send('fluentflow:import-ready');
+    return () => ipcRenderer.removeListener('fluentflow:import-request', listener);
+  },
+
+  /**
+   * Report the theme the app is rendering.
+   *
+   * The same channel `theme.set` uses: the main process resolves the rendered
+   * name from `themeSource` itself, so the preference is all it needs, and one
+   * channel means one place deciding what the window background becomes.
+   */
+  reportTheme: (_name, preference) => {
+    ipcRenderer.send('theme:set', preference);
+  },
+});
+
+/**
+ * Files dropped on the window.
+ *
+ * Handled here rather than in the React tree for two reasons: the app is the
+ * same bundle the browser and the phone run, and a sandboxed renderer cannot
+ * get a path off a `File` anyway — `webUtils.getPathForFile` is preload-only.
+ * So the shell takes the drop, resolves the path, and the app then receives the
+ * same request the File menu produces.
+ *
+ * Only drags that carry files are intercepted; text selections inside the app
+ * keep the browser's behaviour.
+ */
+function carriesFiles(event) {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+window.addEventListener('dragover', (event) => {
+  if (!carriesFiles(event)) return;
+  // Without this the page is not a drop target at all, and Chromium's default
+  // for a dropped file is to navigate the window to it.
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+});
+
+window.addEventListener('drop', (event) => {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+
+  for (const file of event.dataTransfer.files) {
+    if (!EXTENSIONS.test(file.name)) continue;
+    const filePath = webUtils.getPathForFile(file);
+    if (filePath) ipcRenderer.send('fluentflow:dropped-file', filePath);
+    // One deck at a time: the import screen shows a summary per file, and a
+    // queue of them would need a UI that does not exist.
+    break;
+  }
 });
