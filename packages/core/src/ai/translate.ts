@@ -85,9 +85,10 @@ export const BATCH_TRANSLATION_SCHEMA = {
     type: 'OBJECT',
     properties: {
       word: { type: 'STRING' },
+      correctedWord: { type: 'STRING' },
       meaning: { type: 'STRING' },
     },
-    required: ['word', 'meaning'],
+    required: ['word', 'correctedWord', 'meaning'],
   },
 } as const;
 
@@ -118,17 +119,20 @@ export function wordKey(value: string): string {
     .trim();
 }
 
-/** Build one strict JSON request for the entire unresolved set. */
+/** Build one strict JSON request for one bounded unresolved-word batch. */
 export function buildTranslateBatchPrompt(words: string[], language: TargetLanguage): string {
   const languageName = LANGUAGE_NAMES_EN[language];
   return [
     `You are a ${languageName}-English dictionary.`,
     'Translate every input item below.',
     'Return only a JSON array, with exactly one object per input item, in the same order.',
-    'Each object must contain exactly these string fields: "word" and "meaning".',
+    'Each object must contain exactly these string fields: "word", "correctedWord", and "meaning".',
     'Copy "word" exactly as provided.',
+    `For "correctedWord", aggressively infer clear misspellings, missing accents, and regional slang in ${languageName}.`,
+    'Use standard spelling while preserving the original grammatical form; do not lemmatize or paraphrase.',
+    'If the input is already correct, copy it exactly into "correctedWord".',
     'The "meaning" must be a concise English word or short phrase of no more than six words.',
-    'If an item is not a word or you are not sure, use an empty string for "meaning".',
+    `If an item is not plausibly ${languageName} or its intended word is genuinely ambiguous, copy it into "correctedWord" and use an empty string for "meaning".`,
     'Do not explain, add markdown, omit items, reorder items, or invent a translation.',
     '',
     JSON.stringify(words),
@@ -137,6 +141,8 @@ export function buildTranslateBatchPrompt(words: string[], language: TargetLangu
 
 export interface BatchTranslation {
   word: string;
+  /** A validated spelling correction. Absent when the model kept the input. */
+  correctedWord?: string;
   meaning: string;
 }
 
@@ -159,7 +165,7 @@ export function parseTranslationBatch(raw: string, requested: string[]): BatchTr
 
   for (const item of decoded) {
     if (!item || typeof item !== 'object') continue;
-    const candidate = item as { word?: unknown; meaning?: unknown };
+    const candidate = item as { word?: unknown; correctedWord?: unknown; meaning?: unknown };
     if (typeof candidate.word !== 'string' || typeof candidate.meaning !== 'string') continue;
 
     const key = wordKey(candidate.word);
@@ -168,7 +174,17 @@ export function parseTranslationBatch(raw: string, requested: string[]): BatchTr
     seen.add(key);
 
     const parsed = parseTranslation(candidate.meaning, requestedWord);
-    translations.push({ word: requestedWord, meaning: parsed.meaning });
+    const corrected = typeof candidate.correctedWord === 'string'
+      ? sanitizeWord(candidate.correctedWord)
+      : requestedWord;
+    const validCorrection = corrected && /[\p{L}\p{N}]/u.test(corrected)
+      ? corrected
+      : requestedWord;
+    translations.push({
+      word: requestedWord,
+      ...(validCorrection !== requestedWord ? { correctedWord: validCorrection } : {}),
+      meaning: parsed.meaning,
+    });
   }
 
   return translations;

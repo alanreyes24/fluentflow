@@ -516,6 +516,11 @@ export interface TextImportOptions extends TextParseOptions {
    * not written, because a card with a blank back is not a card.
    */
   meanings?: Record<string, string>;
+  /**
+   * Validated spelling corrections for bare-word entries, keyed by the exact
+   * pasted front. Explicit front/back pairs are never rewritten.
+   */
+  correctedFronts?: Record<string, string>;
 }
 
 export interface TextImportSummary {
@@ -579,10 +584,48 @@ export function buildTextImport(text: string, options: TextImportOptions): TextI
 
   const deckId = options.deck?.id ?? deck?.id ?? '';
   const meanings = options.meanings ?? {};
+  const correctedFronts = options.correctedFronts ?? {};
+
+  // Corrected spellings can make formerly distinct pasted rows converge. Pick
+  // the unchanged spelling even when it appeared later, then preserve source
+  // order for ties between two inferred corrections.
+  const existingKeys = new Set(
+    [...(options.existingFronts ?? [])].map(dedupeKey),
+  );
+  const candidates = parsed.entries.map((entry) => {
+    const proposed = entry.back ? '' : clean(correctedFronts[entry.front] ?? '');
+    const front = proposed && proposed.length <= MAX_FRONT ? proposed : entry.front;
+    return { entry, front, corrected: front !== entry.front };
+  });
+  const winnerByKey = new Map<string, number>();
+  const correctionDuplicates = new Set<number>();
+
+  for (const [index, candidate] of candidates.entries()) {
+    const key = dedupeKey(candidate.front);
+    if (existingKeys.has(key)) {
+      correctionDuplicates.add(index);
+      continue;
+    }
+    const previousIndex = winnerByKey.get(key);
+    if (previousIndex === undefined) {
+      winnerByKey.set(key, index);
+      continue;
+    }
+    const previous = candidates[previousIndex];
+    if (previous?.corrected && !candidate.corrected) {
+      correctionDuplicates.add(previousIndex);
+      correctionDuplicates.delete(index);
+      winnerByKey.set(key, index);
+    } else {
+      correctionDuplicates.add(index);
+    }
+  }
 
   let withoutMeaning = 0;
   const cards: Card[] = [];
-  for (const entry of parsed.entries) {
+  for (const [index, candidate] of candidates.entries()) {
+    if (correctionDuplicates.has(index)) continue;
+    const { entry, front } = candidate;
     const back = entry.back || meanings[entry.front] || '';
     if (!back) {
       withoutMeaning++;
@@ -590,10 +633,10 @@ export function buildTextImport(text: string, options: TextImportOptions): TextI
     }
     cards.push(
       createCard({
-        id: stableId('card', options.userId, deckId, dedupeKey(entry.front)),
+        id: stableId('card', options.userId, deckId, dedupeKey(front)),
         userId: options.userId,
         deckId,
-        front: entry.front,
+        front,
         back,
         language: detection.language,
         now,
@@ -610,8 +653,8 @@ export function buildTextImport(text: string, options: TextImportOptions): TextI
       separatorLabel: parsed.separatorLabel,
       linesRead: parsed.linesRead,
       cardsImported: cards.length,
-      cardsSkipped: parsed.skippedCount + withoutMeaning,
-      duplicates: parsed.duplicates,
+      cardsSkipped: parsed.skippedCount + correctionDuplicates.size + withoutMeaning,
+      duplicates: parsed.duplicates + correctionDuplicates.size,
       withoutMeaning,
       headerSkipped: parsed.headerSkipped,
       detection,

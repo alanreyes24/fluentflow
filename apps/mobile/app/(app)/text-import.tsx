@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   LANGUAGE_NAMES,
@@ -7,6 +7,7 @@ import {
   buildTextImport,
   parseTextCards,
   type Deck,
+  type ModelUsage,
   type TargetLanguage,
   type ResolvedMeaning,
   type TextImportSummary,
@@ -75,7 +76,7 @@ export default function TextImportScreen() {
   /** Word -> where its meaning came from, for the automatic-results summary. */
   const [origins, setOrigins] = useState<Record<string, ResolvedMeaning>>({});
   const [reviewing, setReviewing] = useState(false);
-  const [confirmingModel, setConfirmingModel] = useState(false);
+  const [modelUsage, setModelUsage] = useState<ModelUsage | null>(null);
   const [skipApproved, setSkipApproved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Invalidates an in-flight lookup when the pasted list is replaced. */
@@ -169,6 +170,11 @@ export default function TextImportScreen() {
     [remaining, origins],
   );
 
+  const retryableFailures = useMemo(
+    () => remaining.filter((word) => origins[word]?.rejected === 'model-failed').length,
+    [remaining, origins],
+  );
+
   /**
    * Fill in the meanings, in one of the two passes this screen offers.
    *
@@ -190,7 +196,8 @@ export default function TextImportScreen() {
         // picked. Detection cannot help here: it reads the words, and a model
         // asked to translate Spanish as Bosnian answers confidently either way.
         const target = deck?.language ?? language ?? 'es';
-        const results = await lookUpMeanings(words, target, undefined, { useModel });
+        const lookup = await lookUpMeanings(words, target, undefined, { useModel });
+        const results = lookup.meanings;
         // A meaning already in the box wins. The second pass exists to fill
         // blanks, not to overwrite a correction someone has just typed.
         if (generation !== inputGeneration.current) return;
@@ -205,6 +212,9 @@ export default function TextImportScreen() {
           ...current,
           ...Object.fromEntries(results.map((entry) => [entry.word, entry])),
         }));
+        if (useModel && lookup.usage) {
+          setModelUsage((current) => mergeModelUsage(current, lookup.usage!));
+        }
         setReviewing(true);
       } catch (cause) {
         if (generation === inputGeneration.current) {
@@ -230,6 +240,19 @@ export default function TextImportScreen() {
    * attempt and gets one of its own.
    */
   const attempted = useRef(new Set<string>());
+
+  /** Clear every result whose meaning depends on the paste or target language. */
+  const resetLookup = useCallback(() => {
+    inputGeneration.current += 1;
+    setDrafts({});
+    setOrigins({});
+    setReviewing(false);
+    setTranslating(false);
+    setModelUsage(null);
+    setSkipApproved(false);
+    setError(null);
+    attempted.current.clear();
+  }, []);
 
   // The dictionary pass runs on its own: it is free and sends nothing, so
   // asking permission for it is ceremony. The paid pass still waits to be asked.
@@ -263,6 +286,7 @@ export default function TextImportScreen() {
         // Reviewed meanings for the words the paste did not carry. Anything
         // left blank is not written: core drops it and reports the count.
         meanings: drafts,
+        correctedFronts: correctedFrontsFrom(origins),
         ...(deck
           ? { deck: { id: deck.id, language: deck.language } }
           : {
@@ -289,8 +313,11 @@ export default function TextImportScreen() {
       setExistingFronts((current) => [...current, ...result.cards.map((card) => card.front)]);
       setText('');
       setDrafts({});
+      setOrigins({});
       setReviewing(false);
+      setModelUsage(null);
       setSkipApproved(false);
+      attempted.current.clear();
       await refreshDecks();
       void syncNow();
 
@@ -305,7 +332,7 @@ export default function TextImportScreen() {
       setBusy(false);
     }
   }, [
-    repository, user, preview.entries.length, text, swap, existingFronts, drafts,
+    repository, user, preview.entries.length, text, swap, existingFronts, drafts, origins,
     deck, deckName, language, refreshDecks, syncNow, t, targetDeckId,
     missingMeanings.length, skipApproved,
   ]);
@@ -338,17 +365,12 @@ export default function TextImportScreen() {
                   value={selectedDeckId ?? 'new'}
                   onChange={(value) => {
                     const nextDeckId = value === 'new' ? null : value;
+                    resetLookup();
                     setSelectedDeckId(nextDeckId);
                     // Do not let the previous target receive a fast tap while
                     // the newly selected deck is being loaded below.
                     setDeck(null);
                     setExistingFronts([]);
-                    setDrafts({});
-                    setOrigins({});
-                    setReviewing(false);
-                    setConfirmingModel(false);
-                    setSkipApproved(false);
-                    attempted.current.clear();
                   }}
                 />
               </>
@@ -367,7 +389,11 @@ export default function TextImportScreen() {
                     ...TARGET_LANGUAGES.map((code) => ({ value: code, label: LANGUAGE_NAMES[code] })),
                   ]}
                   value={language ?? 'auto'}
-                  onChange={(value) => setLanguage(value === 'auto' ? null : value)}
+                  onChange={(value) => {
+                    const next = value === 'auto' ? null : value;
+                    if (next !== language) resetLookup();
+                    setLanguage(next);
+                  }}
                 />
               </>
             ) : null}
@@ -380,23 +406,9 @@ export default function TextImportScreen() {
           label={t('pasteLabel')}
           value={text}
           onChangeText={(value) => {
-            if (value !== text) {
-              inputGeneration.current += 1;
-              // A new paste or edit must not inherit model-rejected entries
-              // from the previous list. Otherwise the UI can show 450 missing
-              // words while offering Gemini only one fresh request.
-              if (reviewing || translating || Object.keys(drafts).length > 0 || Object.keys(origins).length > 0) {
-                setDrafts({});
-                setOrigins({});
-                setReviewing(false);
-                setConfirmingModel(false);
-                setSkipApproved(false);
-                attempted.current.clear();
-              }
-            }
+            if (value !== text) resetLookup();
             setText(value);
             setSummary(null);
-            setConfirmingModel(false);
           }}
           multiline
           numberOfLines={4}
@@ -407,17 +419,24 @@ export default function TextImportScreen() {
         />
 
         {/* A state, not an action: it says how the list is being read, and
-            pressing it reads the list the other way round. */}
-        <Button
-          label={swap ? t('pasteMeaningFirst') : t('pasteWordFirst')}
-          variant="secondary"
-          onPress={() => setSwap(!swap)}
-        />
+            pressing it reads the list the other way round. Keep the
+            control in its own row so it cannot merge into either panel. */}
+        <View style={styles.readingControl}>
+          <Button
+            label={swap ? t('pasteMeaningFirst') : t('pasteWordFirst')}
+            variant="secondary"
+            onPress={() => {
+              resetLookup();
+              setSwap(!swap);
+            }}
+            style={styles.readingButton}
+          />
+        </View>
 
         <Spacer size={theme.spacing.md} />
         <Preview result={preview} ready={readyCount} meanings={drafts} />
 
-        {missingMeanings.length > 0 && !translating ? (
+        {missingMeanings.length > 0 ? (
           <>
             <Spacer size={theme.spacing.md} />
             <Surface style={styles.options}>
@@ -425,7 +444,14 @@ export default function TextImportScreen() {
                 {t('aiWordsNeedMeanings', { count: missingMeanings.length })}
               </Label>
 
-              {sources === null ? (
+              {translating ? (
+                <Button
+                  label={t('aiTranslating')}
+                  variant="secondary"
+                  loading
+                  onPress={() => {}}
+                />
+              ) : sources === null ? (
                 <Label variant="caption" tone="faint">
                   {t('loading')}
                 </Label>
@@ -435,6 +461,11 @@ export default function TextImportScreen() {
                 </Label>
               ) : hasModel && unasked.length > 0 ? (
                 <>
+                  {retryableFailures > 0 ? (
+                    <Label variant="caption" tone="danger">
+                      {t('aiModelRetry', { count: retryableFailures })}
+                    </Label>
+                  ) : null}
                   <Label variant="caption" tone="muted">
                     {t('aiModelEstimate', {
                       model: modelName,
@@ -442,37 +473,12 @@ export default function TextImportScreen() {
                       cost: estimatedModelCost,
                     })}
                   </Label>
-                  {confirmingModel ? (
-                    <>
-                      <Label variant="caption" tone="faint">
-                        {t('aiModelConfirm', { model: modelName, cost: estimatedModelCost })}
-                      </Label>
-                      <Row gap={theme.spacing.sm}>
-                        <Button
-                          label={t('cancel')}
-                          variant="ghost"
-                          onPress={() => setConfirmingModel(false)}
-                          style={styles.grow}
-                        />
-                        <Button
-                          label={t('aiAskModelConfirm')}
-                          variant="secondary"
-                          onPress={() => {
-                            setConfirmingModel(false);
-                            void runLookup(true);
-                          }}
-                          style={styles.grow}
-                        />
-                      </Row>
-                    </>
-                  ) : (
-                    <Button
-                      label={t('aiAskModel', { model: modelName, count: unasked.length })}
-                      variant="secondary"
-                      onPress={() => setConfirmingModel(true)}
-                      disabled={unasked.length === 0}
-                    />
-                  )}
+                  <Button
+                    label={t('aiAskModel', { model: modelName, count: unasked.length })}
+                    variant="secondary"
+                    onPress={() => void runLookup(true)}
+                    disabled={unasked.length === 0}
+                  />
                 </>
               ) : hasModel ? (
                 <Label variant="caption" tone="faint">
@@ -484,7 +490,7 @@ export default function TextImportScreen() {
                 </Label>
               )}
 
-              {sources !== null && (reviewing || !hasDictionary) && counts.missing > 0 ? (
+              {!translating && sources !== null && (reviewing || !hasDictionary) && counts.missing > 0 ? (
                 <>
                   <Label variant="caption" tone="muted">
                     {t('aiNeedsSkipApproval', { count: counts.missing })}
@@ -506,18 +512,6 @@ export default function TextImportScreen() {
           </>
         ) : null}
 
-        {translating ? (
-          <>
-            <Spacer size={theme.spacing.md} />
-            <Surface style={styles.options}>
-              <Row gap={theme.spacing.sm}>
-                <ActivityIndicator color={theme.colors.accent} />
-                <Label variant="label">{t('aiTranslating')}</Label>
-              </Row>
-            </Surface>
-          </>
-        ) : null}
-
         {reviewing && meaninglessWords.length > 0 ? (
           <>
             <Spacer size={theme.spacing.md} />
@@ -526,6 +520,24 @@ export default function TextImportScreen() {
               <Label variant="caption" tone="faint">
                 {summaryLine(counts, modelName, t)}
               </Label>
+              {modelUsage ? (
+                <>
+                  <Label variant="caption" tone="accent">
+                    {t('aiModelUsage', {
+                      requests: modelUsage.requests,
+                      input: modelUsage.inputTokens.toLocaleString(),
+                      output: modelUsage.outputTokens.toLocaleString(),
+                      cost: formatModelCost(
+                        modelUsage.listPriceUsd,
+                        t('aiModelUsageUnknownCost'),
+                      ),
+                    })}
+                  </Label>
+                  <Label variant="caption" tone="faint">
+                    {t('aiModelUsageBilling')}
+                  </Label>
+                </>
+              ) : null}
               {counts.missing === 0 ? (
                 <Label variant="caption" tone="muted">
                   {t('aiAutomaticReady')}
@@ -707,7 +719,18 @@ function draftsFrom(resolved: ResolvedMeaning[]): Record<string, string> {
   return drafts;
 }
 
-  /** How many meanings came from where, for the automatic-results summary. */
+/** Corrections are applied only for model answers that produced a meaning. */
+function correctedFrontsFrom(
+  origins: Record<string, ResolvedMeaning>,
+): Record<string, string> {
+  const corrected: Record<string, string> = {};
+  for (const [word, entry] of Object.entries(origins)) {
+    if (entry.meaning && entry.correctedWord) corrected[word] = entry.correctedWord;
+  }
+  return corrected;
+}
+
+/** How many meanings came from where, for the automatic-results summary. */
 function tally(words: string[], origins: Record<string, ResolvedMeaning>) {
   let dictionary = 0;
   let model = 0;
@@ -744,16 +767,49 @@ function summaryLine(
 /** Conservative estimate for one short translation prompt at the default rate. */
 function estimateTranslationCost(count: number): string {
   if (count <= 0) return '$0.00';
-  // The prompt has roughly 45 input tokens and the request allows 12 output
-  // tokens. These are upper-bound estimates; Gemini bills the actual usage.
-  const dollars = (count * (45 * 0.25 + 12 * 1.5)) / 1_000_000;
+  // Batches share prompt overhead. Each structured row carries the source,
+  // corrected spelling and a short meaning; Gemini bills actual usage.
+  const batches = Math.ceil(count / 100);
+  const inputTokens = batches * 120 + count * 6;
+  const outputTokens = count * 24;
+  const dollars = (inputTokens * 0.25 + outputTokens * 1.5) / 1_000_000;
   if (dollars < 0.0001) return '<$0.0001';
   return `~$${dollars.toFixed(4)}`;
+}
+
+/** Keep measured usage across retries for the same paste. */
+function mergeModelUsage(current: ModelUsage | null, next: ModelUsage): ModelUsage {
+  if (!current) return next;
+  const sameModel = current.model === next.model;
+  const bothPriced =
+    sameModel && current.listPriceUsd !== undefined && next.listPriceUsd !== undefined;
+  return {
+    model: sameModel ? current.model : next.model,
+    requests: current.requests + next.requests,
+    inputTokens: current.inputTokens + next.inputTokens,
+    outputTokens: current.outputTokens + next.outputTokens,
+    totalTokens: current.totalTokens + next.totalTokens,
+    ...(bothPriced
+      ? {
+          listPriceUsd:
+            Math.round((current.listPriceUsd! + next.listPriceUsd!) * 1_000_000_000_000) /
+            1_000_000_000_000,
+        }
+      : {}),
+  };
+}
+
+function formatModelCost(cost: number | undefined, unavailable: string): string {
+  if (cost === undefined) return unavailable;
+  if (cost > 0 && cost < 0.00000001) return '<$0.00000001';
+  return `$${cost.toFixed(8)}`;
 }
 
 const styles = StyleSheet.create({
   paste: { textAlignVertical: 'top' },
   pasteCollapsed: { minHeight: 88 },
+  readingControl: { paddingTop: 8 },
+  readingButton: { alignSelf: 'stretch', overflow: 'hidden' },
   options: { gap: 12 },
   preview: { gap: 4 },
   previewHead: { justifyContent: 'space-between' },

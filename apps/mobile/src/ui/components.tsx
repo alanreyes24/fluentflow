@@ -191,7 +191,7 @@ export function Button({
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={accessibilityHint}
-      accessibilityState={{ disabled: Boolean(inactive) }}
+      accessibilityState={{ disabled: Boolean(inactive), busy: Boolean(loading) }}
       disabled={inactive}
       onPress={onPress}
       // Pointer events rather than Pressable's `hovered` state: that one is a
@@ -207,7 +207,7 @@ export function Button({
         { minHeight: wide ? 38 : 48, paddingHorizontal: wide ? 18 : 22 },
         {
           backgroundColor: (pressed || hovered) && !inactive ? hoverBackground : background,
-          opacity: inactive ? 0.4 : pressed ? 0.9 : 1,
+          opacity: disabled && !loading ? 0.4 : pressed ? 0.9 : 1,
           boxShadow: inactive ? theme.elevation.none : shadow,
           transform: pressed && !inactive ? [{ translateY: 1 }] : [{ translateY: 0 }],
         },

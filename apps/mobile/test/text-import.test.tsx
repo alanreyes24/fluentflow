@@ -40,10 +40,8 @@ function answer(word: string, useModel?: boolean) {
  * the dictionary rows are what the distilled Wiktionary file returns, and the
  * model row is what Qwen2.5-1.5B actually said about a word it did not know.
  *
- * It honours `useModel`, because the two-press flow is the point: the first
- * press must be answerable by the dictionary alone, and a fake that answers
- * with a model row anyway would let a screen that billed on the first press
- * pass this suite.
+ * It honours `useModel`, because the free dictionary pass must stay separate
+ * from the one button that sends unresolved words to Gemini.
  */
 function installBridge(overrides = {}) {
   const bridge = {
@@ -56,6 +54,18 @@ function installBridge(overrides = {}) {
       resolve: jest.fn(async (words: string[], _language: string, options?: { useModel?: boolean }) => ({
         ok: true,
         meanings: words.map((word) => answer(word, options?.useModel)),
+        ...(options?.useModel
+          ? {
+              usage: {
+                model: 'gemini-3.1-flash-lite',
+                requests: 1,
+                inputTokens: 120,
+                outputTokens: 30,
+                totalTokens: 150,
+                listPriceUsd: 0.000075,
+              },
+            }
+          : {}),
       })),
       onProgress: jest.fn(() => jest.fn()),
       ...overrides,
@@ -286,15 +296,13 @@ describe('TextImportScreen', () => {
     await paste(WORDS);
 
     // The dictionary pass runs on its own — it is free and sends nothing. The
-    // paid pass first shows its estimate and asks for confirmation.
+    // The paid pass shows its estimate, then one press sends only the leftovers.
     await screen.findByText('Meanings assigned automatically');
 
     expect(screen.getByText(/Estimated maximum cost/)).toBeTruthy();
     await fireEvent.press(
       screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
     );
-    await screen.findByText(/Send only these missing words to gemini-3\.1-flash-lite/);
-    await fireEvent.press(screen.getByRole('button', { name: 'Send to Gemini' }));
 
     await screen.findByText('Meanings assigned automatically');
     expect(bridge.ai.resolve).toHaveBeenLastCalledWith(['lodazal'], 'es', { useModel: true });
@@ -302,9 +310,63 @@ describe('TextImportScreen', () => {
     expect(
       screen.getByText('2 from the dictionary · 1 from gemini-3.1-flash-lite'),
     ).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Measured Gemini usage — requests: 1 · input tokens: 120 · output tokens: 30 · list-price cost: $0.00007500.',
+      ),
+    ).toBeTruthy();
 
     // Still nothing written: the deck is untouched until the user says so.
     expect(await repository.listDecks(TEST_USER.id)).toHaveLength(0);
+  });
+
+  it('shows an in-place busy indicator while the one-click Gemini request runs', async () => {
+    let finishModel: (() => void) | undefined;
+    installBridge({
+      resolve: jest.fn(async (
+        words: string[],
+        _language: string,
+        options?: { useModel?: boolean },
+      ) => {
+        if (!options?.useModel) {
+          return {
+            ok: true,
+            meanings: words.map((word) => ({
+              word,
+              meaning: '',
+              source: 'none',
+              needsReview: false,
+              rejected: 'not-found',
+            })),
+          };
+        }
+        return new Promise((resolve) => {
+          finishModel = () => resolve({
+            ok: true,
+            meanings: words.map((word) => ({
+              word,
+              meaning: 'mudflat',
+              source: 'model',
+              needsReview: true,
+            })),
+          });
+        });
+      }),
+    });
+    await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
+    await paste('lodazal');
+    await screen.findByText('Meanings assigned automatically');
+
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
+    );
+
+    const loading = screen.getByRole('button', { name: 'Looking up meanings…' });
+    expect(loading.props.accessibilityState).toEqual({ disabled: true, busy: true });
+    expect(screen.queryByRole('button', { name: 'Send to Gemini' })).toBeNull();
+
+    finishModel?.();
+    await screen.findByText('mudflat');
   });
 
   it('keeps cards with unresolved meanings out of the import', async () => {
@@ -331,7 +393,6 @@ describe('TextImportScreen', () => {
     await fireEvent.press(
       screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
     );
-    await fireEvent.press(screen.getByRole('button', { name: 'Send to Gemini' }));
     await screen.findByText('Meanings assigned automatically');
 
     // The meanings are assigned by the dictionary/model; there is no manual
@@ -386,6 +447,108 @@ describe('TextImportScreen', () => {
     const [deck] = await repository.listDecks(TEST_USER.id);
     const cards = await repository.listCards(deck!.id);
     expect(cards.map((card) => card.front).sort()).toEqual(['empapar', 'nido']);
+  });
+
+  it('offers every unresolved word in a large paste to Gemini', async () => {
+    const words = Array.from({ length: 450 }, (_, index) => `palabra${index}`).join('\n');
+    installBridge();
+    await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
+    await paste(words);
+
+    await screen.findByText('450 words with no meaning yet');
+    expect(
+      screen.getByRole('button', {
+        name: 'Ask gemini-3.1-flash-lite about the remaining 450',
+      }),
+    ).toBeTruthy();
+  });
+
+  it('keeps model request failures available for retry', async () => {
+    installBridge({
+      resolve: jest.fn(async (
+        words: string[],
+        _language: string,
+        options?: { useModel?: boolean },
+      ) => ({
+        ok: true,
+        meanings: words.map((word) => ({
+          word,
+          meaning: '',
+          source: 'none',
+          needsReview: false,
+          rejected: options?.useModel ? 'model-failed' : 'not-found',
+        })),
+      })),
+    });
+    await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
+    await paste(WORDS);
+    await screen.findByText('Meanings assigned automatically');
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 3' }),
+    );
+
+    await screen.findByText('3 could not be completed and can be retried.');
+    expect(
+      screen.getByRole('button', {
+        name: 'Ask gemini-3.1-flash-lite about the remaining 3',
+      }),
+    ).toBeTruthy();
+  });
+
+  it('applies a model spelling correction to the imported card front', async () => {
+    installBridge({
+      resolve: jest.fn(async (
+        words: string[],
+        _language: string,
+        options?: { useModel?: boolean },
+      ) => ({
+        ok: true,
+        meanings: words.map((word) => options?.useModel
+          ? {
+              word,
+              correctedWord: 'armadura',
+              meaning: 'armor',
+              source: 'model',
+              needsReview: true,
+            }
+          : {
+              word,
+              meaning: '',
+              source: 'none',
+              needsReview: false,
+              rejected: 'not-found',
+            }),
+      })),
+    });
+    await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
+    await paste('almadura');
+    await screen.findByText('Meanings assigned automatically');
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
+    );
+    await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');
+    await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));
+
+    await waitFor(async () => {
+      const [deck] = await repository.listDecks(TEST_USER.id);
+      expect(deck).toBeTruthy();
+      const cards = await repository.listCards(deck!.id);
+      expect(cards.map((card) => `${card.front}=${card.back}`)).toEqual(['armadura=armor']);
+    });
+  });
+
+  it('reruns lookup when the selected language changes', async () => {
+    const bridge = installBridge();
+    await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
+    await paste('lodazal');
+    await screen.findByText('Meanings assigned automatically');
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Bosanski' }));
+    await waitFor(() => {
+      expect(bridge.ai.resolve).toHaveBeenLastCalledWith(['lodazal'], 'bs', {
+        useModel: false,
+      });
+    });
   });
 
   it('reports a shell that fails mid-lookup instead of hanging', async () => {

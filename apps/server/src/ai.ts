@@ -1,11 +1,13 @@
 import {
   createRemoteInference,
+  combineModelUsage,
   DEFAULT_REMOTE_MODEL,
   EXAMPLES_SCHEMA,
   generateExamples,
   isTargetLanguage,
   resolveMeanings,
   type GenerateExamplesResult,
+  type ModelUsage,
   type ResolvedMeaning,
   type TargetLanguage,
 } from '@fluentflow/core';
@@ -62,15 +64,17 @@ export async function resolveWithAi(
   words: string[],
   language: string,
   useModel: boolean,
-): Promise<ResolvedMeaning[]> {
+): Promise<{ meanings: ResolvedMeaning[]; usage?: ModelUsage }> {
   if (!isTargetLanguage(language)) throw new Error('Unsupported target language.');
-  const infer = useModel ? remoteInference(config) : null;
+  const usages: ModelUsage[] = [];
+  const infer = useModel ? remoteInference(config, undefined, (usage) => usages.push(usage)) : null;
   const dictionary = dictionaryLookup(language as TargetLanguage);
-  return resolveMeanings(words, language as TargetLanguage, {
+  const meanings = await resolveMeanings(words, language as TargetLanguage, {
     dictionary,
     infer,
     budgetMs: TRANSLATION_BUDGET_MS,
   });
+  return { meanings, usage: combineModelUsage(usages) };
 }
 
 export function examplesWithAi(
@@ -94,12 +98,17 @@ export function examplesWithAi(
   );
 }
 
-function remoteInference(config: Config, responseSchema?: unknown) {
+function remoteInference(
+  config: Config,
+  responseSchema?: unknown,
+  onUsage?: (usage: ModelUsage) => void,
+) {
   const apiKey = config.geminiApiKey?.trim();
   if (!apiKey) return null;
   return createRemoteInference({
     apiKey,
     model: config.geminiModel,
     responseSchema,
+    onUsage,
   });
 }

@@ -55,12 +55,17 @@ const cloud = require('./cloud');
  *                       example generation wants. Omitted for translation,
  *                       whose answer is a bare phrase.
  */
-function remoteInference(core, responseSchema) {
+function remoteInference(core, responseSchema, onUsage) {
   const key = cloud.apiKey();
   if (!key) return null;
 
   try {
-    return core.createRemoteInference({ apiKey: key, model: cloud.model(), responseSchema });
+    return core.createRemoteInference({
+      apiKey: key,
+      model: cloud.model(),
+      responseSchema,
+      onUsage,
+    });
   } catch (error) {
     // A key that cannot even build a client (empty after decryption, no fetch
     // in this runtime) is a configuration problem, not a per-request failure.
@@ -79,17 +84,18 @@ function remoteInference(core, responseSchema) {
  * `useModel` is how the import screen keeps that promise visible. It runs this
  * once with the flag off — free, offline, instant, and it covers most word
  * lists outright — and only offers to spend the user's key on what is left
- * over, as a second press naming the words it would send. Defaulting to true
+ * over, behind one button naming the words it will send. Defaulting to true
  * keeps every other caller behaving as it did.
  *
  * @param words     the words, in the deck's language
  * @param language  'es' or 'bs'
  * @param onProgress called as words are resolved, for the progress bar
  * @param useModel  false to answer from the dictionary alone and bill nothing
- * @returns one result per word, each carrying the source it came from
+ * @returns meanings plus measured Gemini usage when the model was called
  */
 async function resolve(words, language, onProgress, useModel = true) {
   const core = await import('@fluentflow/core');
+  const usages = [];
 
   const lookup = dictionary.status().languages[language]
     ? (word) => dictionary.lookup(language, word)
@@ -98,9 +104,12 @@ async function resolve(words, language, onProgress, useModel = true) {
   // Peek: if the dictionary covers everything, nothing is sent anywhere.
   const missing = lookup ? words.filter((word) => lookup(word).length === 0) : words;
 
-  const infer = useModel && missing.length > 0 ? remoteInference(core) : null;
+  const infer = useModel && missing.length > 0
+    ? remoteInference(core, undefined, (usage) => usages.push(usage))
+    : null;
 
-  return core.resolveMeanings(words, language, { dictionary: lookup, infer, onProgress });
+  const meanings = await core.resolveMeanings(words, language, { dictionary: lookup, infer, onProgress });
+  return { meanings, usage: core.combineModelUsage(usages) };
 }
 
 /**

@@ -1,10 +1,9 @@
 import { Platform } from 'react-native';
 import type {
   GenerateExamplesResult,
-  ResolvedMeaning,
   TargetLanguage,
 } from '@fluentflow/core';
-import type { LookupOptions, LookupSources } from './desktop';
+import type { LookupOptions, LookupSources, MeaningLookupResult } from './desktop';
 import { appConfig } from '../firebase/config';
 import { authApi } from '../firebase/client';
 
@@ -29,12 +28,12 @@ export async function resolveMeaningsOnWeb(
   words: string[],
   language: TargetLanguage,
   options?: LookupOptions,
-): Promise<ResolvedMeaning[]> {
+): Promise<MeaningLookupResult> {
   const body = await request('/api/ai/resolve', {
     method: 'POST',
     body: JSON.stringify({ words, language, useModel: options?.useModel !== false }),
   });
-  return body.meanings;
+  return { meanings: body.meanings, usage: body.usage };
 }
 
 export async function generateExamplesOnWeb(input: {

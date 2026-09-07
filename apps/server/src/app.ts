@@ -66,13 +66,13 @@ export function createApp({ config, store }: AppDeps): express.Express {
         res.status(400).json({ error: 'invalid_request', message: 'language is required.' });
         return;
       }
-      const meanings = await resolveWithAi(
+      const result = await resolveWithAi(
         { config },
         body.words as string[],
         body.language,
         body.useModel !== false,
       );
-      res.json({ meanings });
+      res.json(result);
     } catch (error) {
       next(error);
     }

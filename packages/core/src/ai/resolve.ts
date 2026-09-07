@@ -55,6 +55,8 @@ export type MeaningRejection =
   | 'not-found'
   /** The model answered, and the answer failed validation. */
   | 'model-rejected'
+  /** The model request or structured response failed and may be retried. */
+  | 'model-failed'
   /** There was no dictionary and no model to ask. */
   | 'nothing-to-ask';
 
@@ -65,6 +67,8 @@ export interface ResolvedMeaning {
   source: MeaningSource;
   /** The headword the meaning came from, when it is not the word itself. */
   lemma?: string;
+  /** A model-supplied spelling correction for the card front. */
+  correctedWord?: string;
   /**
    * Whether a person should check this before it becomes a card.
    *
@@ -90,6 +94,9 @@ export interface ResolveDeps {
 /** Glosses to keep on a card back. More than this is an essay, not a card. */
 const MAX_GLOSSES = 3;
 const MAX_MEANING_LENGTH = 120;
+/** Keep structured responses comfortably below even conservative output limits. */
+const MAX_TRANSLATION_BATCH_SIZE = 100;
+const TRANSLATION_BATCH_MAX_TOKENS = 4096;
 
 /**
  * Resolve a meaning for every word.
@@ -113,22 +120,24 @@ export async function resolveMeanings(
     if (!word) {
       unresolved.push(results.length);
       results.push({
-        word,
+        word: originalWord,
         meaning: '',
         source: 'none',
         needsReview: false,
-        rejected: 'not-found',
+        rejected: deps.infer ? 'model-rejected' : deps.dictionary ? 'not-found' : 'nothing-to-ask',
       });
       deps.onProgress?.(results.length, words.length);
       continue;
     }
     const found = deps.dictionary ? await lookUp(deps.dictionary, word) : null;
     if (found) {
-      results.push(found);
+      // Sanitizing is for lookup and prompting only. The renderer keys state by
+      // the exact pasted front, so changing the identity here strands results.
+      results.push({ ...found, word: originalWord });
     } else {
       unresolved.push(results.length);
       results.push({
-        word,
+        word: originalWord,
         meaning: '',
         source: 'none',
         needsReview: false,
@@ -142,51 +151,78 @@ export async function resolveMeanings(
 
   // --- the model, for the leftovers ----------------------------------------
   const deadline = deps.budgetMs ? now() + deps.budgetMs : Infinity;
-  let done = words.length - unresolved.length;
+  let modelDone = 0;
 
   // Duplicate and sanitize before spending a model request. Results are still
   // copied back to every original position, so card order remains unchanged.
   const requested = [...new Map(
     unresolved
-      .map((index) => results[index]?.word ?? '')
+      .map((index) => sanitizeWord(results[index]?.word ?? ''))
       .filter(Boolean)
       .map((word) => [wordKey(word), word] as const),
   ).values()];
 
-  if (requested.length > 0 && !deps.signal?.aborted && now() < deadline) {
+  const indexesByKey = new Map<string, number[]>();
+  for (const index of unresolved) {
+    const key = wordKey(results[index]?.word ?? '');
+    if (!key) continue;
+    const indexes = indexesByKey.get(key) ?? [];
+    indexes.push(index);
+    indexesByKey.set(key, indexes);
+  }
+
+  for (let offset = 0; offset < requested.length; offset += MAX_TRANSLATION_BATCH_SIZE) {
+    if (deps.signal?.aborted || now() >= deadline) break;
+    const batch = requested.slice(offset, offset + MAX_TRANSLATION_BATCH_SIZE);
+    const batchKeys = new Set(batch.map(wordKey));
+
     try {
       const raw = await deps.infer({
-        prompt: buildTranslateBatchPrompt(requested, language),
+        prompt: buildTranslateBatchPrompt(batch, language),
         stop: [],
-        // JSON metadata makes a batch response materially larger than the old
-        // one-word answer. Keep a ceiling for pathological imports.
-        maxTokens: deps.maxTokens ?? Math.min(8192, Math.max(256, requested.length * 16 + 64)),
+        maxTokens: deps.maxTokens ?? TRANSLATION_BATCH_MAX_TOKENS,
         responseSchema: BATCH_TRANSLATION_SCHEMA,
         ...(deps.signal ? { signal: deps.signal } : {}),
       });
 
-      const parsed = parseTranslationBatch(raw, requested);
-      const meanings = new Map(parsed.map((entry) => [wordKey(entry.word), entry.meaning]));
-      for (const index of unresolved) {
-        const entry = results[index];
-        if (!entry) continue;
-        const meaning = meanings.get(wordKey(entry.word)) ?? '';
-        results[index] = meaning
-          ? { ...entry, meaning, source: 'model', needsReview: true, rejected: undefined }
-          : { ...entry, rejected: 'model-rejected' };
+      const parsed = new Map(
+        parseTranslationBatch(raw, batch).map((entry) => [wordKey(entry.word), entry]),
+      );
+      for (const key of batchKeys) {
+        const answer = parsed.get(key);
+        for (const index of indexesByKey.get(key) ?? []) {
+          const entry = results[index];
+          if (!entry) continue;
+          if (!answer) {
+            results[index] = { ...entry, rejected: 'model-failed' };
+          } else if (answer.meaning) {
+            results[index] = {
+              ...entry,
+              meaning: answer.meaning,
+              source: 'model',
+              needsReview: true,
+              ...(answer.correctedWord ? { correctedWord: answer.correctedWord } : {}),
+              rejected: undefined,
+            };
+          } else {
+            results[index] = { ...entry, rejected: 'model-rejected' };
+          }
+        }
       }
     } catch {
-      // Preserve the old safety rule: a failed model request never creates a
-      // guessed card, but it should not discard dictionary results either.
-      for (const index of unresolved) {
-        const entry = results[index];
-        if (entry) results[index] = { ...entry, rejected: 'model-rejected' };
+      // A failed request is retryable and affects only its bounded batch.
+      for (const key of batchKeys) {
+        for (const index of indexesByKey.get(key) ?? []) {
+          const entry = results[index];
+          if (entry) results[index] = { ...entry, rejected: 'model-failed' };
+        }
       }
     }
-  }
 
-  done += unresolved.length;
-  deps.onProgress?.(done, words.length);
+    modelDone += [...batchKeys]
+      .reduce((count, key) => count + (indexesByKey.get(key)?.length ?? 0), 0);
+    deps.onProgress?.(words.length - unresolved.length + modelDone, words.length);
+  }
 
   return results;
 }

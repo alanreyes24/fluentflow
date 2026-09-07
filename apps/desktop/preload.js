@@ -55,9 +55,9 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
      *
      * `options.useModel: false` answers from the dictionary alone, which costs
      * nothing and sends nothing. The import screen uses it for the first pass
-     * so that reaching the paid one is always a deliberate second press.
+     * so that reaching the paid one always requires one deliberate press.
      *
-     * @returns `{ ok: true, meanings }` or `{ ok: false, error }`
+     * @returns `{ ok: true, meanings, usage? }` or `{ ok: false, error }`
      */
     resolve: (words, language, options) =>
       ipcRenderer.invoke('ai:resolve', { words, language, useModel: options?.useModel }),

@@ -275,3 +275,36 @@ test('a meaning in the paste beats one supplied for the same word', () => {
 
   assert.equal(result.cards[0].back, 'nest');
 });
+
+test('model spelling corrections apply only to bare-word entries', () => {
+  const corrected = buildTextImport('almadura', {
+    userId: 'u1',
+    deckName: 'Spanish',
+    language: 'es',
+    meanings: { almadura: 'armor' },
+    correctedFronts: { almadura: 'armadura' },
+  });
+  const explicit = buildTextImport('mal escrito - supplied meaning', {
+    userId: 'u1',
+    deckName: 'Spanish',
+    language: 'es',
+    correctedFronts: { 'mal escrito': 'bien escrito' },
+  });
+
+  assert.equal(corrected.cards[0].front, 'armadura');
+  assert.equal(explicit.cards[0].front, 'mal escrito');
+});
+
+test('an unchanged spelling wins when a correction creates a duplicate', () => {
+  const result = buildTextImport('angila\nanguila', {
+    userId: 'u1',
+    deckName: 'Spanish',
+    language: 'es',
+    meanings: { angila: 'guessed eel', anguila: 'eel' },
+    correctedFronts: { angila: 'anguila' },
+  });
+
+  assert.deepEqual(result.cards.map((card) => `${card.front}=${card.back}`), ['anguila=eel']);
+  assert.equal(result.summary.duplicates, 1);
+  assert.equal(result.summary.cardsSkipped, 1);
+});

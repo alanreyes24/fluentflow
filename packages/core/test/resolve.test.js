@@ -127,7 +127,7 @@ test('with neither, every word says so', async () => {
   assert.equal(resolved[0].rejected, 'nothing-to-ask');
 });
 
-test('the model budget is checked before the single batch, and dictionary work is kept', async () => {
+test('the model budget is checked before each batch, and dictionary work is kept', async () => {
   let clock = 0;
   const resolved = await resolveMeanings(['nido', 'aaa', 'bbb', 'ccc'], 'es', {
     dictionary,
@@ -147,7 +147,7 @@ test('the model budget is checked before the single batch, and dictionary work i
   assert.deepEqual(resolved.map((r) => Boolean(r.meaning)), [true, true, true, true]);
 });
 
-test('a model that throws costs one word, not the run', async () => {
+test('a model request failure is retryable', async () => {
   const resolved = await resolveMeanings(['aaa', 'bbb'], 'es', {
     dictionary,
     infer: async () => {
@@ -155,8 +155,8 @@ test('a model that throws costs one word, not the run', async () => {
     },
   });
 
-  assert.equal(resolved[0].rejected, 'model-rejected');
-  assert.equal(resolved[1].rejected, 'model-rejected');
+  assert.equal(resolved[0].rejected, 'model-failed');
+  assert.equal(resolved[1].rejected, 'model-failed');
 });
 
 test('the model gets one deduplicated structured batch and results map back safely', async () => {
@@ -177,6 +177,132 @@ test('the model gets one deduplicated structured batch and results map back safe
   assert.match(requests[0].prompt, /exactly one object per input item/);
   assert.equal(requests[0].responseSchema.type, 'ARRAY');
   assert.deepEqual(resolved.map((r) => r.meaning), ['first answer', 'first answer', 'second answer']);
+});
+
+test('450 unresolved words are split into bounded structured batches', async () => {
+  const words = Array.from({ length: 450 }, (_, index) => `term-${index}`);
+  const requests = [];
+  const resolved = await resolveMeanings(words, 'es', {
+    dictionary,
+    infer: async (request) => {
+      const batch = JSON.parse(request.prompt.slice(request.prompt.lastIndexOf('\n') + 1));
+      requests.push({ batch, maxTokens: request.maxTokens });
+      return JSON.stringify(batch.map((word) => ({
+        word,
+        correctedWord: word,
+        meaning: 'translation',
+      })));
+    },
+  });
+
+  assert.deepEqual(requests.map(({ batch }) => batch.length), [100, 100, 100, 100, 50]);
+  assert.deepEqual(requests.map(({ maxTokens }) => maxTokens), [4096, 4096, 4096, 4096, 4096]);
+  assert.equal(resolved.filter((entry) => entry.source === 'model').length, 450);
+});
+
+test('one malformed batch does not discard successful neighboring batches', async () => {
+  const words = Array.from({ length: 250 }, (_, index) => `term-${index}`);
+  let request = 0;
+  const resolved = await resolveMeanings(words, 'es', {
+    dictionary,
+    infer: async ({ prompt }) => {
+      const batch = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1));
+      request++;
+      if (request === 2) return '[truncated';
+      return JSON.stringify(batch.map((word) => ({
+        word,
+        correctedWord: word,
+        meaning: 'translation',
+      })));
+    },
+  });
+
+  assert.equal(resolved.slice(0, 100).every((entry) => entry.source === 'model'), true);
+  assert.equal(resolved.slice(100, 200).every((entry) => entry.rejected === 'model-failed'), true);
+  assert.equal(resolved.slice(200).every((entry) => entry.source === 'model'), true);
+});
+
+test('a deadline stops before the next batch and keeps completed batches', async () => {
+  const words = Array.from({ length: 250 }, (_, index) => `term-${index}`);
+  let clock = 0;
+  let requests = 0;
+  const resolved = await resolveMeanings(words, 'es', {
+    dictionary,
+    budgetMs: 700,
+    now: () => clock,
+    infer: async ({ prompt }) => {
+      requests++;
+      clock += 400;
+      const batch = JSON.parse(prompt.slice(prompt.lastIndexOf('\n') + 1));
+      return JSON.stringify(batch.map((word) => ({
+        word,
+        correctedWord: word,
+        meaning: 'translation',
+      })));
+    },
+  });
+
+  assert.equal(requests, 2);
+  assert.equal(resolved.slice(0, 200).every((entry) => entry.source === 'model'), true);
+  assert.equal(resolved.slice(200).every((entry) => entry.rejected === 'not-found'), true);
+});
+
+test('an aborted lookup starts no model batches', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let requests = 0;
+  const resolved = await resolveMeanings(['one', 'two'], 'es', {
+    dictionary,
+    signal: controller.signal,
+    infer: async () => {
+      requests++;
+      return '[]';
+    },
+  });
+
+  assert.equal(requests, 0);
+  assert.equal(resolved.every((entry) => entry.rejected === 'not-found'), true);
+});
+
+test('an omitted row is retryable while an explicit empty answer is rejected', async () => {
+  const resolved = await resolveMeanings(['unknown', 'omitted'], 'es', {
+    dictionary,
+    infer: async () => JSON.stringify([
+      { word: 'unknown', correctedWord: 'unknown', meaning: '' },
+    ]),
+  });
+
+  assert.equal(resolved[0].rejected, 'model-rejected');
+  assert.equal(resolved[1].rejected, 'model-failed');
+});
+
+test('an input that sanitizes to nothing is rejected without a model request', async () => {
+  let requests = 0;
+  const [resolved] = await resolveMeanings(['“”'], 'es', {
+    dictionary,
+    infer: async () => {
+      requests++;
+      return '[]';
+    },
+  });
+
+  assert.equal(requests, 0);
+  assert.equal(resolved.word, '“”');
+  assert.equal(resolved.rejected, 'model-rejected');
+});
+
+test('results preserve the exact pasted identity and carry spelling corrections separately', async () => {
+  const original = '  “almadura”  ';
+  const [resolved] = await resolveMeanings([original], 'es', {
+    dictionary,
+    infer: async () => JSON.stringify([
+      { word: 'almadura', correctedWord: 'armadura', meaning: 'armor' },
+    ]),
+  });
+
+  assert.equal(resolved.word, original);
+  assert.equal(resolved.correctedWord, 'armadura');
+  assert.equal(resolved.meaning, 'armor');
 });
 
 test('progress counts every word, dictionary hits included', async () => {

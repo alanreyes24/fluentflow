@@ -35,6 +35,8 @@ test('each language gets its own few-shot examples', () => {
 test('batch prompts are explicit JSON and preserve the requested words', () => {
   const prompt = buildTranslateBatchPrompt(['nido', 'a lo lejos'], 'es');
   assert.match(prompt, /only a JSON array/);
+  assert.match(prompt, /"correctedWord"/);
+  assert.match(prompt, /aggressively infer clear misspellings/);
   assert.match(prompt, /"nido","a lo lejos"/);
 });
 
@@ -49,6 +51,18 @@ test('batch parsing accepts only requested words and validates meanings', () => 
   assert.deepEqual(result, [
     { word: 'nido', meaning: 'nest' },
     { word: 'a lo lejos', meaning: 'from a distance' },
+  ]);
+});
+
+test('batch parsing keeps valid spelling corrections and ignores invalid ones', () => {
+  const result = parseTranslationBatch(JSON.stringify([
+    { word: 'arandano', correctedWord: 'arándano', meaning: 'blueberry' },
+    { word: 'almadura', correctedWord: '---', meaning: 'armor' },
+  ]), ['arandano', 'almadura']);
+
+  assert.deepEqual(result, [
+    { word: 'arandano', correctedWord: 'arándano', meaning: 'blueberry' },
+    { word: 'almadura', meaning: 'armor' },
   ]);
 });
 

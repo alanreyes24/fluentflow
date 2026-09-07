@@ -1,5 +1,6 @@
 import type {
   GenerateExamplesResult,
+  ModelUsage,
   ResolvedMeaning,
   TargetLanguage,
 } from '@fluentflow/core';
@@ -86,6 +87,12 @@ export interface TranslationProgress {
   total: number;
 }
 
+export interface MeaningLookupResult {
+  meanings: ResolvedMeaning[];
+  /** Measured Gemini usage; absent for dictionary-only lookups. */
+  usage?: ModelUsage;
+}
+
 /** What a card reveal asks the shell for. */
 export interface ExampleRequest {
   word: string;
@@ -104,7 +111,7 @@ interface DesktopBridge {
       language: TargetLanguage,
       /** Optional: a shell built before the free pass existed ignores it. */
       options?: LookupOptions,
-    ): Promise<{ ok: true; meanings: ResolvedMeaning[] } | { ok: false; error: string }>;
+    ): Promise<({ ok: true } & MeaningLookupResult) | { ok: false; error: string }>;
     /** Optional: a shell built before example generation existed has no such key. */
     examples?(
       request: ExampleRequest,
@@ -207,7 +214,7 @@ export async function lookUpMeanings(
   language: TargetLanguage,
   onProgress?: (progress: TranslationProgress) => void,
   options?: LookupOptions,
-): Promise<ResolvedMeaning[]> {
+): Promise<MeaningLookupResult> {
   const ai = bridge();
   if (!ai) {
     if (webAiAvailable()) return resolveMeaningsOnWeb(words, language, options);
@@ -218,7 +225,7 @@ export async function lookUpMeanings(
   try {
     const result = await ai.resolve(words, language, options);
     if (!result.ok) throw new Error(result.error);
-    return result.meanings;
+    return { meanings: result.meanings, usage: result.usage };
   } finally {
     unsubscribe?.();
   }

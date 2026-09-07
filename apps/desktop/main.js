@@ -511,13 +511,13 @@ function registerAiHandlers() {
       // Opt out, not opt in: a renderer too old to send the flag gets the
       // behaviour it was written against.
       const askModel = useModel !== false;
-      const meanings = await ai.resolve(words, language, (done, total) => {
+      const result = await ai.resolve(words, language, (done, total) => {
         // The window can go away mid-run; a long list outlives a closed window.
         if (!event.sender.isDestroyed()) {
           event.sender.send('ai:progress', { done, total });
         }
       }, askModel);
-      return { ok: true, meanings };
+      return { ok: true, ...result };
     } catch (error) {
       return { ok: false, error: String(error?.message ?? error) };
     }

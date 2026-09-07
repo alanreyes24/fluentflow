@@ -9,6 +9,8 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 if (existsSync(new URL('../.env', import.meta.url))) {
   process.loadEnvFile(new URL('../.env', import.meta.url));
@@ -22,51 +24,116 @@ const API_URL = `http://localhost:${API_PORT}`;
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const children = new Set();
 let stopping = false;
-const webEnvironment = { ...process.env };
-// Expo does not need the credential, and keeping it out of the web process
-// makes it impossible for a future bundler change to ship it to Chrome.
-delete webEnvironment.GEMINI_API_KEY;
-delete webEnvironment.GOOGLE_API_KEY;
-
-const api = start('server', [
-  'run',
-  'server',
-], {
-  FLUENTFLOW_MODE: 'local',
-  NODE_ENV: 'development',
-  PORT: String(API_PORT),
-});
-
-const web = start('web', [
-  'run',
-  'web',
-  '-w',
-  '@fluentflow/mobile',
-  '--',
-  '--port',
-  String(WEB_PORT),
-], {}, webEnvironment);
-
-Promise.all([
-  waitFor(`${API_URL}/health`, 'local API'),
-  waitFor(WEB_URL, 'Expo web server'),
-])
-  .then(() => {
-    console.log(`[fluentflow] app: ${WEB_URL}`);
-    console.log(`[fluentflow] api: ${API_URL}`);
-    console.log('[fluentflow] edit files for Fast Refresh; press Ctrl-C to stop.');
-    openChrome(WEB_URL);
-  })
-  .catch((error) => {
-    console.error(`[fluentflow] ${error.message}`);
-    void stop(1);
-  });
-
-api.on('exit', (code) => childExited('local API', code));
-web.on('exit', (code) => childExited('Expo web server', code));
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => void stop(0));
+}
+
+void main().catch((error) => {
+  console.error(`[fluentflow] ${error instanceof Error ? error.message : String(error)}`);
+  void stop(1);
+});
+
+async function main() {
+  const apiEnvironment = { ...process.env };
+  if (!apiEnvironment.GEMINI_API_KEY && !apiEnvironment.GOOGLE_API_KEY) {
+    const desktopCloud = await readDesktopCloudSettings();
+    if (desktopCloud?.apiKey) {
+      apiEnvironment.GEMINI_API_KEY = desktopCloud.apiKey;
+      if (!apiEnvironment.GEMINI_MODEL && desktopCloud.model) {
+        apiEnvironment.GEMINI_MODEL = desktopCloud.model;
+      }
+      console.log('[fluentflow] Gemini: using the encrypted desktop setting for the local API.');
+    }
+  }
+
+  const webEnvironment = { ...apiEnvironment };
+  // Expo does not need the credential, and keeping it out of the web process
+  // makes it impossible for a future bundler change to ship it to the browser.
+  delete webEnvironment.GEMINI_API_KEY;
+  delete webEnvironment.GOOGLE_API_KEY;
+
+  const api = start('server', [
+    'run',
+    'server',
+  ], {
+    FLUENTFLOW_MODE: 'local',
+    NODE_ENV: 'development',
+    PORT: String(API_PORT),
+  }, apiEnvironment);
+
+  const web = start('web', [
+    'run',
+    'web',
+    '-w',
+    '@fluentflow/mobile',
+    '--',
+    '--port',
+    String(WEB_PORT),
+  ], {}, webEnvironment);
+
+  api.on('exit', (code) => childExited('local API', code));
+  web.on('exit', (code) => childExited('Expo web server', code));
+
+  await Promise.all([
+    waitFor(`${API_URL}/health`, 'local API'),
+    waitFor(WEB_URL, 'Expo web server'),
+  ]);
+
+  console.log(`[fluentflow] app: ${WEB_URL}`);
+  console.log(`[fluentflow] api: ${API_URL}`);
+  console.log('[fluentflow] edit files for Fast Refresh; press Ctrl-C to stop.');
+  openChrome(WEB_URL);
+}
+
+/**
+ * Ask a short-lived Electron main process to decrypt the desktop credential.
+ * The key travels only over Node's private IPC fd and is passed only to the
+ * local API child; stdout and the Expo child never receive it.
+ */
+async function readDesktopCloudSettings() {
+  let electronPath;
+  try {
+    const desktopRequire = createRequire(new URL('../apps/desktop/package.json', import.meta.url));
+    electronPath = desktopRequire('electron');
+  } catch {
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    const helper = spawn(
+      electronPath,
+      [fileURLToPath(new URL('./read-desktop-cloud.cjs', import.meta.url))],
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+      },
+    );
+
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      helper.kill();
+      finish(null);
+    }, 10_000);
+
+    helper.on('message', (message) => {
+      if (message?.type === 'fluentflow-cloud-settings') {
+        finish({ apiKey: message.apiKey, model: message.model });
+      } else if (message?.type === 'fluentflow-cloud-settings-error') {
+        console.warn(`[fluentflow] desktop Gemini setting unavailable: ${message.message}`);
+        finish(null);
+      }
+    });
+    helper.once('error', () => finish(null));
+    helper.once('exit', () => finish(null));
+  });
 }
 
 function start(name, args, extraEnv = {}, environment = process.env) {

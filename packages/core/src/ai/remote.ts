@@ -64,6 +64,20 @@ export interface RemoteInferenceOptions {
   temperature?: number;
   /** Injectable for tests; defaults to the global. */
   fetchImpl?: typeof fetch;
+  /** Receives the service-reported token usage after each successful request. */
+  onUsage?: (usage: ModelUsage) => void;
+}
+
+/** Measured usage for one or more successful hosted-model requests. */
+export interface ModelUsage {
+  model: string;
+  requests: number;
+  inputTokens: number;
+  /** Candidate and thinking tokens, both billed at the output rate. */
+  outputTokens: number;
+  totalTokens: number;
+  /** Cost calculated from measured tokens at the model's published list price. */
+  listPriceUsd?: number;
 }
 
 /** A hosted call that failed. `retryable` separates "try again" from "fix this". */
@@ -167,6 +181,8 @@ export function createRemoteInference(options: RemoteInferenceOptions): Inferenc
     if (!response.ok) throw await httpError(response, model);
 
     const body = (await response.json()) as GeminiResponse;
+    const usage = usageFrom(body, model);
+    if (usage) options.onUsage?.(usage);
     const text = textFrom(body);
     if (!text) {
       const blocked = body.promptFeedback?.blockReason ?? body.candidates?.[0]?.finishReason;
@@ -181,7 +197,71 @@ export function createRemoteInference(options: RemoteInferenceOptions): Inferenc
 interface GeminiResponse {
   candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
   promptFeedback?: { blockReason?: string };
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    thoughtsTokenCount?: number;
+    totalTokenCount?: number;
+  };
   error?: { message?: string; status?: string };
+}
+
+/** Combine per-request measurements into the amount shown for one import. */
+export function combineModelUsage(usages: ModelUsage[]): ModelUsage | undefined {
+  if (usages.length === 0) return undefined;
+  const model = usages[0]?.model ?? '';
+  const sameModel = usages.every((usage) => usage.model === model);
+  const allPriced = sameModel && usages.every((usage) => usage.listPriceUsd !== undefined);
+
+  return {
+    model,
+    requests: usages.reduce((sum, usage) => sum + usage.requests, 0),
+    inputTokens: usages.reduce((sum, usage) => sum + usage.inputTokens, 0),
+    outputTokens: usages.reduce((sum, usage) => sum + usage.outputTokens, 0),
+    totalTokens: usages.reduce((sum, usage) => sum + usage.totalTokens, 0),
+    ...(allPriced
+      ? {
+          listPriceUsd: roundUsd(
+            usages.reduce((sum, usage) => sum + (usage.listPriceUsd ?? 0), 0),
+          ),
+        }
+      : {}),
+  };
+}
+
+function usageFrom(body: GeminiResponse, model: string): ModelUsage | undefined {
+  const metadata = body.usageMetadata;
+  if (!metadata) return undefined;
+  const inputTokens = tokenCount(metadata.promptTokenCount);
+  const outputTokens =
+    tokenCount(metadata.candidatesTokenCount) + tokenCount(metadata.thoughtsTokenCount);
+  const totalTokens = tokenCount(metadata.totalTokenCount) || inputTokens + outputTokens;
+  const listPriceUsd = listPrice(model, inputTokens, outputTokens);
+
+  return {
+    model,
+    requests: 1,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    ...(listPriceUsd === undefined ? {} : { listPriceUsd }),
+  };
+}
+
+function tokenCount(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
+}
+
+/** Paid standard-tier text rates per million tokens, September 2026. */
+function listPrice(model: string, inputTokens: number, outputTokens: number): number | undefined {
+  if (model !== 'gemini-3.1-flash-lite') return undefined;
+  return (inputTokens * 0.25 + outputTokens * 1.5) / 1_000_000;
+}
+
+function roundUsd(value: number): number {
+  return Math.round(value * 1_000_000_000_000) / 1_000_000_000_000;
 }
 
 function textFrom(body: GeminiResponse): string {
