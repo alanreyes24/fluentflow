@@ -134,43 +134,60 @@ async function run(browser, crashes, app) {
   await waitForText(page, 'No decks yet');
   check('an account-less session reaches the deck list', true);
 
-  // --- the window buttons are not sitting on top of the app ----------------
+  // --- the window chrome ---------------------------------------------------
   //
-  // The shell hides the native title bar, so macOS paints close, minimise and
-  // zoom over the top-left of the page — at coordinates the page cannot query.
-  // A screenshot cannot catch this (the buttons are not part of the page) and
-  // neither can any assertion about text, so it is checked as geometry: is
-  // anything the app draws inside the rectangle those buttons occupy?
+  // Everything here follows from one line in main.js:
   //
-  // The numbers come from `trafficLightPosition` in main.js and have to stay
-  // in step with TITLE_BAR_HEIGHT and WINDOW_BUTTONS_WIDTH in ui/shell.ts.
-  const collisions = await underWindowButtons(page);
-  check('nothing is drawn under the window buttons', collisions.length === 0, collisions[0]);
+  //   titleBarStyle: isMac ? 'hidden' : 'default'
+  //
+  // Only macOS hides the native title bar, and only there does the page have to
+  // make up the difference — reserving the strip the traffic lights are painted
+  // over, and giving the window a handle to drag. On Windows the native title
+  // bar is left in place, so the OS draws the buttons and the OS moves the
+  // window, and `TitleBar` correctly renders nothing at all.
+  //
+  // Asking the macOS questions on Windows gets three misleading answers: both
+  // geometry checks pass vacuously, because a strip the app never draws cannot
+  // overlap anything, and the drag check fails for a region the app is right
+  // not to draw. So each platform is asked what is actually true of it.
+  const drawsOwnTitleBar = process.platform === 'darwin';
 
-  // Again with the window dragged narrow. The navigation stack's back arrow
-  // sits exactly where the window buttons are, and a narrow window packs the
-  // header and the bottom bar differently — so the wide window being clear
-  // says nothing about this one.
-  await page.setViewport({ width: 700, height: 800 });
-  await delay(300);
-  const narrowCollisions = await underWindowButtons(page);
-  check(
-    'nothing is drawn under them once the window is dragged narrow',
-    narrowCollisions.length === 0,
-    narrowCollisions[0],
-  );
-  await page.setViewport({ width: 1100, height: 800 });
-  await delay(300);
+  if (drawsOwnTitleBar) {
+    // macOS paints close, minimise and zoom over the top-left of the page — at
+    // coordinates the page cannot query. A screenshot cannot catch this (the
+    // buttons are not part of the page) and neither can any assertion about
+    // text, so it is checked as geometry: is anything the app draws inside the
+    // rectangle those buttons occupy?
+    //
+    // The numbers come from `trafficLightPosition` in main.js and have to stay
+    // in step with TITLE_BAR_HEIGHT and WINDOW_BUTTONS_WIDTH in ui/shell.ts.
+    const collisions = await underWindowButtons(page);
+    check('nothing is drawn under the window buttons', collisions.length === 0, collisions[0]);
 
-  // With the title bar hidden the window has no handle until the page gives it
-  // one, and a window that cannot be moved is a worse bug than an overlap.
-  const draggable = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-drag-region]')].some((node) => {
-      const box = node.getBoundingClientRect();
-      return box.width > 100 && box.height >= 20;
-    }),
-  );
-  check('the window has a region to drag it by', draggable);
+    // Again with the window dragged narrow. The navigation stack's back arrow
+    // sits exactly where the window buttons are, and a narrow window packs the
+    // header and the bottom bar differently — so the wide window being clear
+    // says nothing about this one.
+    await page.setViewport({ width: 700, height: 800 });
+    await delay(300);
+    const narrowCollisions = await underWindowButtons(page);
+    check(
+      'nothing is drawn under them once the window is dragged narrow',
+      narrowCollisions.length === 0,
+      narrowCollisions[0],
+    );
+    await page.setViewport({ width: 1100, height: 800 });
+    await delay(300);
+
+    // With the title bar hidden the window has no handle until the page gives
+    // it one, and a window that cannot be moved is a worse bug than an overlap.
+    check('the window has a region to drag it by', await hasDragRegion(page));
+  } else {
+    // The mirror image: drawing a drag strip here would be the bug. It would
+    // sit under a title bar the OS is already drawing, take a bite out of every
+    // screen, and swallow the clicks of anything placed inside it.
+    check('the native title bar is left to drag the window by', !(await hasDragRegion(page)));
+  }
 
   await clickLabel(page, 'New deck');
   await typeInto(page, 'Deck name', 'Bosnian Basics');
@@ -279,12 +296,20 @@ async function run(browser, crashes, app) {
   await shoot(page, '05-paste');
 
   await clickLabel(page, 'Add to this deck');
-  const added = await hasText(page, 'Import complete', 10000);
+  // Adding to a deck that already exists ends on that deck's screen, not on an
+  // "import complete" panel: text-import.tsx replaces the route the moment the
+  // write succeeds, and only a paste that *created* a deck stops to report.
+  // Waiting for that panel here waits for something this path is designed
+  // never to show — so the evidence that the cards were written is the deck
+  // itself, which is the stronger claim anyway.
+  const added = await hasText(page, 'hvala', 10000);
   check('the pasted cards are written to the deck', added);
 
   if (added) {
-    await clickLabel(page, 'Decks');
-    check('the deck lists what was pasted into it', await hasText(page, 'hvala', 10000));
+    check(
+      'the deck lists what was pasted into it, meanings and all',
+      (await hasText(page, 'thank you', 5000)) && (await hasText(page, 'molim', 5000)),
+    );
     await shoot(page, '06-pasted-cards');
   }
 
@@ -419,9 +444,14 @@ async function run(browser, crashes, app) {
       }
     }
   } else {
+    // The wording is the app's, from `aiUnavailable`: it names both missing
+    // sources and then says the meanings can still be typed in by hand, which
+    // is the part that keeps this a dead end rather than a dead stop. Matching
+    // the sentence the app actually renders, rather than a paraphrase of it,
+    // is what makes this check fail when the message stops being true.
     check(
       'with nothing installed the app says so rather than offering to look up',
-      await hasText(page, 'No dictionary installed and no API key', 8000),
+      await hasText(page, 'no dictionary for this language and no API key', 8000),
     );
   }
 
@@ -753,6 +783,23 @@ async function fieldValue(page, label) {
     );
     return node ? node.value : null;
   }, label);
+}
+
+/**
+ * Whether the page draws a strip big enough to move the window by.
+ *
+ * A region narrower than a title bar or only a few pixels tall would satisfy
+ * the selector while being useless to grab, so the size is part of the
+ * question. `TitleBar` marks the strip with `dragRegionProps`, which React
+ * Native Web renders as `data-drag-region`.
+ */
+function hasDragRegion(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('[data-drag-region]')].some((node) => {
+      const box = node.getBoundingClientRect();
+      return box.width > 100 && box.height >= 20;
+    }),
+  );
 }
 
 /**
