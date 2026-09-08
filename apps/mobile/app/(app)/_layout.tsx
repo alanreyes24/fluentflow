@@ -3,10 +3,8 @@ import { Platform, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import { useApp } from '../../src/state/app';
 import { subscribeToShellImports } from '../../src/desktop-import';
-import { useI18n } from '../../src/i18n';
 import { BottomBar } from '../../src/ui/BottomBar';
 import { TitleBar } from '../../src/ui/TitleBar';
-import { Label } from '../../src/ui/components';
 import { onMacDesktop } from '../../src/ui/shell';
 import { useTheme } from '../../src/ui/theme';
 
@@ -24,7 +22,6 @@ import { useTheme } from '../../src/ui/theme';
  */
 export default function AppLayout() {
   const { user } = useApp();
-  const { t } = useI18n();
   const theme = useTheme();
 
   // The desktop shell can ask for an import from the File menu, a dropped file
@@ -61,27 +58,20 @@ export default function AppLayout() {
       <View style={{ flex: 1, minWidth: 0 }}>
         <Stack
           screenOptions={{
-            headerStyle: { backgroundColor: theme.colors.background },
-            headerTintColor: theme.colors.text,
-            headerShadowVisible: false,
+            headerShown: false,
             contentStyle: { backgroundColor: theme.colors.background },
-            headerTitle: ({ children }) => <Label variant="heading">{children}</Label>,
-            // The content column is centred in the window, so the title over it
-            // is too — a leading-edge title above a centred column lands far
-            // enough left to read as a mistake rather than as a choice.
-            headerTitleAlign: 'center',
             // Sync status lives in the bottom bar, where a Mac app puts status.
             // Two of them on one screen would be one too many.
           }}
         >
-          <Stack.Screen name="decks" options={{ title: t('decks') }} />
-          <Stack.Screen name="new-deck" options={{ title: t('newDeck') }} />
-          <Stack.Screen name="deck/[id]" options={{ title: t('cards') }} />
-          <Stack.Screen name="study/[deckId]" options={{ title: t('study') }} />
-          <Stack.Screen name="import" options={{ title: t('importDeck') }} />
-          <Stack.Screen name="text-import" options={{ title: t('pasteText') }} />
-          <Stack.Screen name="stats" options={{ title: t('statistics') }} />
-          <Stack.Screen name="settings" options={{ title: t('settings') }} />
+          <Stack.Screen name="decks" />
+          <Stack.Screen name="new-deck" />
+          <Stack.Screen name="deck/[id]" />
+          <Stack.Screen name="study/[deckId]" />
+          <Stack.Screen name="import" />
+          <Stack.Screen name="text-import" />
+          <Stack.Screen name="stats" />
+          <Stack.Screen name="settings" />
         </Stack>
       </View>
       <BottomBar />

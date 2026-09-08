@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
-import { router, useLocalSearchParams, useNavigation } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import {
   RATING_NAMES,
   RATINGS,
@@ -63,7 +63,6 @@ export default function StudyScreen() {
   const { deckId, ahead } = useLocalSearchParams<{ deckId: string; ahead?: string }>();
   const { t } = useI18n();
   const theme = useTheme();
-  const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const { wide } = useLayout();
   const { repository, examples: exampleService, refreshDecks, user } = useApp();
@@ -106,13 +105,12 @@ export default function StudyScreen() {
       setDeck(loadedDeck);
       setQueue(due);
       setLoading(false);
-      if (loadedDeck) navigation.setOptions({ title: loadedDeck.name });
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [repository, deckId, studyAhead, navigation]);
+  }, [repository, deckId, studyAhead]);
 
   // Keep the model working a few cards ahead of the user. The window is
   // re-primed on every advance rather than set up once, so it follows a queue

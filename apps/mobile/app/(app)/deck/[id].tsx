@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
-import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   LANGUAGE_NAMES,
   type Card,
@@ -40,7 +40,6 @@ export default function DeckScreen() {
   const { t } = useI18n();
   const theme = useTheme();
   const content = useContentStyle();
-  const navigation = useNavigation();
   const { repository, user, refreshDecks } = useApp();
 
   const [deck, setDeck] = useState<Deck | null>(null);
@@ -87,8 +86,7 @@ export default function DeckScreen() {
     setProgress({ ...loadedProgress, due: queue.cards.length });
     setToday(queue);
     setLoading(false);
-    if (loadedDeck) navigation.setOptions({ title: loadedDeck.name });
-  }, [repository, id, navigation]);
+  }, [repository, id]);
 
   useFocusEffect(
     useCallback(() => {
