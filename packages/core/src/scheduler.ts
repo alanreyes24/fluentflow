@@ -613,7 +613,10 @@ export interface StudyQueue {
 /**
  * Gather a normal Anki-style queue: learning first, then reviews, then new
  * cards. Daily limits are applied after the cards are classified, so a large
- * backlog cannot hide learning cards behind a new-card query.
+ * backlog cannot hide learning cards behind a new-card query. Learning and
+ * relearning steps do not spend the review-card allowance: once Anki has
+ * introduced a card, its steps stay available even when today's review limit
+ * has been reached.
  */
 export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptions = {}): StudyQueue {
   const now = options.now ?? new Date();
@@ -632,11 +635,11 @@ export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptio
   const reviewAllowance = options.maxReviewsPerDay === null
     ? Number.MAX_SAFE_INTEGER
     : Math.max(0, (options.maxReviewsPerDay ?? 50) - (options.reviewsAnsweredToday ?? 0));
-  const reviewCards = [...learning, ...reviews].slice(0, reviewAllowance);
+  const reviewCards = reviews.slice(0, reviewAllowance);
   const newAllowance = options.newCardsPerDay === null
     ? Number.MAX_SAFE_INTEGER
     : Math.max(0, (options.newCardsPerDay ?? 20) - (options.newCardsIntroducedToday ?? 0));
-  const result = [...reviewCards, ...newCards.slice(0, newAllowance)].slice(0, options.limit ?? 200);
+  const result = [...learning, ...reviewCards, ...newCards.slice(0, newAllowance)].slice(0, options.limit ?? 200);
 
   return {
     cards: result,

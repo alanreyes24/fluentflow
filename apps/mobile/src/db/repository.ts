@@ -323,13 +323,14 @@ export class Repository {
       start.toISOString(),
       now.toISOString(),
     );
-    // A new-card answer introduces a card but does not consume Anki's review
-    // allowance. Older synced events have no snapshot, so count those
-    // conservatively as reviews.
+    // Only an answer given while the card is in review consumes Anki's daily
+    // review-card allowance. New introductions and their subsequent learning
+    // or relearning steps have their own queues. Older synced events have no
+    // snapshot, so count those conservatively as reviews.
     return rows.filter((row) => {
       if (!row.previousState) return true;
       const previous = parseCardSnapshot(row.previousState);
-      return previous ? schedulingStateFor(previous).phase !== 'new' : true;
+      return previous ? schedulingStateFor(previous).phase === 'review' : true;
     }).length;
   }
 

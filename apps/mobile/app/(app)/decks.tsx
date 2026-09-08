@@ -53,7 +53,19 @@ export default function DecksScreen() {
   const loadProgress = useCallback(async () => {
     if (!repository) return;
     const entries = await Promise.all(
-      decks.map(async (deck) => [deck.id, await repository.deckProgress(deck.id)] as const),
+      decks.map(async (deck) => {
+        const [deckProgress, queue] = await Promise.all([
+          repository.deckProgress(deck.id),
+          repository.studyQueue(
+            deck.id,
+            new Date(),
+            200,
+            deck.newCardsPerDay,
+            deck.maxReviewsPerDay,
+          ),
+        ]);
+        return [deck.id, { ...deckProgress, due: queue.cards.length }] as const;
+      }),
     );
     setProgress(Object.fromEntries(entries));
 
@@ -89,6 +101,7 @@ export default function DecksScreen() {
     },
     { due: 0, cards: 0 },
   );
+  const progressReady = decks.length > 0 && decks.every((deck) => progress[deck.id] !== undefined);
 
   return (
     <Screen>
@@ -111,7 +124,7 @@ export default function DecksScreen() {
             keyExtractor={(deck) => deck.id}
             contentContainerStyle={content}
             ListHeaderComponent={
-              decks.length > 0 ? (
+              progressReady ? (
                 <View style={styles.summaryWrap}>
                   <Summary due={totals.due} cards={totals.cards} />
                   <Spacer size={theme.spacing.lg} />
@@ -195,7 +208,9 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
                 {LANGUAGE_NAMES[deck.language]} · {t('cardCount', { count: deck.cardCount })}
               </Label>
             </View>
-            {due > 0 ? <Badge>{due}</Badge> : <Badge tone="plain">✓</Badge>}
+            {progress ? (
+              progress.due > 0 ? <Badge>{progress.due}</Badge> : <Badge tone="plain">✓</Badge>
+            ) : null}
           </View>
 
           {progress && progress.total > 0 ? (

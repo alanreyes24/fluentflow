@@ -391,7 +391,8 @@ test('study queue applies review limits, new limits, and manual hiding', () => {
     newCardsPerDay: 1,
     maxReviewsPerDay: 1,
   });
-  assert.deepEqual(queue.cards.map((card) => card.id), ['learning', 'new-1']);
+  assert.deepEqual(queue.cards.map((card) => card.id), ['learning', 'review', 'new-1']);
   assert.equal(queue.learning, 1);
+  assert.equal(queue.review, 1);
   assert.equal(queue.new, 1);
 });

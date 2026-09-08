@@ -194,6 +194,24 @@ describe('Repository', () => {
     expect(queue.cards.map((card) => card.id)).toContain(reviewCard.id);
   });
 
+  it('does not spend the review allowance on learning-step answers', async () => {
+    const { repository } = context;
+    let deck = await repository.createDeck('u1', 'Spanish', 'es');
+    deck = await repository.setMaxReviewsPerDay(deck, 1);
+    const learningCard = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    const dueReview = await repository.addCard('u1', deck, 'comer', 'to eat');
+    const now = new Date();
+
+    const learning = await repository.rateCard(learningCard, 'good', now);
+    await repository.rateCard(learning, 'again', new Date(now.getTime() + 1_000));
+    await repository.updateCard(dueReview, {
+      phase: 'review', interval: 2, dueDay: collectionDayKey(now), nextReview: now.toISOString(), status: 'learning',
+    });
+
+    const queue = await repository.studyQueue(deck.id, now, 20, 20, deck.maxReviewsPerDay);
+    expect(queue.cards.map((card) => card.id)).toContain(dueReview.id);
+  });
+
   it('buries and suspends cards out of the due queue', async () => {
     const { repository } = context;
     const deck = await repository.createDeck('u1', 'Spanish', 'es');

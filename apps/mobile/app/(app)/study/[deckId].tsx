@@ -32,6 +32,7 @@ import {
 import { formatInterval } from '../../../src/ui/format';
 
 import { useCardGestures } from '../../../src/ui/useCardGestures';
+import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 import { useLayout, useTheme } from '../../../src/ui/theme';
 
 /**
@@ -83,6 +84,7 @@ export default function StudyScreen() {
 
   const card = queue[index] ?? null;
   const studyAhead = ahead === '1';
+  const remainingCounts = useMemo(() => countQueue(queue.slice(index)), [queue, index]);
 
   useEffect(() => {
     if (!repository || !deckId) return;
@@ -369,17 +371,28 @@ export default function StudyScreen() {
   return (
     <Screen>
       <View style={[styles.stage, wide ? styles.stageWide : null]}>
-        <View style={styles.progressRow}>
-          <Label variant="caption" tone="faint">
-            {index + 1} / {queue.length}
-          </Label>
-          <Row gap={6}>
-            <StatusDot status={card.status} />
+        <View style={styles.studyHeader}>
+          <StudyQueueCounts
+            compact
+            counts={remainingCounts}
+            labels={{
+              new: t('queueNew'),
+              learning: t('queueLearn'),
+              review: t('queueReview'),
+            }}
+          />
+          <View style={styles.progressRow}>
             <Label variant="caption" tone="faint">
-              {t(statusKey(card.status))}
+              {index + 1} / {queue.length}
             </Label>
-            {card.leech ? <Badge tone="plain">{t('leech')}</Badge> : null}
-          </Row>
+            <Row gap={6}>
+              <StatusDot status={card.status} />
+              <Label variant="caption" tone="faint">
+                {t(statusKey(card.status))}
+              </Label>
+              {card.leech ? <Badge tone="plain">{t('leech')}</Badge> : null}
+            </Row>
+          </View>
         </View>
 
         <Animated.View
@@ -738,6 +751,14 @@ function dueWithinSession(card: Card): boolean {
   return Date.parse(card.nextReview) - Date.now() <= LEARN_AHEAD_MS;
 }
 
+function countQueue(cards: readonly Card[]) {
+  return {
+    new: cards.filter((item) => (item.phase ?? 'new') === 'new').length,
+    learning: cards.filter((item) => item.phase === 'learning' || item.phase === 'relearning').length,
+    review: cards.filter((item) => item.phase === 'review').length,
+  };
+}
+
 function statusKey(status: Card['status']): 'statusNew' | 'statusLearning' | 'statusMastered' {
   return status === 'new' ? 'statusNew' : status === 'mastered' ? 'statusMastered' : 'statusLearning';
 }
@@ -771,11 +792,11 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingVertical: 8,
   },
+  studyHeader: { paddingHorizontal: 16, paddingTop: 8 },
   progressRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
     paddingVertical: 8,
   },
   cardWrap: { flex: 1, paddingHorizontal: 16 },

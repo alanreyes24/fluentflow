@@ -58,6 +58,7 @@ export class SyncEngine {
   private rerunRequested = false;
   private online = true;
   private unsubscribe: (() => void) | null = null;
+  private remoteSubscriptionReady = false;
   private disposed = false;
 
   constructor(options: SyncEngineOptions) {
@@ -77,15 +78,16 @@ export class SyncEngine {
     const meta = await this.repository.getSyncMeta(this.userId);
     this.status.lastSyncedAt = meta.lastPulledAt ?? null;
 
-    this.unsubscribe = subscribeRemote(
+    const subscription = subscribeRemote(
       this.userId,
-      (snapshot) => {
-        void this.applyRemoteSnapshot(snapshot);
-      },
+      (snapshot) => this.applyRemoteSnapshot(snapshot),
       (error) => {
+        this.remoteSubscriptionReady = false;
         this.emit({ state: 'error', error: error.message });
       },
     );
+    this.unsubscribe = subscription.unsubscribe;
+    this.remoteSubscriptionReady = await subscription.ready;
 
     await this.sync();
   }
@@ -94,6 +96,7 @@ export class SyncEngine {
     this.disposed = true;
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.remoteSubscriptionReady = false;
   }
 
   setOnline(online: boolean): void {
@@ -129,7 +132,10 @@ export class SyncEngine {
       do {
         this.rerunRequested = false;
         await this.push();
-        await this.pull();
+        // The live listeners deliver both remote changes and our own writes.
+        // A pull is only needed when listeners are unavailable; otherwise an
+        // idle/manual sync would re-read the same collections unnecessarily.
+        if (!this.remoteSubscriptionReady) await this.pull();
       } while (this.rerunRequested && !this.disposed);
 
       const now = new Date().toISOString();

@@ -50,6 +50,21 @@ describe('DecksScreen', () => {
     expect(screen.getByText('Español · 1 cards')).toBeTruthy();
   });
 
+  it('shows the number of cards available in today\'s study queue', async () => {
+    const deck = await repository.createDeck(TEST_USER.id, 'Spanish', 'es');
+    for (let index = 0; index < 25; index += 1) {
+      await repository.addCard(TEST_USER.id, deck, `palabra-${index}`, `word-${index}`);
+    }
+    const [stored] = await repository.listDecks(TEST_USER.id);
+
+    await renderScreen(<DecksScreen />, { repository, decks: [stored!] });
+
+    await waitFor(() => {
+      expect(screen.getByText('20 due')).toBeTruthy();
+    });
+    expect(screen.queryByText('25 due')).toBeNull();
+  });
+
   it('breaks a deck down into new, learning and mastered', async () => {
     const deck = await repository.createDeck(TEST_USER.id, 'Spanish', 'es');
     const learning = await repository.addCard(TEST_USER.id, deck, 'hablar', 'to speak');
@@ -120,11 +135,41 @@ describe('DeckScreen', () => {
 
     await renderScreen(<DeckScreen />, { repository: context.repository });
     await screen.findByText('New cards per day');
+    await fireEvent.press(screen.getByRole('button', { name: 'New cards per day' }));
     await fireEvent.press(screen.getByRole('button', { name: '40' }));
 
     await waitFor(async () => {
       expect((await context.repository.getDeck(deck.id))?.newCardsPerDay).toBe(40);
     });
+  });
+
+  it('minimizes the card list until it is opened', async () => {
+    const deck = await context.repository.createDeck(TEST_USER.id, 'Spanish', 'es');
+    await context.repository.addCard(TEST_USER.id, deck, 'hablar', 'to speak');
+    mockSearchParams.current = { id: deck.id };
+
+    await renderScreen(<DeckScreen />, { repository: context.repository });
+    await screen.findByText('Español');
+
+    expect(screen.queryByText('hablar')).toBeNull();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Cards' }));
+    expect(await screen.findByText('hablar')).toBeTruthy();
+  });
+
+  it('shows Anki-style counts for today before study starts', async () => {
+    const deck = await context.repository.createDeck(TEST_USER.id, 'Spanish', 'es');
+    for (let index = 0; index < 25; index += 1) {
+      await context.repository.addCard(TEST_USER.id, deck, `palabra-${index}`, `word-${index}`);
+    }
+    mockSearchParams.current = { id: deck.id };
+
+    await renderScreen(<DeckScreen />, { repository: context.repository });
+
+    await screen.findByText('Today');
+    expect(screen.getByLabelText('New: 20')).toBeTruthy();
+    expect(screen.getByLabelText('Learn: 0')).toBeTruthy();
+    expect(screen.getByLabelText('Review: 0')).toBeTruthy();
   });
 });
 

@@ -15,7 +15,7 @@
  *   FLUENTFLOW_DICTIONARY_DIR=<dir> node scripts/verify-desktop.mjs   # + lookup
  */
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -197,7 +197,10 @@ async function run(browser, crashes, app, session) {
     check('the native title bar is left to drag the window by', !(await hasDragRegion(page)));
   }
 
-  await clickLabel(page, 'New deck');
+  // The empty deck list also renders a primary New deck button and the
+  // persistent bottom-bar action with the same label. Prefer the primary one
+  // here, whose destination is unambiguous.
+  await clickFirstVisibleLabel(page, 'New deck');
   await typeInto(page, 'Deck name', 'Bosnian Basics');
   // Pick the target language explicitly. The form defaults to Spanish, and a
   // Bosnian deck left on that default produces Spanish example sentences for
@@ -212,12 +215,20 @@ async function run(browser, crashes, app, session) {
   await typeInto(page, 'Word or phrase', 'zdravo');
   await typeInto(page, 'Meaning or translation', 'hello');
   await clickLabel(page, 'Save');
-  await waitForText(page, 'zdravo');
+  // The card form deliberately stays open and clears after a successful save
+  // so a user can add several cards in one pass. Close it explicitly before
+  // checking the collapsed card list; the input value is not part of
+  // document.body.innerText and cannot prove persistence.
   await clickLabel(page, 'Cancel');
+  await clickLabel(page, 'Cards');
+  await waitForText(page, 'zdravo');
   check('a card is added and listed', true);
   await shoot(page, '02-deck');
 
-  await clickText(page, /^Study/);
+  // Match the study action itself. A deck screen also contains the separate
+  // “Study presentation” settings card, so a broad /^Study/ match can click
+  // that container instead of navigating to the review screen.
+  await clickText(page, /^Study(?:\s·|\s*$)/);
   await waitForText(page, 'Show answer');
   await clickLabel(page, 'Show answer');
   await waitForText(page, 'Again');
@@ -288,7 +299,10 @@ async function run(browser, crashes, app, session) {
   // --- a pasted word list becomes cards ------------------------------------
   // The second way cards get made, exercised in the packaged shell because it
   // writes to the same SQLite database the study flow just read from.
-  await clickLabel(page, 'Decks');
+  // The completion screen has a primary “Decks” button as well as the
+  // persistent bottom-bar “Decks” tab. Choose the primary action so we return
+  // to the deck detail screen that owns the paste flow.
+  await clickFirstVisibleLabel(page, 'Decks');
   await waitForText(page, 'zdravo');
 
   await clickLabel(page, 'Paste a word list');
@@ -310,7 +324,12 @@ async function run(browser, crashes, app, session) {
   // Waiting for that panel here waits for something this path is designed
   // never to show — so the evidence that the cards were written is the deck
   // itself, which is the stronger claim anyway.
-  const added = await hasText(page, 'hvala', 10000);
+  // A successful import returns to the deck detail screen with its card list
+  // collapsed, so wait for a detail-only action and expand Cards before
+  // looking for the newly persisted rows.
+  const returnedToDeck = await hasText(page, 'Add card', 10000);
+  if (returnedToDeck) await clickLabel(page, 'Cards');
+  const added = returnedToDeck && (await hasText(page, 'hvala', 10000));
   check('the pasted cards are written to the deck', added);
 
   if (added) {
@@ -459,7 +478,7 @@ async function run(browser, crashes, app, session) {
     // is what makes this check fail when the message stops being true.
     check(
       'with nothing installed the app says so rather than offering to look up',
-      await hasText(page, 'no dictionary for this language and no API key', 8000),
+      await hasText(page, 'Gemini is not connected', 8000),
     );
   }
 
@@ -471,16 +490,18 @@ async function run(browser, crashes, app, session) {
   // it is computed from local calendar days, so it depends on the machine's
   // clock and timezone rather than a test's, and a review rated a moment ago
   // has to land on today for the count to be right.
+  // The deck list owns the compact day-streak card; Statistics owns the long
+  // view with retention, rating history, and the study calendar.
   await clickLabel(page, 'Statistics');
-  const statsReady = await hasText(page, 'Day streak', 15000);
+  const statsReady = await hasText(page, 'Reviews per day', 15000);
   check('the statistics screen opens from the toolbar', statsReady);
 
   if (statsReady) {
     const stats = await bodyText(page);
     check(
-      'the streak counts the review rated in the packaged app',
-      /kept up today/i.test(stats),
-      stats.match(/Best \d+/)?.[0],
+      'the statistics include the review rated in the packaged app',
+      /reviews/i.test(stats) && /best day/i.test(stats),
+      stats.match(/Best day[\s\S]{0,80}/i)?.[0]?.replace(/\s+/g, ' '),
     );
     check(
       'retention and the rating split are reported',
@@ -686,15 +707,15 @@ function checkMacBundle(executable) {
     statSync(iconPath).size > 1024;
   check('the app carries a custom icon, not the default Electron one', customIcon, iconFile);
 
-  let signature = '';
-  try {
-    signature = execFileSync('codesign', ['-d', '--entitlements', ':-', appDir], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } catch {
-    signature = '';
-  }
+  // `codesign -d` writes its display output, including entitlements, to
+  // stderr. Capture both streams; reading stdout alone makes a correctly
+  // signed bundle look unsigned on macOS.
+  const signatureResult = spawnSync(
+    'codesign',
+    ['-d', '--entitlements', ':-', appDir],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  const signature = `${signatureResult.stdout ?? ''}\n${signatureResult.stderr ?? ''}`;
   check(
     'the bundle is signed with the hardened-runtime entitlements',
     /com\.apple\.security\.cs\.allow-jit/.test(signature),
@@ -873,6 +894,32 @@ async function clickLabel(page, label) {
   const handle = await visibleMatch(page, `[aria-label="${label}"]`);
   await handle.click();
   await delay(250);
+}
+
+/** Click the first visible match when the page intentionally has two actions. */
+async function clickFirstVisibleLabel(page, label) {
+  const selector = `[aria-label="${label}"]`;
+  await page.waitForFunction(
+    (sel) =>
+      [...document.querySelectorAll(sel)].some((node) => {
+        const box = node.getBoundingClientRect();
+        return box.width > 0 && box.height > 0;
+      }),
+    { timeout: 20000 },
+    selector,
+  );
+
+  for (const handle of await page.$$(selector)) {
+    const visible = await handle.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      return box.width > 0 && box.height > 0;
+    });
+    if (!visible) continue;
+    await handle.click();
+    await delay(250);
+    return;
+  }
+  throw new Error(`No visible element matches ${selector}`);
 }
 
 /**

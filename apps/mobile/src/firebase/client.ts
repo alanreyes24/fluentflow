@@ -131,6 +131,12 @@ export interface RemoteSnapshot {
   reviewEvents: ReviewEvent[];
 }
 
+export interface RemoteSubscription {
+  unsubscribe: Unsubscribe;
+  /** Resolves true after the initial snapshot from all three collections is merged. */
+  ready: Promise<boolean>;
+}
+
 /** One-shot read of everything, or of everything newer than `since`. */
 export async function fetchRemote(userId: string, since?: string): Promise<RemoteSnapshot> {
   const db = firestore();
@@ -201,11 +207,11 @@ export async function pushRemote(
  */
 export function subscribeRemote(
   userId: string,
-  onChange: (snapshot: RemoteSnapshot) => void,
+  onChange: (snapshot: RemoteSnapshot) => void | Promise<void>,
   onError: (error: Error) => void,
-): Unsubscribe {
+): RemoteSubscription {
   const db = firestore();
-  if (!db) return () => undefined;
+  if (!db) return { unsubscribe: () => undefined, ready: Promise.resolve(false) };
 
   let decks: Deck[] = [];
   let cards: Card[] = [];
@@ -213,11 +219,38 @@ export function subscribeRemote(
   let deckReady = false;
   let cardReady = false;
   let reviewEventsReady = false;
+  let initialSnapshotHandled = false;
+  let readySettled = false;
+  let resolveReady!: (initialSnapshotMerged: boolean) => void;
+  const ready = new Promise<boolean>((resolve) => {
+    resolveReady = resolve;
+  });
+  const settleReady = (initialSnapshotMerged: boolean) => {
+    if (readySettled) return;
+    readySettled = true;
+    resolveReady(initialSnapshotMerged);
+  };
 
   const emit = () => {
     // Wait for both collections before the first emit, so a merge never sees
     // cards whose deck has not arrived yet.
-    if (deckReady && cardReady && reviewEventsReady) onChange({ decks, cards, reviewEvents });
+    if (!deckReady || !cardReady || !reviewEventsReady) return;
+
+    const snapshot = { decks, cards, reviewEvents };
+    if (!initialSnapshotHandled) {
+      initialSnapshotHandled = true;
+      Promise.resolve(onChange(snapshot)).then(
+        () => settleReady(true),
+        () => settleReady(false),
+      );
+      return;
+    }
+    void onChange(snapshot);
+  };
+
+  const handleError = (error: Error) => {
+    settleReady(false);
+    onError(error);
   };
 
   const unsubscribeDecks = onSnapshot(
@@ -227,7 +260,7 @@ export function subscribeRemote(
       deckReady = true;
       emit();
     },
-    onError,
+    handleError,
   );
 
   const unsubscribeCards = onSnapshot(
@@ -237,7 +270,7 @@ export function subscribeRemote(
       cardReady = true;
       emit();
     },
-    onError,
+    handleError,
   );
 
   const unsubscribeReviewEvents = onSnapshot(
@@ -247,13 +280,19 @@ export function subscribeRemote(
       reviewEventsReady = true;
       emit();
     },
-    onError,
+    handleError,
   );
 
-  return () => {
-    unsubscribeDecks();
-    unsubscribeCards();
-    unsubscribeReviewEvents();
+  return {
+    ready,
+    unsubscribe: () => {
+      unsubscribeDecks();
+      unsubscribeCards();
+      unsubscribeReviewEvents();
+      // Do not leave startup waiting forever if the engine is disposed before
+      // all listeners deliver their first snapshot.
+      settleReady(false);
+    },
   };
 }
 

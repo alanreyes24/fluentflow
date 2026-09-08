@@ -57,9 +57,14 @@ function buildConfig(): AppConfig {
   // A partially filled config is worse than none: it fails at the first call
   // with an opaque SDK error instead of at startup with a clear one.
   const hasFirebase = Boolean(firebase?.apiKey && firebase?.projectId && firebase?.appId);
+  // Expo's web runtime can deserialize a null extra value as an empty object.
+  // Treat anything other than a string as absent; calling replace() on that
+  // value otherwise prevents the entire packaged renderer from mounting.
+  const apiBaseUrl =
+    typeof extra.apiBaseUrl === 'string' ? extra.apiBaseUrl.replace(/\/+$/, '') || null : null;
 
   return {
-    apiBaseUrl: extra.apiBaseUrl?.replace(/\/+$/, '') || null,
+    apiBaseUrl,
     firebase: hasFirebase
       ? {
           apiKey: firebase!.apiKey!,

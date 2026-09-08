@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
-import { LANGUAGE_NAMES, type Card, type CardStatus, type Deck, type DeckProgress } from '@fluentflow/core';
+import {
+  LANGUAGE_NAMES,
+  type Card,
+  type CardStatus,
+  type Deck,
+  type DeckProgress,
+  type StudyQueue,
+} from '@fluentflow/core';
 import { useI18n } from '../../../src/i18n';
 import { useApp } from '../../../src/state/app';
 import {
@@ -22,10 +29,10 @@ import {
   useContentStyle,
 } from '../../../src/ui/components';
 import { useTheme } from '../../../src/ui/theme';
+import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 
 const NEW_CARD_LIMIT_OPTIONS = [10, 20, 40, 50, 80] as const;
 const REVIEW_LIMIT_OPTIONS = [50, 100, 200, 400] as const;
-const AUTO_EXPAND_CARD_LIMIT = 12;
 
 /** Deck detail: progress, the study entry point, and card management. */
 export default function DeckScreen() {
@@ -39,34 +46,46 @@ export default function DeckScreen() {
   const [deck, setDeck] = useState<Deck | null>(null);
   const [cards, setCards] = useState<Card[]>([]);
   const [progress, setProgress] = useState<DeckProgress | null>(null);
+  const [today, setToday] = useState<StudyQueue | null>(null);
   const [adding, setAdding] = useState(false);
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
   const [duplicateCardId, setDuplicateCardId] = useState<string | null>(null);
-  const [cardsExpanded, setCardsExpanded] = useState(true);
-  const [cardsExpansionTouched, setCardsExpansionTouched] = useState(false);
+  const [cardsExpanded, setCardsExpanded] = useState(false);
+  const [newCardsSettingsExpanded, setNewCardsSettingsExpanded] = useState(false);
+  const [maxReviewsSettingsExpanded, setMaxReviewsSettingsExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // A new deck starts with the compact default again. Within a deck, preserve
-  // the user's choice rather than reopening the list on every focus refresh.
+  // A new deck starts minimized. Within a deck, preserve the user's choice
+  // rather than reopening the list on every focus refresh.
   useEffect(() => {
-    setCardsExpanded(true);
-    setCardsExpansionTouched(false);
+    setCardsExpanded(false);
+    setNewCardsSettingsExpanded(false);
+    setMaxReviewsSettingsExpanded(false);
   }, [id]);
-
-  useEffect(() => {
-    if (!cardsExpansionTouched) setCardsExpanded(cards.length <= AUTO_EXPAND_CARD_LIMIT);
-  }, [cards.length, cardsExpansionTouched]);
 
   const load = useCallback(async () => {
     if (!repository || !id) return;
-    const [loadedDeck, loadedCards, loadedProgress] = await Promise.all([
-      repository.getDeck(id),
+    const loadedDeck = await repository.getDeck(id);
+    if (!loadedDeck) {
+      setDeck(null);
+      setLoading(false);
+      return;
+    }
+    const [loadedCards, loadedProgress, queue] = await Promise.all([
       repository.listCards(id),
       repository.deckProgress(id),
+      repository.studyQueue(
+        id,
+        new Date(),
+        200,
+        loadedDeck.newCardsPerDay,
+        loadedDeck.maxReviewsPerDay,
+      ),
     ]);
     setDeck(loadedDeck);
     setCards(loadedCards);
-    setProgress(loadedProgress);
+    setProgress({ ...loadedProgress, due: queue.cards.length });
+    setToday(queue);
     setLoading(false);
     if (loadedDeck) navigation.setOptions({ title: loadedDeck.name });
   }, [repository, id, navigation]);
@@ -141,6 +160,25 @@ export default function DeckScreen() {
 
             <Spacer size={theme.spacing.md} />
 
+            <Surface>
+              <SectionLabel>{t('studyToday')}</SectionLabel>
+              <Spacer size={theme.spacing.sm} />
+              <StudyQueueCounts
+                counts={{
+                  new: today?.new ?? 0,
+                  learning: today?.learning ?? 0,
+                  review: today?.review ?? 0,
+                }}
+                labels={{
+                  new: t('queueNew'),
+                  learning: t('queueLearn'),
+                  review: t('queueReview'),
+                }}
+              />
+            </Surface>
+
+            <Spacer size={theme.spacing.md} />
+
             <Button
               label={due > 0 ? `${t('study')} · ${t('dueCount', { count: due })}` : t('studyAhead')}
               onPress={() =>
@@ -155,57 +193,97 @@ export default function DeckScreen() {
             <Spacer size={theme.spacing.sm} />
 
             <Surface style={styles.limitCard}>
-              <SectionLabel>{t('newCardsPerDay')}</SectionLabel>
-              <Spacer size={theme.spacing.xs} />
-              <SegmentedControl<string>
-                options={[
-                  ...NEW_CARD_LIMIT_OPTIONS.map((count) => ({
-                    value: String(count),
-                    label: String(count),
-                  })),
-                  { value: 'unlimited', label: t('unlimited') },
-                ]}
-                value={deck.newCardsPerDay === null ? 'unlimited' : String(deck.newCardsPerDay)}
-                onChange={(value) => {
-                  if (!repository) return;
-                  void repository
-                    .setNewCardsPerDay(deck, value === 'unlimited' ? null : Number(value))
-                    .then((updated) => {
-                      setDeck(updated);
-                      return refreshDecks();
-                    });
-                }}
-              />
-              <Spacer size={theme.spacing.xs} />
-              <Label variant="caption" tone="faint">
-                {t('newCardsPerDayHint')}
-              </Label>
-              <Spacer size={theme.spacing.md} />
-              <SectionLabel>{t('maxReviewsPerDay')}</SectionLabel>
-              <Spacer size={theme.spacing.xs} />
-              <SegmentedControl<string>
-                options={[
-                  ...REVIEW_LIMIT_OPTIONS.map((count) => ({
-                    value: String(count),
-                    label: String(count),
-                  })),
-                  { value: 'unlimited', label: t('unlimited') },
-                ]}
-                value={deck.maxReviewsPerDay === null ? 'unlimited' : String(deck.maxReviewsPerDay)}
-                onChange={(value) => {
-                  if (!repository) return;
-                  void repository
-                    .setMaxReviewsPerDay(deck, value === 'unlimited' ? null : Number(value))
-                    .then((updated) => {
-                      setDeck(updated);
-                      return refreshDecks();
-                    });
-                }}
-              />
-              <Spacer size={theme.spacing.xs} />
-              <Label variant="caption" tone="faint">
-                {t('maxReviewsPerDayHint')}
-              </Label>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('newCardsPerDay')}
+                accessibilityState={{ expanded: newCardsSettingsExpanded }}
+                onPress={() => setNewCardsSettingsExpanded((expanded) => !expanded)}
+                style={styles.settingHeader}
+              >
+                <Row justify="space-between">
+                  <SectionLabel>{t('newCardsPerDay')}</SectionLabel>
+                  <Label variant="body" tone="faint">
+                    {newCardsSettingsExpanded ? '⌃' : '⌄'}
+                  </Label>
+                </Row>
+              </Pressable>
+              {newCardsSettingsExpanded ? (
+                <>
+                  <Spacer size={theme.spacing.xs} />
+                  <SegmentedControl<string>
+                    options={[
+                      ...NEW_CARD_LIMIT_OPTIONS.map((count) => ({
+                        value: String(count),
+                        label: String(count),
+                      })),
+                      { value: 'unlimited', label: t('unlimited') },
+                    ]}
+                    value={deck.newCardsPerDay === null ? 'unlimited' : String(deck.newCardsPerDay)}
+                    onChange={(value) => {
+                      if (!repository) return;
+                      void repository
+                        .setNewCardsPerDay(deck, value === 'unlimited' ? null : Number(value))
+                        .then(async (updated) => {
+                          setDeck(updated);
+                          await load();
+                          return refreshDecks();
+                        });
+                    }}
+                  />
+                  <Spacer size={theme.spacing.xs} />
+                  <Label variant="caption" tone="faint">
+                    {t('newCardsPerDayHint')}
+                  </Label>
+                </>
+              ) : null}
+            </Surface>
+
+            <Spacer size={theme.spacing.sm} />
+
+            <Surface style={styles.limitCard}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('maxReviewsPerDay')}
+                accessibilityState={{ expanded: maxReviewsSettingsExpanded }}
+                onPress={() => setMaxReviewsSettingsExpanded((expanded) => !expanded)}
+                style={styles.settingHeader}
+              >
+                <Row justify="space-between">
+                  <SectionLabel>{t('maxReviewsPerDay')}</SectionLabel>
+                  <Label variant="body" tone="faint">
+                    {maxReviewsSettingsExpanded ? '⌃' : '⌄'}
+                  </Label>
+                </Row>
+              </Pressable>
+              {maxReviewsSettingsExpanded ? (
+                <>
+                  <Spacer size={theme.spacing.xs} />
+                  <SegmentedControl<string>
+                    options={[
+                      ...REVIEW_LIMIT_OPTIONS.map((count) => ({
+                        value: String(count),
+                        label: String(count),
+                      })),
+                      { value: 'unlimited', label: t('unlimited') },
+                    ]}
+                    value={deck.maxReviewsPerDay === null ? 'unlimited' : String(deck.maxReviewsPerDay)}
+                    onChange={(value) => {
+                      if (!repository) return;
+                      void repository
+                        .setMaxReviewsPerDay(deck, value === 'unlimited' ? null : Number(value))
+                        .then(async (updated) => {
+                          setDeck(updated);
+                          await load();
+                          return refreshDecks();
+                        });
+                    }}
+                  />
+                  <Spacer size={theme.spacing.xs} />
+                  <Label variant="caption" tone="faint">
+                    {t('maxReviewsPerDayHint')}
+                  </Label>
+                </>
+              ) : null}
             </Surface>
 
             <Spacer size={theme.spacing.sm} />
@@ -300,7 +378,6 @@ export default function DeckScreen() {
               accessibilityLabel={t('cards')}
               accessibilityState={{ expanded: cardsExpanded }}
               onPress={() => {
-                setCardsExpansionTouched(true);
                 setCardsExpanded((expanded) => !expanded);
               }}
               style={styles.cardsHeader}
@@ -568,6 +645,7 @@ const styles = StyleSheet.create({
   limitCard: { gap: 4 },
   toggleRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 12 },
   toggle: { minWidth: 44, alignItems: 'center', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999 },
+  settingHeader: { paddingVertical: 4 },
   cardsHeader: { paddingVertical: 8 },
   footer: { marginTop: 24 },
 });

@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
-import type { Card, Deck } from '@fluentflow/core';
+import { collectionDayKey, type Card, type Deck } from '@fluentflow/core';
 import StudyScreen from '../app/(app)/study/[deckId]';
 import { ExampleService } from '../src/ai/service';
 import { Repository } from '../src/db/repository';
@@ -85,6 +85,9 @@ describe('StudyScreen', () => {
 
     await screen.findByText('hablar');
     expect(screen.getByText('1 / 2')).toBeTruthy();
+    expect(screen.getByLabelText('New: 2')).toBeTruthy();
+    expect(screen.getByLabelText('Learn: 0')).toBeTruthy();
+    expect(screen.getByLabelText('Review: 0')).toBeTruthy();
   });
 
   it('schedules the card and advances to the next one', async () => {
@@ -105,6 +108,9 @@ describe('StudyScreen', () => {
     // The rated card is still on its learning steps, so the queue grew: it is
     // waiting at the back rather than being finished for the day.
     expect(screen.getByText('2 / 3')).toBeTruthy();
+    expect(screen.getByLabelText('New: 1')).toBeTruthy();
+    expect(screen.getByLabelText('Learn: 1')).toBeTruthy();
+    expect(screen.getByLabelText('Review: 0')).toBeTruthy();
     // The next card starts hidden again.
     expect(screen.queryByText('to eat')).toBeNull();
 
@@ -112,6 +118,35 @@ describe('StudyScreen', () => {
     expect(stored?.repetitions).toBe(1);
     expect(stored?.phase).toBe('learning');
     expect(stored?.syncStatus).toBe('pending');
+  });
+
+  it('separates due reviews from new cards in the remaining counters', async () => {
+    const [reviewCard] = await seed([
+      ['hablar', 'to speak'],
+      ['comer', 'to eat'],
+    ]);
+    const now = new Date();
+    await repository.updateCard(reviewCard!, {
+      phase: 'review',
+      interval: 2,
+      nextReview: now.toISOString(),
+      dueDay: collectionDayKey(now),
+      status: 'learning',
+    });
+
+    await show();
+
+    await screen.findByText('hablar');
+    expect(screen.getByLabelText('New: 1')).toBeTruthy();
+    expect(screen.getByLabelText('Learn: 0')).toBeTruthy();
+    expect(screen.getByLabelText('Review: 1')).toBeTruthy();
+
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+
+    await screen.findByText('comer');
+    expect(screen.getByLabelText('New: 1')).toBeTruthy();
+    expect(screen.getByLabelText('Review: 0')).toBeTruthy();
   });
 
   it('brings a card still on its learning steps back before the session ends', async () => {

@@ -24,7 +24,7 @@ collapsing these four into one word:
 | Windows | yes | yes | yes, 37 checks | unsigned only |
 | iOS | yes | **never** | no | no |
 | Android | yes | **never** | no | no |
-| macOS | **never attempted** | no | no | no |
+| macOS arm64 | yes | yes | yes, 42 checks | unsigned only |
 
 Windows is the only desktop platform that exists as an artifact. iOS is the only
 platform where the on-device model could ever run. Neither of those is true of
@@ -152,11 +152,11 @@ now does that edit with `resedit`, in JavaScript, needing no privileges; the
 packaged `FluentFlow.exe` reports its own name, version, description and
 copyright, and carries the app's icon at seven sizes.
 
-## macOS: configured, never executed
+## macOS: arm64 packaged, driven, unsigned
 
-Every macOS decision has been made and none of them has been run. Nothing below
-has been watched working; it is a description of code and configuration, which
-is a different claim.
+The arm64 target has now been built and exercised on an Apple-silicon Mac. It is
+verified by the packaged-app walkthrough; distribution signing remains the
+only macOS-specific release gap.
 
 **What exists.** The shell has real darwin branches rather than Windows code
 that happens to compile. The window is a vibrancy pane
@@ -176,33 +176,31 @@ an `.icns`, `hardenedRuntime`, and an entitlements plist that exists on disk.
 `codesign --verify` on an unsigned Electron bundle otherwise complains that it
 promises sealed resources it does not have.
 
-Both desktop scripts already look for `dist/mac/FluentFlow.app`:
+Both desktop scripts look for `dist/mac/FluentFlow.app`:
 `verify-desktop.mjs` knows the path to the executable inside the bundle, takes
 `FLUENTFLOW_APP=/Applications/FluentFlow.app` to point at an installed copy, and
 checks the signature is self-consistent; `refresh-desktop.mjs` knows where
-`resources/app` sits within it. Neither needs changing. They need a build to
-point at.
+`resources/app` sits within it.
 
-The walkthrough's macOS-only checks — that nothing is drawn under the traffic
-lights at two window widths, and that the page supplies a drag handle — are
-written and have never executed, because they are skipped off darwin. On
-Windows the walkthrough asks the opposite question instead.
+On 7 September 2026, `npm run desktop:pack` produced the arm64 `.app`, and
+`npm run verify:desktop` passed 42 checks. These include the custom `app://`
+origin, SQLite persistence, offline examples, card and word-list flows,
+statistics, Anki parsing, single-instance handoff, settings key isolation,
+window-state restoration, CSP/error checks, and the macOS-only traffic-light
+geometry and drag-handle checks.
 
 **What is missing.** `identity` is null and `notarize` is false, so there is no
 Developer ID and nothing is notarized: a dmg built today would be quarantined
 on any machine except the one that built it. There is no x64 or universal
 target, only arm64.
 
-**And it needs a Mac.** electron-builder cannot cross-build a signed and
-notarized macOS target from Windows. That is the blocker; everything else is
-downstream of it.
+**The remaining release gap.** A Mac is required for this target, and that
+requirement is now satisfied for arm64. A Developer ID certificate and
+notarization are still required before distributing the DMG or ZIP broadly.
 
-**Order of work.** Get a Mac, then `npm run desktop:pack` there, which builds
-the web export and packages the `.app`. `npm run verify:desktop` should then
-find it without modification, and the three macOS chrome checks would run for
-the first time. Decide arm64 versus universal. Finally, and only if it is to
-leave that machine, an Apple Developer certificate and notarization — set
-`APPLE_IDENTITY`, and the build wrapper turns both on.
+**Next steps.** Decide whether to add x64 or universal output. If the build is
+to leave this machine, add an Apple Developer certificate and notarization —
+set `APPLE_IDENTITY`, and the build wrapper turns both on.
 
 ## iOS: code-complete, zero device time
 
@@ -308,6 +306,6 @@ Every claim above is meant to be re-verifiable rather than trusted:
 | No EAS config | `ls apps/mobile/eas.json`, no such file |
 | Icon and splash are configured | `grep -E "icon\|splash" apps/mobile/app.json`, and `ls apps/mobile/assets/*.png` |
 | ONNX is absent | `grep onnxruntime apps/mobile/package.json`, no matches |
-| macOS has never been built | `ls apps/desktop/dist/mac`, no such directory |
+| macOS arm64 runs and works | `npm run verify:desktop`, 42 checks |
 | The Windows exe names itself | `(Get-Item apps/desktop/dist/win-unpacked/FluentFlow.exe).VersionInfo` |
 | Windows is still unsigned | the same `VersionInfo`, and SmartScreen on a first launch |

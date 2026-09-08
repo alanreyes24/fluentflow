@@ -55,6 +55,11 @@ export function BottomBar() {
         onPress={() => router.push('/(app)/decks')}
       />
       <BarAction
+        label={t('statistics')}
+        selected={pathname === '/stats'}
+        onPress={() => router.push('/(app)/stats')}
+      />
+      <BarAction
         label={t('newDeck')}
         onPress={() => router.push('/(app)/new-deck')}
       />
