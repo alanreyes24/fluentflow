@@ -8,6 +8,7 @@
   "scripts": {
     "build:core": "node ../../scripts/vendor-core.mjs",
     "build:icon": "node ../../scripts/make-icons.mjs",
+    "make-icon": "node scripts/make-icon.mjs",
     "build:web": "cd ../mobile && npx expo export --platform web --output-dir ../desktop/web --clear",
     "build": "npm run build:icon && npm run build:core && npm run build:web",
     "test": "node --test \"test/*.test.mjs\"",

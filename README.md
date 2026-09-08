@@ -732,10 +732,10 @@ npm run verify:desktop    # launches the packaged app and drives it
 That writes installers — two on Windows, a `.dmg` on macOS — and takes minutes.
 It is the wrong loop for trying a change out.
 
-The app icon lives at `apps/desktop/build/icon-source.png` (a 1024² PNG);
-`npm --prefix apps/desktop run make-icon` regenerates `build/icon.icns` and
-`build/icon.png` from it, which are committed so the packaged build never
-depends on `iconutil`. The one committed now is a placeholder.
+The app icon is generated in one place by `scripts/make-icons.mjs`. It writes
+the web favicon and the matching 1024² macOS source, then regenerates the
+committed `apps/desktop/build/icon.icns` and `icon.png` on macOS so the
+packaged build never depends on `iconutil` being available.
 
 The dictionaries are not in there. `npm run fetch-dictionaries` puts them in the
 app's user data directory instead, alongside the stored API key; see

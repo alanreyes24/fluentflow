@@ -1,21 +1,22 @@
 #!/usr/bin/env node
 /**
- * Draw the app icon, the Android adaptive icon, the splash mark, the favicon
- * and the Windows `.ico`.
+ * Draw the app icon, the Android adaptive icon, the splash mark, the favicon,
+ * the macOS source and the Windows `.ico`.
  *
  * A script rather than five checked-in binaries, for the same reason
  * `prepare-model.mjs` is a script: the design is then readable and arguable,
  * and changing the accent colour is an edit here rather than a round trip
  * through an image editor nobody has installed.
  *
- * It writes PNGs with `node:zlib` and no dependencies. That sounds worse than
- * it is — a PNG is a header, one deflated block of scanlines and a trailer,
- * and the mark is two rounded rectangles. Pulling in a canvas implementation
- * to draw two rectangles would cost more than it saves.
+ * It writes PNGs with `node:zlib` and no image dependencies. That sounds worse
+ * than it is — a PNG is a header, one deflated block of scanlines and a
+ * trailer, and the mark is two rounded rectangles. Pulling in a canvas
+ * implementation to draw two rectangles would cost more than it saves.
  *
  *   node scripts/make-icons.mjs
  */
 
+import { execFileSync } from 'node:child_process';
 import { deflateSync } from 'node:zlib';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -24,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSETS = join(ROOT, 'apps', 'mobile', 'assets');
 const DESKTOP_BUILD = join(ROOT, 'apps', 'desktop', 'build');
+const DESKTOP_ICON_SCRIPT = join(ROOT, 'apps', 'desktop', 'scripts', 'make-icon.mjs');
 
 /**
  * Sizes inside the Windows icon.
@@ -44,6 +46,7 @@ const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256];
 const ACCENT = [0x05, 0x96, 0x69]; // light `accent`
 const ACCENT_DARK_THEME = [0x34, 0xd3, 0x99]; // dark `accent`
 const CREAM = [0xf4, 0xf7, 0xf5]; // light `background`
+const STANDARD_ICON = { background: ACCENT, ink: CREAM, scale: 0.8 };
 
 /**
  * The mark: two cards, the one behind tilted away from the one in front.
@@ -90,7 +93,7 @@ async function main() {
 
     // Browser tabs. Drawn at its real size rather than downscaled from 1024,
     // so the antialiasing is computed for the pixels it will actually occupy.
-    { file: 'favicon.png', size: 48, background: ACCENT, ink: CREAM, scale: 0.8 },
+    { file: 'favicon.png', size: 48, ...STANDARD_ICON },
   ];
 
   for (const output of outputs) {
@@ -101,18 +104,34 @@ async function main() {
 
   console.log(`\nWritten to ${ASSETS}`);
 
+  // Keep the desktop source at the same design scale as the favicon. The
+  // macOS iconset is built from this high-resolution copy below, while the
+  // Windows icon keeps its own set of pixel-sized entries.
+  await mkdir(DESKTOP_BUILD, { recursive: true });
+  await writeFile(
+    join(DESKTOP_BUILD, 'icon-source.png'),
+    encodePng(1024, 1024, render({ size: 1024, ...STANDARD_ICON })),
+  );
+  console.log('  icon-source.png — 1024x1024 (macOS source)');
+
   // The desktop shell. Without this the packaged Windows app carries Electron's
   // own atom in the taskbar, the Start menu and the installer.
-  await mkdir(DESKTOP_BUILD, { recursive: true });
   const ico = encodeIco(
     ICO_SIZES.map((size) => ({
       size,
-      png: encodePng(size, size, render({ size, background: ACCENT, ink: CREAM, scale: 0.8 })),
+      png: encodePng(size, size, render({ size, ...STANDARD_ICON })),
     })),
   );
   await writeFile(join(DESKTOP_BUILD, 'icon.ico'), ico);
   console.log(`  icon.ico — ${ICO_SIZES.join(', ')}`);
   console.log(`Written to ${DESKTOP_BUILD}`);
+
+  // iconutil and sips are macOS-only. On that platform, build the checked-in
+  // ICNS from the same source used for the favicon so `npm run build` cannot
+  // leave the app icon behind when the mark changes.
+  if (process.platform === 'darwin') {
+    execFileSync(process.execPath, [DESKTOP_ICON_SCRIPT], { stdio: 'inherit' });
+  }
 }
 
 // --- drawing ----------------------------------------------------------------
