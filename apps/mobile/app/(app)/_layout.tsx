@@ -30,7 +30,7 @@ export default function AppLayout() {
   // The desktop shell can ask for an import from the File menu, a dropped file
   // or a deck opened with the app. This is the only place mounted for the whole
   // session, so it is the only place that can route one.
-  useEffect(() => subscribeToShellImports(() => router.push('/(app)/import')), []);
+  useEffect(() => subscribeToShellImports(() => router.push('/(app)/new-deck')), []);
 
   // Escape is the desktop convention for leaving the current view. Keeping
   // this in the shell makes it work consistently on every route, including

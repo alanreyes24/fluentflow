@@ -108,7 +108,7 @@ export default function DecksScreen() {
       <View style={[styles.split, wide ? styles.splitWide : null]}>
         {streakData ? (
           <View style={[styles.calendarPane, wide ? styles.calendarPaneWide : null]}>
-            <Surface elevation="sm">
+            <Surface raised elevation="md">
               <StreakCard
                 streak={streakData.streak}
                 days={streakData.days}
@@ -122,12 +122,16 @@ export default function DecksScreen() {
           <FlatList
             data={decks}
             keyExtractor={(deck) => deck.id}
+            numColumns={wide ? 2 : 1}
+            columnWrapperStyle={wide ? styles.deckRow : undefined}
             contentContainerStyle={content}
             ListHeaderComponent={
               progressReady ? (
                 <View style={styles.summaryWrap}>
                   <Summary due={totals.due} cards={totals.cards} />
-                  <Spacer size={theme.spacing.lg} />
+                  <Spacer size={theme.spacing.xl} />
+                  <Label variant="heading">{t('yourDecks')}</Label>
+                  <Spacer size={theme.spacing.sm} />
                 </View>
               ) : null
             }
@@ -138,8 +142,12 @@ export default function DecksScreen() {
                 action={<Button label={t('newDeck')} onPress={() => router.push('/(app)/new-deck')} />}
               />
             }
-            renderItem={({ item }) => <DeckRow deck={item} progress={progress[item.id]} />}
-            ItemSeparatorComponent={() => <Spacer size={theme.spacing.sm} />}
+            renderItem={({ item }) => (
+              <View style={wide ? styles.deckGridItem : null}>
+                <DeckRow deck={item} progress={progress[item.id]} />
+              </View>
+            )}
+            ItemSeparatorComponent={() => <Spacer size={theme.spacing.md} />}
           />
         </View>
       </View>
@@ -167,16 +175,31 @@ function Summary({ due, cards }: { due: number; cards: number }) {
         due > 0
           ? { backgroundColor: theme.colors.accentSoft, borderColor: 'transparent' }
           : null,
-      ]}
-    >
-      <Label variant="title" tone={due > 0 ? 'accent' : 'default'}>
-      {due > 0 ? t('dueCount', { count: due }) : t('allCaughtUp')}
-      </Label>
-      <Spacer size={theme.spacing.xs} />
-      <Label variant="caption" tone="faint">
-        {due > 0 ? t('cardCount', { count: cards }) : t('allCaughtUpHint')}
-      </Label>
-    </Surface>
+    ]}
+  >
+    <Row justify="space-between" align="center" gap={theme.spacing.lg}>
+      <View style={styles.summaryLead}>
+        <Label variant="overline" tone="muted">
+          {t('today')}
+        </Label>
+        <Spacer size={theme.spacing.xs} />
+        <Label variant="title" tone={due > 0 ? 'accent' : 'default'}>
+          {due > 0 ? t('dueCount', { count: due }) : t('allCaughtUp')}
+        </Label>
+        <Label variant="caption" tone="faint">
+          {due > 0 ? t('cardCount', { count: cards }) : t('allCaughtUpHint')}
+        </Label>
+      </View>
+      <View style={styles.summaryMetric} accessible accessibilityLabel={t('cardCount', { count: cards })}>
+        <Label variant="metric" tone="default">
+          {cards}
+        </Label>
+        <Label variant="caption" tone="faint">
+          {t('cards')}
+        </Label>
+      </View>
+    </Row>
+  </Surface>
   );
 }
 
@@ -260,15 +283,26 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
 
 const styles = StyleSheet.create({
   split: { flex: 1, width: '100%' },
-  splitWide: { flexDirection: 'row', alignSelf: 'center', maxWidth: 1240 },
+  splitWide: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 1380,
+    gap: 24,
+    paddingHorizontal: 24,
+  },
   calendarPane: { padding: 16 },
-  calendarPaneWide: { width: 340, paddingRight: 0 },
+  calendarPaneWide: { width: 326, paddingHorizontal: 0, paddingTop: 24 },
   decksPane: { flex: 1, minWidth: 0 },
-  summaryWrap: { marginBottom: 16 },
-  summary: { paddingVertical: 20 },
+  summaryWrap: { marginBottom: 0 },
+  summary: { paddingVertical: 18 },
+  summaryLead: { flex: 1, minWidth: 0 },
+  summaryMetric: { alignItems: 'flex-end', minWidth: 72 },
   grow: { flex: 1 },
   deck: {},
   deckHeader: { alignItems: 'flex-start', gap: 12 },
+  deckRow: { gap: 16 },
+  deckGridItem: { flex: 1, minWidth: 0 },
   deckAction: { flex: 1 },
   lifted: { transform: [{ translateY: -1 }] },
 });

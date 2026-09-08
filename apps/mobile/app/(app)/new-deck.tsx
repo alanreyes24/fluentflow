@@ -1,14 +1,17 @@
+import { ScrollView } from 'react-native';
 import { router } from 'expo-router';
 import { useApp } from '../../src/state/app';
 import { NewDeckForm } from '../../src/ui/NewDeckForm';
-import { Page, Screen, Surface } from '../../src/ui/components';
+import { AnkiImportPanel } from './import';
+import { Screen, Spacer, Surface, useContentStyle } from '../../src/ui/components';
 
 export default function NewDeckScreen() {
+  const content = useContentStyle({ maxWidth: 560 });
   const { repository, user, refreshDecks } = useApp();
 
   return (
     <Screen>
-      <Page maxWidth={560}>
+      <ScrollView contentContainerStyle={content}>
         <Surface>
           <NewDeckForm
             onCancel={() => router.back()}
@@ -20,7 +23,9 @@ export default function NewDeckScreen() {
             }}
           />
         </Surface>
-      </Page>
+        <Spacer />
+        <AnkiImportPanel embedded />
+      </ScrollView>
     </Screen>
   );
 }

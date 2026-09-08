@@ -34,6 +34,15 @@ import { useTheme } from '../../src/ui/theme';
  * drops half a deck is the outcome worth avoiding.
  */
 export default function ImportScreen() {
+  return <AnkiImportPanel />;
+}
+
+/**
+ * The Anki flow can stand on its own for deep links, or sit below the new-deck
+ * form. Keeping the state and file-handling here means both entry points have
+ * exactly the same import behaviour.
+ */
+export function AnkiImportPanel({ embedded = false }: { embedded?: boolean }) {
   const { t } = useI18n();
   const theme = useTheme();
   const content = useContentStyle();
@@ -96,9 +105,14 @@ export default function ImportScreen() {
     }
   };
 
-  return (
-    <Screen>
-      <ScrollView contentContainerStyle={content}>
+  const body = (
+    <>
+      {embedded ? (
+        <Label variant="heading" style={styles.embeddedTitle}>
+          {t('importDeck')}
+        </Label>
+      ) : null}
+
         <Surface>
           <Label variant="body" tone="muted">
             {t('importHint')}
@@ -218,7 +232,14 @@ export default function ImportScreen() {
         ) : null}
 
         <View style={styles.spacer} />
-      </ScrollView>
+    </>
+  );
+
+  if (embedded) return <View style={styles.embedded}>{body}</View>;
+
+  return (
+    <Screen>
+      <ScrollView contentContainerStyle={content}>{body}</ScrollView>
     </Screen>
   );
 }
@@ -231,6 +252,8 @@ function describeError(cause: unknown, fallback: string): string {
 }
 
 const styles = StyleSheet.create({
+  embedded: { gap: 16 },
+  embeddedTitle: { marginBottom: 0 },
   options: { gap: 16 },
   overrideLabel: { textTransform: 'uppercase', letterSpacing: 0.8 },
   notice: { gap: 2 },

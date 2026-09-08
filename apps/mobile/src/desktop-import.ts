@@ -9,10 +9,10 @@ import { desktopBridge, type DesktopFile } from './desktop';
  * usually not the import screen — and on a cold start nothing is on screen yet.
  *
  * So the request is split in two. The signed-in layout listens for the whole
- * session and navigates; the import screen picks up whatever was waiting when it
+ * session and navigates; the Anki panel picks up whatever was waiting when it
  * mounts. The queue between them is one slot deep, because a second request
  * before the first is even shown replaces it rather than stacking a backlog the
- * screen has no way to display.
+ * panel has no way to display.
  *
  * `null` is a request with no file: the user asked for the picker.
  */
@@ -26,8 +26,8 @@ const listeners = new Set<(request: ShellImportRequest) => void>();
 /**
  * Listen for the whole session. Call once, from the layout that owns routing.
  *
- * @param navigate moves to the import screen; called after the request is
- *   delivered or queued, so the screen finds it already waiting.
+ * @param navigate moves to the new-deck screen; called after the request is
+ *   delivered or queued, so the Anki panel finds it already waiting.
  * @returns an unsubscribe function, or a no-op outside the desktop shell
  */
 export function subscribeToShellImports(navigate: () => void): () => void {
@@ -44,7 +44,7 @@ export function subscribeToShellImports(navigate: () => void): () => void {
   });
 }
 
-/** Receive requests while the import screen is mounted, including a queued one. */
+/** Receive requests while the Anki panel is mounted, including a queued one. */
 export function onShellImport(listener: (request: ShellImportRequest) => void): () => void {
   listeners.add(listener);
 

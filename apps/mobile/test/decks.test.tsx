@@ -116,6 +116,13 @@ describe('DecksScreen', () => {
     expect(mockRouter.replace).toHaveBeenCalled();
   });
 
+  it('offers Anki import from the new-deck screen', async () => {
+    await renderScreen(<NewDeckScreen />, { repository, decks: [], user: TEST_USER });
+
+    expect(screen.getByText('Import from Anki')).toBeTruthy();
+    expect(screen.getByText('Export a deck from Anki Desktop with File › Export › Anki Deck Package.')).toBeTruthy();
+  });
+
 });
 
 describe('DeckScreen', () => {
@@ -189,11 +196,15 @@ describe('BottomBar', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Paste' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/text-import');
 
-    await fireEvent.press(screen.getByRole('button', { name: 'Import' }));
-    expect(mockRouter.push).toHaveBeenCalledWith('/(app)/import');
-
     await fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/settings');
+  });
+
+  it('does not show statistics or Anki import in the bottom bar', async () => {
+    await renderScreen(<BottomBar />);
+
+    expect(screen.queryByRole('button', { name: 'Statistics' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
   });
 
   it('opens the dedicated new-deck screen', async () => {

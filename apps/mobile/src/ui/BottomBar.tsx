@@ -19,11 +19,12 @@ import { useTheme } from './theme';
  * arrangement a Mac app uses for a bottom bar. Navigation between decks is not
  * here: the deck list is a screen you go to, so it stays one.
  *
- * "Paste" and "Import" rather than the sentences those screens are titled
- * with. A toolbar label is a word, the bar has to fit the 480pt minimum window
- * alongside the sync status, and the deck screen has its own "Paste a word
- * list" that adds to the open deck — two controls with the same name and
- * different destinations is the thing worth avoiding.
+ * "Paste" rather than the sentence the screen is titled with. A toolbar label
+ * is a word, and the deck screen has its own "Paste a word list" that adds to
+ * the open deck — two controls with the same name and different destinations
+ * is the thing worth avoiding. Anki import belongs with creating a deck, so it
+ * is available from the new-deck screen instead of taking a permanent toolbar
+ * slot.
  *
  * On macOS the strip is transparent so the window's vibrancy shows through —
  * every content screen paints itself opaque, so this and the title strip are
@@ -55,16 +56,10 @@ export function BottomBar() {
         onPress={() => router.push('/(app)/decks')}
       />
       <BarAction
-        label={t('statistics')}
-        selected={pathname === '/stats'}
-        onPress={() => router.push('/(app)/stats')}
-      />
-      <BarAction
         label={t('newDeck')}
         onPress={() => router.push('/(app)/new-deck')}
       />
       <BarAction label={t('pasteShort')} onPress={() => router.push('/(app)/text-import')} />
-      <BarAction label={t('importShort')} onPress={() => router.push('/(app)/import')} />
       <BarAction
         label={t('settings')}
         selected={pathname === '/settings'}
