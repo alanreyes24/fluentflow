@@ -130,4 +130,21 @@ describe('StudyScreen examples', () => {
     // without inference — the point is that they are on screen at all.
     expect(generate).toHaveBeenCalledTimes(1);
   });
+
+  it('regenerates the visible examples when pressed', async () => {
+    const service = new ExampleService(repository);
+    const generate = jest
+      .spyOn(service, 'forCard')
+      .mockResolvedValueOnce({ examples: ['Yo hablo español.'], source: 'model', durationMs: 900 })
+      .mockResolvedValueOnce({ examples: ['Yo estudio español.'], source: 'model', durationMs: 900 });
+    await renderScreen(<StudyScreen />, { repository, examples: service });
+
+    await screen.findByText('hablar');
+    await reveal();
+    await screen.findByText('Yo hablo español.');
+    await fireEvent.press(screen.getByRole('button', { name: 'Regenerate' }));
+
+    await screen.findByText('Yo estudio español.');
+    expect(generate.mock.calls[1]?.[1]).toBe(true);
+  });
 });

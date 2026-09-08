@@ -141,6 +141,19 @@ export class Repository {
     return row ? toCard(row) : null;
   }
 
+  /** Find a live card by its front, without treating capitalization as a duplicate. */
+  async findCardByFront(deckId: string, front: string): Promise<Card | null> {
+    const row = await this.db.getFirstAsync<CardRow>(
+      `SELECT * FROM cards
+       WHERE deckId = ? AND deleted = 0 AND lower(trim(front)) = lower(trim(?))
+       ORDER BY rowid
+       LIMIT 1`,
+      deckId,
+      front,
+    );
+    return row ? toCard(row) : null;
+  }
+
   /**
    * The study queue for a deck.
    *

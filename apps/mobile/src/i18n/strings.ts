@@ -67,6 +67,11 @@ export const en = {
   examplesOffline: 'Offline examples',
   examplesOfflineHint: 'The model was unavailable, so these are generic.',
   regenerate: 'Regenerate',
+  regenerateFailed: 'Could not regenerate examples.',
+  studyOptions: 'Study options',
+  wordAdded: 'Added to {deck}',
+  wordAlreadyInDeck: 'That word is already in this deck.',
+  wordMeaningUnavailable: 'Could not find a meaning for that word.',
   bury: 'Bury until tomorrow',
   suspend: 'Suspend card',
   undo: 'Undo',
@@ -247,7 +252,6 @@ export const en = {
   retry: 'Retry',
   loading: 'Loading…',
   errorTitle: 'Something went wrong',
-  keyboardHint: 'Press 1–4 to rate',
 } as const;
 
 /**
@@ -313,6 +317,11 @@ const es: Strings = {
   examplesOffline: 'Ejemplos sin conexión',
   examplesOfflineHint: 'El modelo no estaba disponible, así que estos son genéricos.',
   regenerate: 'Regenerar',
+  regenerateFailed: 'No se pudieron regenerar los ejemplos.',
+  studyOptions: 'Opciones de estudio',
+  wordAdded: 'Añadida a {deck}',
+  wordAlreadyInDeck: 'Esa palabra ya está en este mazo.',
+  wordMeaningUnavailable: 'No se pudo encontrar un significado para esa palabra.',
   bury: 'Enterrar hasta mañana',
   suspend: 'Suspender tarjeta',
   undo: 'Deshacer',
@@ -482,7 +491,6 @@ const es: Strings = {
   retry: 'Reintentar',
   loading: 'Cargando…',
   errorTitle: 'Algo salió mal',
-  keyboardHint: 'Pulsa 1–4 para calificar',
 };
 
 const bs: Strings = {
@@ -540,6 +548,11 @@ const bs: Strings = {
   examplesOffline: 'Primjeri bez interneta',
   examplesOfflineHint: 'Model nije bio dostupan, pa su ovi primjeri opšti.',
   regenerate: 'Generiši ponovo',
+  regenerateFailed: 'Nije moguće ponovo generisati primjere.',
+  studyOptions: 'Opcije učenja',
+  wordAdded: 'Dodano u {deck}',
+  wordAlreadyInDeck: 'Ta riječ je već u ovom špilu.',
+  wordMeaningUnavailable: 'Nije moguće pronaći značenje te riječi.',
   bury: 'Zakopaj do sutra',
   suspend: 'Suspenduj karticu',
   undo: 'Poništi',
@@ -709,7 +722,6 @@ const bs: Strings = {
   retry: 'Pokušaj ponovo',
   loading: 'Učitavanje…',
   errorTitle: 'Nešto je pošlo po zlu',
-  keyboardHint: 'Pritisnite 1–4 za ocjenu',
 };
 
 export const LANGUAGE_PACKS: Record<LanguageCode, Strings> = { en, es, bs };

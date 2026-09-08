@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { LANGUAGE_NAMES, type Card, type CardStatus, type Deck, type DeckProgress } from '@fluentflow/core';
@@ -22,8 +22,9 @@ import {
 } from '../../../src/ui/components';
 import { useTheme } from '../../../src/ui/theme';
 
-const NEW_CARD_LIMIT_OPTIONS = [10, 20, 40, 80] as const;
+const NEW_CARD_LIMIT_OPTIONS = [10, 20, 40, 50, 80] as const;
 const REVIEW_LIMIT_OPTIONS = [50, 100, 200, 400] as const;
+const AUTO_EXPAND_CARD_LIMIT = 12;
 
 /** Deck detail: progress, the study entry point, and card management. */
 export default function DeckScreen() {
@@ -38,7 +39,20 @@ export default function DeckScreen() {
   const [cards, setCards] = useState<Card[]>([]);
   const [progress, setProgress] = useState<DeckProgress | null>(null);
   const [adding, setAdding] = useState(false);
+  const [cardsExpanded, setCardsExpanded] = useState(true);
+  const [cardsExpansionTouched, setCardsExpansionTouched] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // A new deck starts with the compact default again. Within a deck, preserve
+  // the user's choice rather than reopening the list on every focus refresh.
+  useEffect(() => {
+    setCardsExpanded(true);
+    setCardsExpansionTouched(false);
+  }, [id]);
+
+  useEffect(() => {
+    if (!cardsExpansionTouched) setCardsExpanded(cards.length <= AUTO_EXPAND_CARD_LIMIT);
+  }, [cards.length, cardsExpansionTouched]);
 
   const load = useCallback(async () => {
     if (!repository || !id) return;
@@ -95,7 +109,7 @@ export default function DeckScreen() {
   return (
     <Screen>
       <FlatList
-        data={cards}
+        data={cardsExpanded ? cards : []}
         keyExtractor={(card) => card.id}
         contentContainerStyle={content}
         ListHeaderComponent={
@@ -226,7 +240,28 @@ export default function DeckScreen() {
             )}
 
             <Spacer size={theme.spacing.md} />
-            <SectionLabel>{t('cards')}</SectionLabel>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('cards')}
+              accessibilityState={{ expanded: cardsExpanded }}
+              onPress={() => {
+                setCardsExpansionTouched(true);
+                setCardsExpanded((expanded) => !expanded);
+              }}
+              style={styles.cardsHeader}
+            >
+              <Row justify="space-between">
+                <Row gap={theme.spacing.xs}>
+                  <SectionLabel>{t('cards')}</SectionLabel>
+                  <Label variant="caption" tone="faint">
+                    {cards.length}
+                  </Label>
+                </Row>
+                <Label variant="body" tone="faint">
+                  {cardsExpanded ? '⌃' : '⌄'}
+                </Label>
+              </Row>
+            </Pressable>
           </View>
         }
         renderItem={({ item }) => (
@@ -379,5 +414,6 @@ const styles = StyleSheet.create({
   grow: { flex: 1 },
   form: { gap: 16 },
   limitCard: { gap: 4 },
+  cardsHeader: { paddingVertical: 8 },
   footer: { marginTop: 24 },
 });

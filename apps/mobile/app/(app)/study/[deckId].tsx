@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import {
@@ -13,6 +13,7 @@ import {
 import { useI18n } from '../../../src/i18n';
 import { useApp } from '../../../src/state/app';
 import type { ExampleResult } from '../../../src/ai/service';
+import { lookUpMeanings, lookupSources } from '../../../src/ai/desktop';
 import {
   Button,
   Divider,
@@ -72,6 +73,10 @@ export default function StudyScreen() {
   const [reviewed, setReviewed] = useState(0);
   const [lapses, setLapses] = useState(0);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const addingWords = useRef(new Set<string>());
   const [loading, setLoading] = useState(true);
 
   const card = queue[index] ?? null;
@@ -168,6 +173,7 @@ export default function StudyScreen() {
         if (rating === 'again') setLapses((count) => count + 1);
         setRevealed(false);
         setExamples(null);
+        setToolsOpen(false);
         // A card whose next step lands inside the learn-ahead window goes back
         // on the end of the queue; anything further out is done for today.
         if (dueWithinSession(answered)) setQueue((current) => [...current, answered]);
@@ -189,6 +195,7 @@ export default function StudyScreen() {
     setUndoState(null);
     setRevealed(false);
     setExamples(null);
+    setToolsOpen(false);
     await refreshDecks();
   }, [repository, user, undoState, refreshDecks]);
 
@@ -201,19 +208,81 @@ export default function StudyScreen() {
       setUndoState(null);
       setRevealed(false);
       setExamples(null);
+      setToolsOpen(false);
       await refreshDecks();
     },
     [repository, card, refreshDecks],
   );
 
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2400);
+  }, []);
+
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
+
   const regenerate = useCallback(() => {
-    if (!card || !exampleService) return;
+    if (!card || !exampleService || generating) return;
+    const previous = examples;
     setGenerating(true);
+    // Clear the old result so the learner gets an unambiguous loading state.
+    // Previously the old sentences stayed visible throughout the request,
+    // making a successful regeneration look like a no-op.
+    setExamples(null);
     exampleService
       .forCard(card, true)
       .then(setExamples)
+      .catch(() => {
+        setExamples(previous);
+        showToast(t('regenerateFailed'));
+      })
       .finally(() => setGenerating(false));
-  }, [card, exampleService]);
+  }, [card, exampleService, examples, generating, showToast, t]);
+
+  const captureWord = useCallback(
+    (word: string, sentence: string) => {
+      if (!card || !deck || !repository || !user) return;
+      const key = `${deck.id}:${word.trim().toLocaleLowerCase()}`;
+      if (addingWords.current.has(key)) return;
+      addingWords.current.add(key);
+
+      void (async () => {
+        try {
+          // Try the free dictionary first, then use the configured AI model
+          // for words the dictionary does not know.
+          const [lookup, sources] = await Promise.all([
+            lookUpMeanings([word], card.language, undefined, { useModel: false }),
+            lookupSources(),
+          ]);
+          let meaning = lookup.meanings[0]?.meaning?.trim() ?? '';
+          if (!meaning && sources.cloud?.available) {
+            meaning = (await lookUpMeanings([word], card.language)).meanings[0]?.meaning?.trim() ?? '';
+          }
+          if (!meaning) {
+            showToast(t('wordMeaningUnavailable'));
+            return;
+          }
+
+          const existing = await repository.findCardByFront(deck.id, word);
+          if (existing) {
+            showToast(t('wordAlreadyInDeck'));
+            return;
+          }
+          await repository.addCard(user.id, deck, word, meaning, [sentence]);
+          showToast(t('wordAdded', { deck: deck.name }));
+          await refreshDecks();
+        } catch (cause) {
+          showToast(cause instanceof Error ? cause.message : String(cause));
+        } finally {
+          addingWords.current.delete(key);
+        }
+      })();
+    },
+    [card, deck, repository, user, showToast, t, refreshDecks],
+  );
 
   const stageWidth = wide ? Math.min(width, STAGE_WIDTH) : width;
 
@@ -311,6 +380,8 @@ export default function StudyScreen() {
                       result={examples}
                       generating={generating}
                       onRegenerate={regenerate}
+                      onWordPress={captureWord}
+                      toast={toast}
                     />
                   </>
                 ) : (
@@ -345,41 +416,50 @@ export default function StudyScreen() {
         <View style={styles.controls}>
           {revealed ? (
             <>
-              <Row gap={theme.spacing.xs}>
-                {RATING_NAMES.map((rating) => (
-                  <RatingButton
-                    key={rating}
-                    rating={rating}
-                    tone={theme.colors[rating]}
-                    interval={intervals?.[rating]}
-                    onPress={rate}
-                  />
-                ))}
+              <Row gap={theme.spacing.xs} align="flex-start">
+                <Row gap={theme.spacing.xs} style={styles.ratingRow}>
+                  {RATING_NAMES.map((rating) => (
+                    <RatingButton
+                      key={rating}
+                      rating={rating}
+                      tone={theme.colors[rating]}
+                      interval={intervals?.[rating]}
+                      onPress={rate}
+                    />
+                  ))}
+                </Row>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('studyOptions')}
+                  accessibilityState={{ expanded: toolsOpen }}
+                  onPress={() => setToolsOpen((open) => !open)}
+                  style={styles.gearButton}
+                >
+                  <Label variant="body" align="center" style={styles.gearIcon}>
+                    ⚙
+                  </Label>
+                </Pressable>
               </Row>
-              <Spacer size={theme.spacing.sm} />
-              <Row gap={theme.spacing.xs}>
-                <Button
-                  label={t('bury')}
-                  variant="secondary"
-                  onPress={() => void removeFromSession('bury')}
-                  style={styles.flex}
-                />
-                <Button
-                  label={t('suspend')}
-                  variant="ghostDanger"
-                  onPress={() => void removeFromSession('suspend')}
-                  style={styles.flex}
-                />
-                {undoState ? (
-                  <Button label={t('undo')} variant="ghost" onPress={() => void undo()} style={styles.flex} />
-                ) : null}
-              </Row>
-              {Platform.OS === 'web' ? (
+              {toolsOpen ? (
                 <>
                   <Spacer size={theme.spacing.sm} />
-                  <Label variant="caption" tone="faint" align="center">
-                    {t('keyboardHint')}
-                  </Label>
+                  <Row gap={theme.spacing.xs}>
+                    <Button
+                      label={t('bury')}
+                      variant="secondary"
+                      onPress={() => void removeFromSession('bury')}
+                      style={styles.flex}
+                    />
+                    <Button
+                      label={t('suspend')}
+                      variant="ghostDanger"
+                      onPress={() => void removeFromSession('suspend')}
+                      style={styles.flex}
+                    />
+                    {undoState ? (
+                      <Button label={t('undo')} variant="ghost" onPress={() => void undo()} style={styles.flex} />
+                    ) : null}
+                  </Row>
                 </>
               ) : null}
             </>
@@ -420,6 +500,20 @@ function CardShell({
     >
       {children}
     </Pressable>
+  );
+}
+
+function Toast({ message }: { message: string | null }) {
+  const theme = useTheme();
+  if (!message) return null;
+  return (
+    <View pointerEvents="none" style={styles.toast}>
+      <View style={[styles.toastBubble, { backgroundColor: theme.colors.text }]}>
+        <Label variant="caption" tone="inverse" align="center">
+          {message}
+        </Label>
+      </View>
+    </View>
   );
 }
 
@@ -465,10 +559,14 @@ function ExampleBlock({
   result,
   generating,
   onRegenerate,
+  onWordPress,
+  toast,
 }: {
   result: ExampleResult | null;
   generating: boolean;
   onRegenerate: () => void;
+  onWordPress: (word: string, sentence: string) => void;
+  toast: string | null;
 }) {
   const { t } = useI18n();
   const theme = useTheme();
@@ -500,10 +598,10 @@ function ExampleBlock({
       </Row>
 
       {result.examples.map((example) => (
-        <Label key={example} variant="body" selectable style={styles.example}>
-          {example}
-        </Label>
+        <SentenceWords key={example} sentence={example} onWordPress={onWordPress} />
       ))}
+
+      <Toast message={toast} />
 
       {isFallback ? (
         <>
@@ -522,6 +620,50 @@ function ExampleBlock({
           ) : null}
         </>
       ) : null}
+    </View>
+  );
+}
+
+function SentenceWords({
+  sentence,
+  onWordPress,
+}: {
+  sentence: string;
+  onWordPress: (word: string, sentence: string) => void;
+}) {
+  const theme = useTheme();
+  const tokens = sentence.match(/[\p{L}\p{M}\p{N}]+(?:['’-][\p{L}\p{M}\p{N}]+)*|[^\p{L}\p{M}\p{N}]+/gu) ?? [sentence];
+  return (
+    <View style={styles.sentenceWrap}>
+      {/* Keep the sentence available as one selectable text node for screen
+          readers and copy/search tooling; the visible layer adds word actions. */}
+      <Label variant="body" selectable style={styles.sentenceFullText}>
+        {sentence}
+      </Label>
+      <View style={styles.sentence}>
+        {tokens.map((token, index) => {
+          const isWord = /[\p{L}\p{M}\p{N}]/u.test(token);
+          return isWord ? (
+            <Pressable
+              key={`${token}-${index}`}
+              accessibilityRole="button"
+              accessibilityLabel={token}
+              onPress={() => onWordPress(token, sentence)}
+              style={({ pressed }) => [
+                styles.wordButton,
+                { borderBottomColor: theme.colors.accent },
+                pressed ? { backgroundColor: theme.colors.accentSoft } : null,
+              ]}
+            >
+              <Label variant="body">{token}</Label>
+            </Pressable>
+          ) : (
+            <Label key={`${token}-${index}`} variant="body" style={styles.sentenceText}>
+              {token}
+            </Label>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -584,5 +726,33 @@ const styles = StyleSheet.create({
   examples: { gap: 8 },
   examplesLabel: { textTransform: 'uppercase', letterSpacing: 0.6, flex: 1 },
   example: {},
+  sentenceWrap: { position: 'relative' },
+  sentenceFullText: { position: 'absolute', opacity: 0, height: 0, width: 0 },
+  sentence: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
+  sentenceText: { includeFontPadding: false },
+  wordButton: {
+    borderBottomWidth: 1,
+    borderRadius: 3,
+    paddingHorizontal: 2,
+  },
+  toast: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  ratingRow: { flex: 1 },
+  gearButton: {
+    width: 48,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gearIcon: { fontSize: 22 },
+  toastBubble: {
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    maxWidth: 440,
+  },
   controls: { padding: 16 },
 });
