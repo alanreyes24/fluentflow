@@ -23,7 +23,7 @@ describe('Repository', () => {
     const row = await context.database.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version',
     );
-    expect(row?.user_version).toBe(9);
+    expect(row?.user_version).toBe(10);
   });
 
   it('round-trips a deck and its cards', async () => {
@@ -36,6 +36,7 @@ describe('Repository', () => {
     expect(decks).toHaveLength(1);
     expect(decks[0]?.cardCount).toBe(2);
     expect(decks[0]?.newCardsPerDay).toBe(20);
+    expect(decks[0]?.maxReviewsPerDay).toBe(50);
 
     const cards = await repository.listCards(deck.id);
     expect(cards.map((card) => card.front)).toEqual(['hablar', 'comer']);

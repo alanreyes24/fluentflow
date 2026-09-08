@@ -156,7 +156,7 @@ const migrations: Migration[] = [
   // 7 — Anki's separate daily limits for new cards and reviews.
   async (db) => {
     await db.execAsync(`
-      ALTER TABLE decks ADD COLUMN maxReviewsPerDay INTEGER DEFAULT 200;
+      ALTER TABLE decks ADD COLUMN maxReviewsPerDay INTEGER DEFAULT 50;
     `);
   },
 
@@ -173,6 +173,17 @@ const migrations: Migration[] = [
   async (db) => {
     await db.execAsync(`
       ALTER TABLE review_log ADD COLUMN previousState TEXT;
+    `);
+  },
+
+  // 10 — update decks that still carry the previous out-of-the-box review limit.
+  async (db) => {
+    await db.execAsync(`
+      UPDATE decks
+      SET maxReviewsPerDay = 50,
+          lastModified = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          syncStatus = 'pending'
+      WHERE maxReviewsPerDay = 200;
     `);
   },
 ];

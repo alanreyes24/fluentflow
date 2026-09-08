@@ -17,7 +17,6 @@ import {
 } from '@fluentflow/core';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
-import { usePreferences } from '../../src/state/preferences';
 import type { StudyStats } from '../../src/db/repository';
 import { BarChart, BreakdownBars, StudyCalendar, type Bar } from '../../src/ui/charts';
 import {
@@ -60,7 +59,6 @@ export default function StatsScreen() {
   const theme = useTheme();
   const content = useContentStyle();
   const { repository, user } = useApp();
-  const { dailyGoal } = usePreferences();
 
   const [stats, setStats] = useState<StudyStats | null>(null);
   const [range, setRange] = useState<Range>(30);
@@ -125,7 +123,7 @@ export default function StatsScreen() {
     <Screen>
       <ScrollView contentContainerStyle={[styles.content, content]}>
         <Surface elevation="sm">
-          <StreakCard streak={streak} reviewsToday={reviewsToday} goal={dailyGoal} />
+          <StreakCard streak={streak} reviewsToday={reviewsToday} />
         </Surface>
 
         <Spacer size={theme.spacing.lg} />
@@ -169,6 +167,40 @@ export default function StatsScreen() {
             </>
           ) : null}
         </Surface>
+
+        <Spacer size={theme.spacing.lg} />
+
+        <Surface elevation="sm">
+          <StatTile value={String(stats.cardsLearnedThisWeek)} label={t('learnedThisWeek')} />
+        </Surface>
+
+        {stats.mostMissedCards.length > 0 ? (
+          <>
+            <Spacer size={theme.spacing.lg} />
+            <SectionHeader title={t('mostMissed')} />
+            <Surface elevation="sm">
+              {stats.mostMissedCards.map((entry, index) => (
+                <View key={entry.cardId}>
+                  {index > 0 ? (
+                    <>
+                      <Spacer size={theme.spacing.sm} />
+                      <Divider />
+                      <Spacer size={theme.spacing.sm} />
+                    </>
+                  ) : null}
+                  <Row justify="space-between" gap={theme.spacing.sm}>
+                    <Label variant="label" numberOfLines={1} style={styles.grow}>
+                      {entry.front}
+                    </Label>
+                    <Label variant="caption" tone="danger">
+                      {t('missesCount', { count: entry.misses })}
+                    </Label>
+                  </Row>
+                </View>
+              ))}
+            </Surface>
+          </>
+        ) : null}
 
         <Spacer size={theme.spacing.lg} />
 

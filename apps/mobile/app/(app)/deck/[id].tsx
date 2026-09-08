@@ -6,6 +6,7 @@ import { useI18n } from '../../../src/i18n';
 import { useApp } from '../../../src/state/app';
 import {
   Button,
+  Badge,
   EmptyState,
   Field,
   Label,
@@ -39,6 +40,8 @@ export default function DeckScreen() {
   const [cards, setCards] = useState<Card[]>([]);
   const [progress, setProgress] = useState<DeckProgress | null>(null);
   const [adding, setAdding] = useState(false);
+  const [editingCardId, setEditingCardId] = useState<string | null>(null);
+  const [duplicateCardId, setDuplicateCardId] = useState<string | null>(null);
   const [cardsExpanded, setCardsExpanded] = useState(true);
   const [cardsExpansionTouched, setCardsExpansionTouched] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -209,12 +212,22 @@ export default function DeckScreen() {
 
             {adding ? (
               <NewCardForm
-                onCancel={() => setAdding(false)}
+                onCancel={() => {
+                  setAdding(false);
+                  setDuplicateCardId(null);
+                }}
+                error={duplicateCardId === 'new' ? t('duplicateCardHint') : undefined}
                 onCreate={async (front, back) => {
-                  if (!repository || !user) return;
+                  if (!repository || !user) return false;
+                  if (await repository.findCardByFront(deck.id, front)) {
+                    setDuplicateCardId('new');
+                    return false;
+                  }
                   await repository.addCard(user.id, deck, front, back);
                   await load();
                   await refreshDecks();
+                  setDuplicateCardId(null);
+                  return true;
                 }}
               />
             ) : (
@@ -222,7 +235,10 @@ export default function DeckScreen() {
                 <Button
                   label={t('addCard')}
                   variant="secondary"
-                  onPress={() => setAdding(true)}
+                  onPress={() => {
+                    setDuplicateCardId(null);
+                    setAdding(true);
+                  }}
                   style={styles.grow}
                 />
                 <Button
@@ -265,17 +281,44 @@ export default function DeckScreen() {
           </View>
         }
         renderItem={({ item }) => (
-          <CardRow
-            card={item}
-            onDelete={() =>
-              confirm(t('delete'), item.front, t('delete'), async () => {
-                if (!repository) return;
-                await repository.deleteCard(item);
+          editingCardId === item.id ? (
+            <NewCardForm
+              initialFront={item.front}
+              initialBack={item.back}
+              onCancel={() => setEditingCardId(null)}
+              error={duplicateCardId === item.id ? t('duplicateCardHint') : undefined}
+              onCreate={async (front, back) => {
+                if (!repository) return false;
+                const duplicate = await repository.findCardByFront(deck.id, front);
+                if (duplicate && duplicate.id !== item.id) {
+                  setDuplicateCardId(item.id);
+                  return false;
+                }
+                await repository.updateCard(item, { front, back });
+                setDuplicateCardId(null);
+                setEditingCardId(null);
                 await load();
                 await refreshDecks();
-              })
-            }
-          />
+                return true;
+              }}
+            />
+          ) : (
+            <CardRow
+              card={item}
+              onEdit={() => {
+                setDuplicateCardId(null);
+                setEditingCardId(item.id);
+              }}
+              onDelete={() =>
+                confirm(t('delete'), item.front, t('delete'), async () => {
+                  if (!repository) return;
+                  await repository.deleteCard(item);
+                  await load();
+                  await refreshDecks();
+                })
+              }
+            />
+          )
         )}
         ItemSeparatorComponent={() => <Spacer size={theme.spacing.xs} />}
         ListFooterComponent={
@@ -307,8 +350,9 @@ function Legend({
   );
 }
 
-function CardRow({ card, onDelete }: { card: Card; onDelete: () => void }) {
+function CardRow({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; onDelete: () => void }) {
   const theme = useTheme();
+  const { t } = useI18n();
   return (
     <Surface style={styles.card}>
       <Row gap={theme.spacing.sm}>
@@ -321,6 +365,17 @@ function CardRow({ card, onDelete }: { card: Card; onDelete: () => void }) {
             {card.back}
           </Label>
         </View>
+        {card.leech ? <Badge tone="plain">{t('leech')}</Badge> : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${t('edit')} ${card.front}`}
+          onPress={onEdit}
+          hitSlop={8}
+        >
+          <Label variant="caption" tone="accent">
+            ✎
+          </Label>
+        </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Delete ${card.front}`}
@@ -339,24 +394,32 @@ function CardRow({ card, onDelete }: { card: Card; onDelete: () => void }) {
 function NewCardForm({
   onCreate,
   onCancel,
+  initialFront = '',
+  initialBack = '',
+  error,
 }: {
-  onCreate: (front: string, back: string) => Promise<void>;
+  onCreate: (front: string, back: string) => Promise<boolean>;
   onCancel: () => void;
+  initialFront?: string;
+  initialBack?: string;
+  error?: string;
 }) {
   const { t } = useI18n();
   const theme = useTheme();
-  const [front, setFront] = useState('');
-  const [back, setBack] = useState('');
+  const [front, setFront] = useState(initialFront);
+  const [back, setBack] = useState(initialBack);
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (!front.trim() || !back.trim() || busy) return;
     setBusy(true);
     try {
-      await onCreate(front.trim(), back.trim());
-      // Stay open and clear: adding ten cards in a row is the common case.
-      setFront('');
-      setBack('');
+      const saved = await onCreate(front.trim(), back.trim());
+      if (saved && !initialFront && !initialBack) {
+        // Stay open and clear: adding ten cards in a row is the common case.
+        setFront('');
+        setBack('');
+      }
     } finally {
       setBusy(false);
     }
@@ -364,6 +427,7 @@ function NewCardForm({
 
   return (
     <Surface style={styles.form}>
+      {error ? <Label variant="caption" tone="danger">{error}</Label> : null}
       <Field label={t('front')} value={front} onChangeText={setFront} autoFocus />
       <Field
         label={t('back')}

@@ -23,6 +23,7 @@ import {
   type DayCount,
   type Deck,
   type DeckProgress,
+  type MissedCard,
   type RatingCounts,
   type RatingName,
   type ReviewEvent,
@@ -56,6 +57,8 @@ export interface StudyStats {
   ratings: RatingCounts;
   forecast: DayCount[];
   collection: CollectionSummary;
+  cardsLearnedThisWeek: number;
+  mostMissedCards: MissedCard[];
   decks: { deck: Deck; progress: DeckProgress }[];
 }
 
@@ -165,7 +168,7 @@ export class Repository {
     now: Date = new Date(),
     limit = 200,
     newCardsPerDay: number | null = 20,
-    maxReviewsPerDay: number | null = 200,
+    maxReviewsPerDay: number | null = 50,
   ): Promise<Card[]> {
     return (await this.studyQueue(deckId, now, limit, newCardsPerDay, maxReviewsPerDay)).cards;
   }
@@ -176,7 +179,7 @@ export class Repository {
     now: Date = new Date(),
     limit = 200,
     newCardsPerDay: number | null = 20,
-    maxReviewsPerDay: number | null = 200,
+    maxReviewsPerDay: number | null = 50,
   ): Promise<StudyQueue> {
     const candidateLimit = Math.max(limit * 4, 1000);
     const [reviewRows, newRows, introduced, reviewed] = await Promise.all([
@@ -439,6 +442,39 @@ export class Repository {
     return counts;
   }
 
+  /** Cards that graduated from learning during the trailing seven days. */
+  async cardsLearnedSince(userId: string, since: Date): Promise<number> {
+    const rows = await this.db.getAllAsync<{ cardId: string; interval: number; previousState: string | null }>(
+      `SELECT cardId, interval, previousState FROM review_log
+       WHERE userId = ? AND reviewedAt >= ? AND interval >= 1`,
+      userId,
+      since.toISOString(),
+    );
+    const learned = new Set<string>();
+    for (const row of rows) {
+      const previous = row.previousState ? parseCardSnapshot(row.previousState) : null;
+      const phase = previous ? schedulingStateFor(previous).phase : null;
+      if (phase === 'new' || phase === 'learning') learned.add(row.cardId);
+    }
+    return learned.size;
+  }
+
+  /** Cards with the most Again answers, used to focus review effort. */
+  async mostMissedCards(userId: string, limit = 5): Promise<MissedCard[]> {
+    const rows = await this.db.getAllAsync<{ cardId: string; front: string; misses: number }>(
+      `SELECT r.cardId, c.front, COUNT(*) AS misses
+       FROM review_log r
+       JOIN cards c ON c.id = r.cardId
+       WHERE r.userId = ? AND r.rating = 'again' AND c.deleted = 0
+       GROUP BY r.cardId, c.front
+       ORDER BY misses DESC, c.front COLLATE NOCASE
+       LIMIT ?`,
+      userId,
+      limit,
+    );
+    return rows.map((row) => ({ cardId: row.cardId, front: row.front, misses: row.misses }));
+  }
+
   /** Review events waiting to be copied to the shared account. */
   async pendingReviewEvents(userId: string): Promise<ReviewEvent[]> {
     const rows = await this.db.getAllAsync<ReviewEventRow>(
@@ -465,11 +501,15 @@ export class Repository {
    * time the range selector moved.
    */
   async studyStats(userId: string, now: Date = new Date(), horizonDays = 14): Promise<StudyStats> {
-    const [days, ratings, cards, decks] = await Promise.all([
+    const weekStart = new Date(now);
+    weekStart.setDate(weekStart.getDate() - 6);
+    const [days, ratings, cards, decks, cardsLearnedThisWeek, mostMissedCards] = await Promise.all([
       this.reviewDays(userId, now),
       this.ratingCounts(userId),
       this.listAllCards(userId),
       this.listDecks(userId),
+      this.cardsLearnedSince(userId, weekStart),
+      this.mostMissedCards(userId),
     ]);
 
     return {
@@ -477,6 +517,8 @@ export class Repository {
       ratings,
       forecast: forecast(cards, { days: horizonDays, now }),
       collection: collectionSummary(cards, decks.length, now),
+      cardsLearnedThisWeek,
+      mostMissedCards,
       decks: decks.map((deck) => ({
         deck,
         progress: deckProgress(
@@ -714,7 +756,7 @@ export class Repository {
         deck.name,
         deck.language,
         deck.newCardsPerDay ?? 20,
-        deck.maxReviewsPerDay ?? 200,
+        deck.maxReviewsPerDay ?? 50,
         deck.cardCount,
         deck.createdAt,
         deck.lastModified,
@@ -853,7 +895,7 @@ function toDeck(row: DeckRow): Deck {
     name: row.name,
     language: row.language as Deck['language'],
     newCardsPerDay: row.newCardsPerDay ?? 20,
-    maxReviewsPerDay: row.maxReviewsPerDay ?? 200,
+    maxReviewsPerDay: row.maxReviewsPerDay ?? 50,
     cardCount: row.cardCount,
     createdAt: row.createdAt,
     lastModified: row.lastModified,

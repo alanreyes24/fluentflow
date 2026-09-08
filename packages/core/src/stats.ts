@@ -32,6 +32,12 @@ export interface DayCount {
   count: number;
 }
 
+export interface MissedCard {
+  cardId: string;
+  front: string;
+  misses: number;
+}
+
 export interface StreakSummary {
   /** Consecutive days ending today, or ending yesterday if today is untouched. */
   current: number;

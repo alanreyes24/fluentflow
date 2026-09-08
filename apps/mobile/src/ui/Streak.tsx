@@ -18,12 +18,10 @@ import type { ViewStyleProp } from './styles';
 export function StreakCard({
   streak,
   reviewsToday,
-  goal,
   style,
 }: {
   streak: StreakSummary;
   reviewsToday: number;
-  goal: number;
   style?: ViewStyleProp;
 }) {
   const theme = useTheme();
@@ -36,7 +34,10 @@ export function StreakCard({
       ? t('streakAtRisk')
       : t('streakNone');
 
-  const met = goal > 0 && reviewsToday >= goal;
+  // One completed review keeps the streak active. There is intentionally no
+  // configurable target here: a streak should reward consistency, not volume.
+  const goal = 1;
+  const met = reviewsToday >= goal;
 
   return (
     <View style={style}>

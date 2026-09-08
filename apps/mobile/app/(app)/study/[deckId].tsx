@@ -4,6 +4,7 @@ import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import {
   RATING_NAMES,
   RATINGS,
+  ratingFromValue,
   review,
   schedulingStateFor,
   type Card,
@@ -16,6 +17,7 @@ import type { ExampleResult } from '../../../src/ai/service';
 import { lookUpMeanings, lookupSources } from '../../../src/ai/desktop';
 import {
   Button,
+  Badge,
   Divider,
   EmptyState,
   Label,
@@ -95,7 +97,7 @@ export default function StudyScreen() {
             new Date(),
             200,
             loadedDeck?.newCardsPerDay ?? 20,
-            loadedDeck?.maxReviewsPerDay ?? 200,
+            loadedDeck?.maxReviewsPerDay ?? 50,
           );
       if (cancelled) return;
       setDeck(loadedDeck);
@@ -183,6 +185,25 @@ export default function StudyScreen() {
     },
     [repository, card, revealed, refreshDecks, queue, index, reviewed, lapses],
   );
+
+  // Anki's desktop muscle memory is 1=Again, 2=Hard, 3=Good, 4=Easy.
+  // The web build is also the keyboard surface for the Electron desktop app.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!revealed || event.defaultPrevented) return;
+      const target = event.target as { tagName?: string; isContentEditable?: boolean } | null;
+      if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')) {
+        return;
+      }
+      const rating = ratingFromValue(Number(event.key));
+      if (!rating) return;
+      event.preventDefault();
+      rate(rating);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [revealed, rate]);
 
   const undo = useCallback(async () => {
     if (!repository || !user || !undoState) return;
@@ -347,6 +368,7 @@ export default function StudyScreen() {
             <Label variant="caption" tone="faint">
               {t(statusKey(card.status))}
             </Label>
+            {card.leech ? <Badge tone="plain">{t('leech')}</Badge> : null}
           </Row>
         </View>
 

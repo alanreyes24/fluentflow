@@ -148,11 +148,11 @@ function Summary({ due, cards }: { due: number; cards: number }) {
       ]}
     >
       <Label variant="title" tone={due > 0 ? 'accent' : 'default'}>
-        {due > 0 ? t('dueCount', { count: due }) : t('sessionComplete')}
+      {due > 0 ? t('dueCount', { count: due }) : t('allCaughtUp')}
       </Label>
       <Spacer size={theme.spacing.xs} />
       <Label variant="caption" tone="faint">
-        {due > 0 ? t('cardCount', { count: cards }) : t('sessionCompleteHint')}
+        {due > 0 ? t('cardCount', { count: cards }) : t('allCaughtUpHint')}
       </Label>
     </Surface>
   );
@@ -192,7 +192,7 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
                   {LANGUAGE_NAMES[deck.language]} · {t('cardCount', { count: deck.cardCount })}
                 </Label>
               </View>
-              {due > 0 ? <Badge>{due}</Badge> : null}
+              {due > 0 ? <Badge>{due}</Badge> : <Badge tone="plain">✓</Badge>}
             </Row>
 
             {progress && progress.total > 0 ? (

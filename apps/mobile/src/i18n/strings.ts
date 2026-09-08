@@ -240,6 +240,12 @@ export const en = {
   noStatsYet: 'No reviews yet',
   noStatsHint: 'Rate a card and this screen fills in.',
   byDeck: 'By deck',
+  learnedThisWeek: 'Learned this week',
+  mostMissed: 'Most missed',
+  missesCount: '{count} Again ratings',
+  leech: 'Leech',
+  duplicateCard: 'Duplicate card',
+  duplicateCardHint: 'That word is already in this deck.',
 
   // Session
   sessionAccuracy: 'Accuracy',
@@ -481,6 +487,12 @@ const es: Strings = {
   noStatsYet: 'Todavía no hay repasos',
   noStatsHint: 'Califica una tarjeta y esta pantalla se llenará.',
   byDeck: 'Por mazo',
+  learnedThisWeek: 'Aprendidas esta semana',
+  mostMissed: 'Más falladas',
+  missesCount: '{count} calificaciones de Otra vez',
+  leech: 'Repetida muchas veces',
+  duplicateCard: 'Tarjeta duplicada',
+  duplicateCardHint: 'Esa palabra ya está en este mazo.',
 
   sessionAccuracy: 'Acierto',
   intervalMinutes: '{count} min',
@@ -712,6 +724,12 @@ const bs: Strings = {
   noStatsYet: 'Još nema ponavljanja',
   noStatsHint: 'Ocijenite karticu i ovaj ekran će se popuniti.',
   byDeck: 'Po špilu',
+  learnedThisWeek: 'Naučeno ove sedmice',
+  mostMissed: 'Najčešće promašene',
+  missesCount: '{count} ocjena Ponovo',
+  leech: 'Problematična kartica',
+  duplicateCard: 'Duplikat kartice',
+  duplicateCardHint: 'Ta riječ je već u ovom špilu.',
 
   sessionAccuracy: 'Tačnost',
   intervalMinutes: '{count} min',

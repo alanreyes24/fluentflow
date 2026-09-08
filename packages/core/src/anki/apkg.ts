@@ -442,7 +442,7 @@ function ensureDeck(
     name: args.name,
     language,
     newCardsPerDay: 20,
-    maxReviewsPerDay: 200,
+    maxReviewsPerDay: 50,
     cardCount: 0,
     createdAt: args.nowIso,
     lastModified: args.nowIso,

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { View } from 'react-native';
+import { Platform, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import { useApp } from '../../src/state/app';
 import { subscribeToShellImports } from '../../src/desktop-import';
@@ -31,6 +31,20 @@ export default function AppLayout() {
   // or a deck opened with the app. This is the only place mounted for the whole
   // session, so it is the only place that can route one.
   useEffect(() => subscribeToShellImports(() => router.push('/(app)/import')), []);
+
+  // Escape is the desktop convention for leaving the current view. Keeping
+  // this in the shell makes it work consistently on every route, including
+  // screens that are added later.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || !router.canGoBack()) return;
+      event.preventDefault();
+      router.back();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   if (!user) return <Redirect href="/sign-in" />;
 

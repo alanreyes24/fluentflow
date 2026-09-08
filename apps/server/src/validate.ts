@@ -53,7 +53,7 @@ function parseDeck(value: unknown, userId: string, path: string): Deck {
     maxReviewsPerDay:
       raw.maxReviewsPerDay === null
         ? null
-        : integer(raw.maxReviewsPerDay ?? 200, `${path}.maxReviewsPerDay`, 1),
+        : integer(raw.maxReviewsPerDay ?? 50, `${path}.maxReviewsPerDay`, 1),
     cardCount: integer(raw.cardCount ?? 0, `${path}.cardCount`, 0),
     createdAt: isoDate(raw.createdAt, `${path}.createdAt`),
     lastModified: isoDate(raw.lastModified, `${path}.lastModified`),

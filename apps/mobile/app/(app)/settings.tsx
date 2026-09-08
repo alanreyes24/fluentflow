@@ -4,7 +4,6 @@ import { router } from 'expo-router';
 import { LANGUAGE_NAMES, SUPPORTED_LANGUAGES, type LanguageCode } from '@fluentflow/core';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
-import { DAILY_GOAL_OPTIONS, usePreferences } from '../../src/state/preferences';
 import { desktopBridge } from '../../src/desktop';
 import { modelStatus, type ModelStatus } from '../../src/ai/model';
 import {
@@ -41,7 +40,6 @@ export default function SettingsScreen() {
   const theme = useTheme();
   const { preference, setPreference } = useThemeContext();
   const { user, sync, syncNow, signOut, cloudAvailable } = useApp();
-  const { dailyGoal, setDailyGoal } = usePreferences();
   const content = useContentStyle();
   const desktop = desktopBridge();
 
@@ -54,21 +52,6 @@ export default function SettingsScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={content}>
-        <Section title={t('dailyGoal')}>
-          <SegmentedControl<string>
-            options={DAILY_GOAL_OPTIONS.map((goal) => ({
-              value: String(goal),
-              label: t('goalPerDay', { count: goal }),
-            }))}
-            value={String(dailyGoal)}
-            onChange={(next) => setDailyGoal(Number(next))}
-          />
-          <Spacer size={theme.spacing.sm} />
-          <Label variant="caption" tone="faint">
-            {t('dailyGoalHint')}
-          </Label>
-        </Section>
-
         <Section title={t('interfaceLanguage')}>
           <SegmentedControl
             options={SUPPORTED_LANGUAGES.map((code: LanguageCode) => ({

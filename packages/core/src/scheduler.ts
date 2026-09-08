@@ -622,7 +622,7 @@ export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptio
 
   const reviewAllowance = options.maxReviewsPerDay === null
     ? Number.MAX_SAFE_INTEGER
-    : Math.max(0, (options.maxReviewsPerDay ?? 200) - (options.reviewsAnsweredToday ?? 0));
+    : Math.max(0, (options.maxReviewsPerDay ?? 50) - (options.reviewsAnsweredToday ?? 0));
   const reviewCards = [...learning, ...reviews].slice(0, reviewAllowance);
   const newAllowance = options.newCardsPerDay === null
     ? Number.MAX_SAFE_INTEGER
