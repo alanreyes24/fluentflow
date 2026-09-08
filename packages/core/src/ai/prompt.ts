@@ -23,10 +23,13 @@ export interface ExamplePromptInput {
 const LANGUAGE_INSTRUCTIONS: Record<TargetLanguage, (word: string, count: number) => string> = {
   es: (word, count) =>
     `Escribe ${count} frases sencillas en español que usen la palabra "${word}". ` +
-    'Cada frase debe tener entre 4 y 12 palabras.',
+    'Cada frase debe tener entre 4 y 12 palabras. Usa la colocación y la preposición más naturales para un hablante nativo; no traduzcas literalmente del inglés. ' +
+    'Si es una expresión fija, conserva su forma idiomática y añade los artículos que correspondan. ' +
+    'Por ejemplo, para "entrar a la fuerza en" es preferible "entrar por la fuerza en la casa/una casa"; "en casa" normalmente significa "at home".',
   bs: (word, count) =>
     `Napiši ${count} jednostavne rečenice na bosanskom jeziku koje koriste riječ "${word}". ` +
-    'Svaka rečenica treba imati između 4 i 12 riječi.',
+    'Svaka rečenica treba imati između 4 i 12 riječi. Koristi prirodne kolokacije i padeže; ne prevodi doslovno s engleskog. ' +
+    'Ako je riječ o ustaljenom izrazu, koristi njegov najprirodniji oblik.',
 };
 
 export function buildInstruction(input: ExamplePromptInput): string {
@@ -39,6 +42,8 @@ export function buildInstruction(input: ExamplePromptInput): string {
     `Generate ${count} simple example sentences using the word "${input.word}" in ${languageName}.` +
     meaning +
     ` ${localized}` +
+    ' The sentences must sound like natural, contemporary usage to a native speaker, not merely be grammatically possible.' +
+    ' Prefer a different sentence or construction if the requested phrase would sound unnatural in context.' +
     ' Format the answer as a JSON array of strings.' +
     ' Example: ["sentence 1", "sentence 2"]'
   );

@@ -19,6 +19,9 @@ test('the instruction names the word, the language and the output format', () =>
   assert.match(instruction, /to speak/);
   // The localised half keeps a small model producing the target language.
   assert.match(instruction, /frases sencillas en español/);
+  assert.match(instruction, /colocación y la preposición más naturales/);
+  assert.match(instruction, /no traduzcas literalmente del inglés/);
+  assert.match(instruction, /entrar por la fuerza/);
 });
 
 test('the prompt is the bare instruction, with no chat template around it', () => {
