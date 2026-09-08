@@ -23,6 +23,7 @@ import {
 import { useTheme } from '../../../src/ui/theme';
 
 const NEW_CARD_LIMIT_OPTIONS = [10, 20, 40, 80] as const;
+const REVIEW_LIMIT_OPTIONS = [50, 100, 200, 400] as const;
 
 /** Deck detail: progress, the study entry point, and card management. */
 export default function DeckScreen() {
@@ -161,6 +162,32 @@ export default function DeckScreen() {
               <Spacer size={theme.spacing.xs} />
               <Label variant="caption" tone="faint">
                 {t('newCardsPerDayHint')}
+              </Label>
+              <Spacer size={theme.spacing.md} />
+              <SectionLabel>{t('maxReviewsPerDay')}</SectionLabel>
+              <Spacer size={theme.spacing.xs} />
+              <SegmentedControl<string>
+                options={[
+                  ...REVIEW_LIMIT_OPTIONS.map((count) => ({
+                    value: String(count),
+                    label: String(count),
+                  })),
+                  { value: 'unlimited', label: t('unlimited') },
+                ]}
+                value={deck.maxReviewsPerDay === null ? 'unlimited' : String(deck.maxReviewsPerDay)}
+                onChange={(value) => {
+                  if (!repository) return;
+                  void repository
+                    .setMaxReviewsPerDay(deck, value === 'unlimited' ? null : Number(value))
+                    .then((updated) => {
+                      setDeck(updated);
+                      return refreshDecks();
+                    });
+                }}
+              />
+              <Spacer size={theme.spacing.xs} />
+              <Label variant="caption" tone="faint">
+                {t('maxReviewsPerDayHint')}
               </Label>
             </Surface>
 

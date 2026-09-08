@@ -47,6 +47,8 @@ export const en = {
   noCardsYet: 'This deck has no cards yet.',
   newCardsPerDay: 'New cards per day',
   newCardsPerDayHint: 'How many untouched cards this deck can introduce today.',
+  maxReviewsPerDay: 'Maximum reviews per day',
+  maxReviewsPerDayHint: 'Learning and review cards shown during this collection day.',
   unlimited: 'Unlimited',
 
   // Study
@@ -65,6 +67,9 @@ export const en = {
   examplesOffline: 'Offline examples',
   examplesOfflineHint: 'The model was unavailable, so these are generic.',
   regenerate: 'Regenerate',
+  bury: 'Bury until tomorrow',
+  suspend: 'Suspend card',
+  undo: 'Undo',
 
   // Progress
   statusNew: 'New',
@@ -289,6 +294,8 @@ const es: Strings = {
   noCardsYet: 'Este mazo aún no tiene tarjetas.',
   newCardsPerDay: 'Tarjetas nuevas por día',
   newCardsPerDayHint: 'Cuántas tarjetas sin estudiar puede introducir este mazo hoy.',
+  maxReviewsPerDay: 'Máximo de repasos por día',
+  maxReviewsPerDayHint: 'Tarjetas de aprendizaje y repaso que se muestran hoy.',
   unlimited: 'Sin límite',
 
   study: 'Estudiar',
@@ -306,6 +313,9 @@ const es: Strings = {
   examplesOffline: 'Ejemplos sin conexión',
   examplesOfflineHint: 'El modelo no estaba disponible, así que estos son genéricos.',
   regenerate: 'Regenerar',
+  bury: 'Enterrar hasta mañana',
+  suspend: 'Suspender tarjeta',
+  undo: 'Deshacer',
 
   statusNew: 'Nuevas',
   statusLearning: 'Aprendiendo',
@@ -511,6 +521,8 @@ const bs: Strings = {
   noCardsYet: 'Ovaj špil još nema kartica.',
   newCardsPerDay: 'Nove kartice dnevno',
   newCardsPerDayHint: 'Koliko neobrađenih kartica ovaj špil može uvesti danas.',
+  maxReviewsPerDay: 'Najviše ponavljanja dnevno',
+  maxReviewsPerDayHint: 'Kartice za učenje i ponavljanje prikazane tokom ovog dana.',
   unlimited: 'Bez ograničenja',
 
   study: 'Uči',
@@ -528,6 +540,9 @@ const bs: Strings = {
   examplesOffline: 'Primjeri bez interneta',
   examplesOfflineHint: 'Model nije bio dostupan, pa su ovi primjeri opšti.',
   regenerate: 'Generiši ponovo',
+  bury: 'Zakopaj do sutra',
+  suspend: 'Suspenduj karticu',
+  undo: 'Poništi',
 
   statusNew: 'Nove',
   statusLearning: 'Učenje',

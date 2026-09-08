@@ -16,6 +16,9 @@ import {
   MASTERED_INTERVAL_DAYS,
   MS_PER_DAY,
   MS_PER_MINUTE,
+  collectionDayKey,
+  addCollectionDays,
+  buildStudyQueue,
 } from '../dist/index.js';
 
 const NOW = new Date('2024-09-03T10:00:00.000Z');
@@ -358,4 +361,37 @@ test('due cards exclude future and deleted cards, most overdue first', () => {
     mastered: 0,
     due: 2,
   });
+});
+
+test('collection days roll over at 4am and review due days ignore timestamps', () => {
+  const beforeBoundary = new Date(2024, 8, 4, 3, 59);
+  const afterBoundary = new Date(2024, 8, 4, 4, 0);
+  assert.equal(collectionDayKey(beforeBoundary), '2024-09-03');
+  assert.equal(collectionDayKey(afterBoundary), '2024-09-04');
+  assert.equal(addCollectionDays('2024-09-30', 1), '2024-10-01');
+
+  const card = reviewCard(
+    { ...reviewState(10), nextReview: NOW.toISOString() },
+    'good',
+    { now: afterBoundary, config: { fuzz: false } },
+  );
+  assert.equal(card.dueDay, addCollectionDays(collectionDayKey(afterBoundary), Math.round(card.interval)));
+});
+
+test('study queue applies review limits, new limits, and manual hiding', () => {
+  const learning = { ...reviewState(1), id: 'learning', phase: 'learning', nextReview: NOW.toISOString() };
+  const review = { ...reviewState(1), id: 'review', phase: 'review', nextReview: NOW.toISOString(), dueDay: collectionDayKey(NOW) };
+  const newOne = { ...reviewState(0), id: 'new-1', phase: 'new', interval: 0, nextReview: NOW.toISOString(), status: 'new' };
+  const newTwo = { ...newOne, id: 'new-2' };
+  const hidden = { ...newOne, id: 'suspended', suspended: true };
+  const buried = { ...newOne, id: 'buried', buriedUntil: addCollectionDays(collectionDayKey(NOW), 1) };
+
+  const queue = buildStudyQueue([learning, review, newOne, newTwo, hidden, buried], {
+    now: NOW,
+    newCardsPerDay: 1,
+    maxReviewsPerDay: 1,
+  });
+  assert.deepEqual(queue.cards.map((card) => card.id), ['learning', 'new-1']);
+  assert.equal(queue.learning, 1);
+  assert.equal(queue.new, 1);
 });

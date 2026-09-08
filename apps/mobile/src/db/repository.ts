@@ -2,6 +2,10 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import {
   EMPTY_RATING_COUNTS,
   RATING_NAMES,
+  addCollectionDays,
+  buildStudyQueue,
+  collectionDayKey,
+  collectionDayStart,
   collectionSummary,
   createCard,
   createDeck,
@@ -22,6 +26,7 @@ import {
   type RatingCounts,
   type RatingName,
   type ReviewEvent,
+  type StudyQueue,
   type StudyDay,
   type TargetLanguage,
 } from '@fluentflow/core';
@@ -90,6 +95,12 @@ export class Repository {
     return updated;
   }
 
+  async setMaxReviewsPerDay(deck: Deck, maxReviewsPerDay: number | null): Promise<Deck> {
+    const updated = touch({ ...deck, maxReviewsPerDay });
+    await this.saveDecks([updated]);
+    return updated;
+  }
+
   async deleteDeck(deck: Deck): Promise<void> {
     const cards = await this.listCards(deck.id);
     await this.db.withTransactionAsync(async () => {
@@ -141,49 +152,61 @@ export class Repository {
     now: Date = new Date(),
     limit = 200,
     newCardsPerDay: number | null = 20,
+    maxReviewsPerDay: number | null = 200,
   ): Promise<Card[]> {
-    const introduced = await this.newCardsIntroducedToday(deckId, now);
-    const remainingNew =
-      newCardsPerDay === null ? limit : Math.min(limit, Math.max(0, newCardsPerDay - introduced));
+    return (await this.studyQueue(deckId, now, limit, newCardsPerDay, maxReviewsPerDay)).cards;
+  }
 
-    const [reviewRows, newRows] = await Promise.all([
+  /** Gather learning, review, and new cards in Anki's normal queue order. */
+  async studyQueue(
+    deckId: string,
+    now: Date = new Date(),
+    limit = 200,
+    newCardsPerDay: number | null = 20,
+    maxReviewsPerDay: number | null = 200,
+  ): Promise<StudyQueue> {
+    const candidateLimit = Math.max(limit * 4, 1000);
+    const [reviewRows, newRows, introduced, reviewed] = await Promise.all([
       this.db.getAllAsync<CardRow>(
         `SELECT * FROM cards
-         WHERE deckId = ? AND deleted = 0 AND nextReview <= ? AND phase <> 'new'
-         ORDER BY nextReview
+         WHERE deckId = ? AND deleted = 0 AND phase <> 'new'
+         ORDER BY nextReview, rowid
          LIMIT ?`,
         deckId,
-        now.toISOString(),
-        limit,
+        candidateLimit,
       ),
-      remainingNew > 0
-        ? this.db.getAllAsync<CardRow>(
-            `SELECT * FROM cards
-             WHERE deckId = ? AND deleted = 0 AND nextReview <= ?
-               AND phase = 'new' AND introducedAt IS NULL
-             ORDER BY nextReview
-             LIMIT ?`,
-            deckId,
-            now.toISOString(),
-            remainingNew,
-          )
-        : Promise.resolve([] as CardRow[]),
+      this.db.getAllAsync<CardRow>(
+        `SELECT * FROM cards
+         WHERE deckId = ? AND deleted = 0 AND phase = 'new'
+         ORDER BY rowid
+         LIMIT ?`,
+        deckId,
+        candidateLimit,
+      ),
+      this.newCardsIntroducedToday(deckId, now),
+      this.reviewsAnsweredTodayForDeck(deckId, now),
     ]);
-
-    return [...reviewRows, ...newRows]
-      .sort((a, b) => Date.parse(a.nextReview) - Date.parse(b.nextReview))
-      .slice(0, limit)
-      .map(toCard);
+    return buildStudyQueue([...reviewRows, ...newRows].map(toCard), {
+      now,
+      limit,
+      newCardsPerDay,
+      maxReviewsPerDay,
+      newCardsIntroducedToday: introduced,
+      reviewsAnsweredToday: reviewed,
+    });
   }
 
   /** Cards that are not due yet, for the "study ahead" path. */
   async upcomingCards(deckId: string, now: Date = new Date(), limit = 50): Promise<Card[]> {
     const rows = await this.db.getAllAsync<CardRow>(
       `SELECT * FROM cards
-       WHERE deckId = ? AND deleted = 0 AND nextReview > ?
+       WHERE deckId = ? AND deleted = 0 AND suspended = 0
+         AND (buriedUntil IS NULL OR buriedUntil <= ?)
+         AND nextReview > ?
        ORDER BY nextReview
        LIMIT ?`,
       deckId,
+      collectionDayKey(now),
       now.toISOString(),
       limit,
     );
@@ -232,8 +255,8 @@ export class Repository {
     await this.db.withTransactionAsync(async () => {
       await this.writeCards([withIntroduction]);
       await this.db.runAsync(
-        `INSERT INTO review_log (eventId, cardId, userId, rating, interval, easeFactor, reviewedAt, syncStatus)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        `INSERT INTO review_log (eventId, cardId, userId, rating, interval, easeFactor, reviewedAt, syncStatus, previousState)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         uuid(),
         withIntroduction.id,
         withIntroduction.userId,
@@ -241,23 +264,87 @@ export class Repository {
         withIntroduction.interval,
         withIntroduction.easeFactor,
         now.toISOString(),
+        JSON.stringify(card),
       );
     });
     return withIntroduction;
   }
 
   async newCardsIntroducedToday(deckId: string, now: Date = new Date()): Promise<number> {
-    const modifier = localDayModifier(now);
+    const start = collectionDayStart(now);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
     const row = await this.db.getFirstAsync<{ count: number }>(
       `SELECT COUNT(*) AS count FROM cards
-       WHERE deckId = ? AND deleted = 0 AND introducedAt IS NOT NULL
-         AND date(introducedAt, ?) = date(?, ?)`,
+       WHERE deckId = ? AND deleted = 0 AND introducedAt >= ? AND introducedAt < ?`,
       deckId,
-      modifier,
-      now.toISOString(),
-      modifier,
+      start.toISOString(),
+      end.toISOString(),
     );
-    return row?.count ?? 0;
+    return Number(row?.count ?? 0);
+  }
+
+  async reviewsAnsweredTodayForDeck(deckId: string, now: Date = new Date()): Promise<number> {
+    const start = collectionDayStart(now);
+    const rows = await this.db.getAllAsync<ReviewCountRow>(
+      `SELECT previousState FROM review_log
+       WHERE cardId IN (SELECT id FROM cards WHERE deckId = ?)
+         AND reviewedAt >= ? AND reviewedAt <= ?`,
+      deckId,
+      start.toISOString(),
+      now.toISOString(),
+    );
+    // A new-card answer introduces a card but does not consume Anki's review
+    // allowance. Older synced events have no snapshot, so count those
+    // conservatively as reviews.
+    return rows.filter((row) => {
+      if (!row.previousState) return true;
+      const previous = parseCardSnapshot(row.previousState);
+      return previous ? schedulingStateFor(previous).phase !== 'new' : true;
+    }).length;
+  }
+
+  async buryCard(card: Card, now: Date = new Date()): Promise<Card> {
+    const buried = touch({ ...card, buriedUntil: addCollectionDays(collectionDayKey(now), 1) });
+    await this.saveCards([buried]);
+    return buried;
+  }
+
+  async unburyCard(card: Card): Promise<Card> {
+    const updated = touch({ ...card, buriedUntil: undefined });
+    await this.saveCards([updated]);
+    return updated;
+  }
+
+  async suspendCard(card: Card): Promise<Card> {
+    const updated = touch({ ...card, suspended: true });
+    await this.saveCards([updated]);
+    return updated;
+  }
+
+  async unsuspendCard(card: Card): Promise<Card> {
+    const updated = touch({ ...card, suspended: false });
+    await this.saveCards([updated]);
+    return updated;
+  }
+
+  /** Undo the latest review while its upload is still pending. */
+  async undoLastReview(userId: string, now: Date = new Date()): Promise<Card | null> {
+    const row = await this.db.getFirstAsync<UndoRow>(
+      `SELECT id, cardId, syncStatus, previousState FROM review_log
+       WHERE userId = ? AND previousState IS NOT NULL
+       ORDER BY id DESC LIMIT 1`,
+      userId,
+    );
+    if (!row || row.syncStatus !== 'pending') return null;
+    const previous = parseCardSnapshot(row.previousState);
+    if (!previous) return null;
+    const restored = touch({ ...previous, suspended: previous.suspended ?? false }, now);
+    await this.db.withTransactionAsync(async () => {
+      await this.writeCards([restored]);
+      await this.db.runAsync("DELETE FROM review_log WHERE id = ? AND syncStatus = 'pending'", row.id);
+    });
+    return restored;
   }
 
   async saveCards(cards: Card[]): Promise<void> {
@@ -312,7 +399,7 @@ export class Repository {
        GROUP BY day
        ORDER BY day`,
       userId,
-      localDayModifier(now),
+      collectionDayModifier(now),
     );
     return rows.map((row) => ({ day: row.day, reviews: row.reviews, lapses: row.lapses ?? 0 }));
   }
@@ -597,13 +684,14 @@ export class Repository {
   private async writeDecks(decks: Deck[]): Promise<void> {
     for (const deck of decks) {
       await this.db.runAsync(
-        `INSERT INTO decks (id, userId, name, language, newCardsPerDay, cardCount, createdAt, lastModified, syncStatus, deleted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO decks (id, userId, name, language, newCardsPerDay, maxReviewsPerDay, cardCount, createdAt, lastModified, syncStatus, deleted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            userId = excluded.userId,
            name = excluded.name,
            language = excluded.language,
            newCardsPerDay = excluded.newCardsPerDay,
+           maxReviewsPerDay = excluded.maxReviewsPerDay,
            cardCount = excluded.cardCount,
            lastModified = excluded.lastModified,
            syncStatus = excluded.syncStatus,
@@ -613,6 +701,7 @@ export class Repository {
         deck.name,
         deck.language,
         deck.newCardsPerDay ?? 20,
+        deck.maxReviewsPerDay ?? 200,
         deck.cardCount,
         deck.createdAt,
         deck.lastModified,
@@ -627,8 +716,8 @@ export class Repository {
       await this.db.runAsync(
         `INSERT INTO cards (id, deckId, userId, front, back, language, examples, interval,
                             easeFactor, repetitions, phase, lapses, learningStep, leech,
-                            introducedAt, nextReview, status, lastModified, syncStatus, deleted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            introducedAt, dueDay, buriedUntil, suspended, nextReview, status, lastModified, syncStatus, deleted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            deckId = excluded.deckId,
            userId = excluded.userId,
@@ -644,6 +733,9 @@ export class Repository {
            learningStep = excluded.learningStep,
            leech = excluded.leech,
            introducedAt = excluded.introducedAt,
+           dueDay = excluded.dueDay,
+           buriedUntil = excluded.buriedUntil,
+           suspended = excluded.suspended,
            nextReview = excluded.nextReview,
            status = excluded.status,
            lastModified = excluded.lastModified,
@@ -664,6 +756,9 @@ export class Repository {
         card.learningStep ?? 0,
         card.leech ? 1 : 0,
         card.introducedAt ?? null,
+        card.dueDay ?? null,
+        card.buriedUntil ?? null,
+        card.suspended ? 1 : 0,
         card.nextReview,
         card.status,
         card.lastModified,
@@ -682,6 +777,7 @@ interface DeckRow {
   name: string;
   language: string;
   newCardsPerDay: number | null;
+  maxReviewsPerDay: number | null;
   cardCount: number;
   createdAt: string;
   lastModified: string;
@@ -705,6 +801,9 @@ interface CardRow {
   learningStep: number;
   leech: number;
   introducedAt: string | null;
+  dueDay: string | null;
+  buriedUntil: string | null;
+  suspended: number;
   nextReview: string;
   status: string;
   lastModified: string;
@@ -723,6 +822,17 @@ interface ReviewEventRow {
   syncStatus: string;
 }
 
+interface UndoRow {
+  id: number;
+  cardId: string;
+  syncStatus: string;
+  previousState: string;
+}
+
+interface ReviewCountRow {
+  previousState: string | null;
+}
+
 function toDeck(row: DeckRow): Deck {
   return {
     id: row.id,
@@ -730,6 +840,7 @@ function toDeck(row: DeckRow): Deck {
     name: row.name,
     language: row.language as Deck['language'],
     newCardsPerDay: row.newCardsPerDay ?? 20,
+    maxReviewsPerDay: row.maxReviewsPerDay ?? 200,
     cardCount: row.cardCount,
     createdAt: row.createdAt,
     lastModified: row.lastModified,
@@ -758,9 +869,25 @@ function toCard(row: CardRow): Card {
     lastModified: row.lastModified,
     syncStatus: row.syncStatus as Card['syncStatus'],
     ...(row.introducedAt ? { introducedAt: row.introducedAt } : {}),
+    ...(row.dueDay
+      ? { dueDay: row.dueDay }
+      : row.phase === 'review'
+        ? { dueDay: collectionDayKey(new Date(row.nextReview)) }
+        : {}),
+    ...(row.buriedUntil ? { buriedUntil: row.buriedUntil } : {}),
+    ...(row.suspended ? { suspended: true } : {}),
     ...(row.leech ? { leech: true } : {}),
     ...(row.deleted ? { deleted: true } : {}),
   };
+}
+
+function parseCardSnapshot(value: string): Card | null {
+  try {
+    const parsed = JSON.parse(value) as Card;
+    return parsed && typeof parsed.id === 'string' ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function toReviewEvent(row: ReviewEventRow): ReviewEvent {
@@ -806,8 +933,8 @@ function normaliseWord(word: string): string {
  * same imprecision with its fixed day cutoff, and the alternative — a timezone
  * database in the bundle — is not worth 400 kB to move one review.
  */
-function localDayModifier(now: Date): string {
+function collectionDayModifier(now: Date): string {
   // `getTimezoneOffset` is minutes to add to local time to reach UTC, so the
   // modifier that goes the other way is its negation.
-  return `${-now.getTimezoneOffset()} minutes`;
+  return `${-now.getTimezoneOffset() - 4 * 60} minutes`;
 }

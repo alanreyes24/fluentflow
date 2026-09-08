@@ -27,6 +27,8 @@ service cloud.firestore {
         && deck.id is string && deck.id.size() > 0 && deck.id.size() <= 200
         && deck.name is string && deck.name.size() > 0 && deck.name.size() <= 200
         && deck.language in ['es', 'bs']
+        && (!('newCardsPerDay' in deck) || deck.newCardsPerDay == null || (deck.newCardsPerDay is int && deck.newCardsPerDay >= 1))
+        && (!('maxReviewsPerDay' in deck) || deck.maxReviewsPerDay == null || (deck.maxReviewsPerDay is int && deck.maxReviewsPerDay >= 1))
         && deck.cardCount is int && deck.cardCount >= 0
         && isIsoTimestamp(deck.lastModified);
     }
@@ -49,6 +51,9 @@ service cloud.firestore {
         && (!('lapses' in card) || (card.lapses is int && card.lapses >= 0))
         && (!('learningStep' in card) || (card.learningStep is int && card.learningStep >= 0))
         && card.examples is list && card.examples.size() <= 10
+        && (!('dueDay' in card) || (card.dueDay is string && card.dueDay.size() == 10))
+        && (!('buriedUntil' in card) || (card.buriedUntil is string && card.buriedUntil.size() == 10))
+        && (!('suspended' in card) || card.suspended is bool)
         && isIsoTimestamp(card.nextReview)
         && isIsoTimestamp(card.lastModified);
     }

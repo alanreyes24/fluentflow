@@ -51,8 +51,8 @@ const migrations: Migration[] = [
         deleted       INTEGER NOT NULL DEFAULT 0
       );
 
-      -- The study queue is "my cards, in this deck, due before now", and the
-      -- deck list needs per-deck counts. Both are hot paths on every launch.
+      -- The study queue and deck list are hot paths on every launch. The
+      -- collection-day scheduler uses dueDay while nextReview orders steps.
       CREATE INDEX idx_cards_due ON cards (userId, deckId, deleted, nextReview);
       CREATE INDEX idx_cards_deck ON cards (deckId, deleted);
       CREATE INDEX idx_decks_user ON decks (userId, deleted);
@@ -150,6 +150,29 @@ const migrations: Migration[] = [
     await db.execAsync(`
       CREATE UNIQUE INDEX idx_review_log_event_id ON review_log (eventId);
       CREATE INDEX idx_review_log_pending ON review_log (userId) WHERE syncStatus = 'pending';
+    `);
+  },
+
+  // 7 — Anki's separate daily limits for new cards and reviews.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE decks ADD COLUMN maxReviewsPerDay INTEGER DEFAULT 200;
+    `);
+  },
+
+  // 8 — collection-day due dates plus manual queue controls.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE cards ADD COLUMN dueDay TEXT;
+      ALTER TABLE cards ADD COLUMN buriedUntil TEXT;
+      ALTER TABLE cards ADD COLUMN suspended INTEGER NOT NULL DEFAULT 0;
+    `);
+  },
+
+  // 9 — local snapshot needed to undo the latest unsynced review safely.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE review_log ADD COLUMN previousState TEXT;
     `);
   },
 ];

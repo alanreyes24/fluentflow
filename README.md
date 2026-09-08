@@ -457,15 +457,14 @@ fuzzed so a batch reviewed together does not stay together. Anki's own defaults
 are the defaults, and every one of them is a field on `SchedulerConfig` so
 per-deck options can be added without touching the algorithm.
 
-Two things Anki does that this does not. Anki rolls the day over at 4am and
-schedules review cards to a day number; `nextReview` here is an instant and
-"days late" is elapsed 24-hour periods, which differs only for someone
-answering within hours of a rollover. And Anki's per-deck new/review daily
-limits are not implemented — that is queue building rather than scheduling, and
-the study screen builds the queue. What the study screen does implement is the
-other half of learning steps: a card answered onto a step ten minutes out comes
-back at the end of the same session, because steps that never come back are
-just a slower way of burying a card.
+Anki rolls the collection day over at 4am and schedules review cards to a day
+number; FluentFlow stores that day in `dueDay` while retaining `nextReview` for
+intraday learning steps and ordering. The study queue also enforces per-deck
+new/review daily limits, hides buried and suspended cards, and lets a pending
+review be undone. What the study screen additionally implements is the other
+half of learning steps: a card answered onto a step ten minutes out comes back
+at the end of the same session, because steps that never come back are just a
+slower way of burying a card.
 
 **A pasted list has no schema, so the separator is scored, not sniffed.** Word
 lists arrive as tabs from a spreadsheet, commas from a CSV export,

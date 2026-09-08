@@ -1,4 +1,5 @@
 import { createTestRepository } from './fakes/database';
+import { collectionDayKey } from '@fluentflow/core';
 
 /**
  * The repository against a real SQLite database.
@@ -22,7 +23,7 @@ describe('Repository', () => {
     const row = await context.database.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version',
     );
-    expect(row?.user_version).toBe(6);
+    expect(row?.user_version).toBe(9);
   });
 
   it('round-trips a deck and its cards', async () => {
@@ -127,6 +128,71 @@ describe('Repository', () => {
 
     const unlimited = await repository.setNewCardsPerDay(deck, null);
     expect(await repository.dueCards(deck.id, new Date(), 200, unlimited.newCardsPerDay)).toHaveLength(3);
+  });
+
+  it('limits review cards separately from new cards', async () => {
+    const { repository } = context;
+    let deck = await repository.createDeck('u1', 'Spanish', 'es');
+    deck = await repository.setMaxReviewsPerDay(deck, 1);
+    const first = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    const second = await repository.addCard('u1', deck, 'comer', 'to eat');
+    const now = new Date();
+    await repository.updateCard(first, {
+      phase: 'review', interval: 2, dueDay: collectionDayKey(now), nextReview: now.toISOString(), status: 'learning',
+    });
+    await repository.updateCard(second, {
+      phase: 'review', interval: 2, dueDay: collectionDayKey(now), nextReview: now.toISOString(), status: 'learning',
+    });
+
+    const queue = await repository.studyQueue(deck.id, now, 20, 0, deck.maxReviewsPerDay);
+    expect(queue.cards).toHaveLength(1);
+    expect(queue.cards[0]?.phase).toBe('review');
+  });
+
+  it('does not spend the review allowance on a new-card introduction', async () => {
+    const { repository } = context;
+    let deck = await repository.createDeck('u1', 'Spanish', 'es');
+    deck = await repository.setMaxReviewsPerDay(deck, 1);
+    const newCard = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    const reviewCard = await repository.addCard('u1', deck, 'comer', 'to eat');
+    const now = new Date();
+    await repository.rateCard(newCard, 'good', now);
+    await repository.updateCard(reviewCard, {
+      phase: 'review', interval: 2, dueDay: collectionDayKey(now), nextReview: now.toISOString(), status: 'learning',
+    });
+
+    const queue = await repository.studyQueue(deck.id, now, 20, 20, deck.maxReviewsPerDay);
+    expect(queue.cards.map((card) => card.id)).toContain(reviewCard.id);
+  });
+
+  it('buries and suspends cards out of the due queue', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const card = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    const now = new Date();
+
+    const buried = await repository.buryCard(card, now);
+    expect(await repository.dueCards(deck.id, now)).toHaveLength(0);
+    await repository.unburyCard(buried);
+    expect(await repository.dueCards(deck.id, now)).toHaveLength(1);
+
+    await repository.suspendCard(card);
+    expect(await repository.dueCards(deck.id, now)).toHaveLength(0);
+  });
+
+  it('undoes the latest pending review and removes its log entry', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const card = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    const reviewed = await repository.rateCard(card, 'easy');
+
+    const restored = await repository.undoLastReview('u1');
+    expect(restored?.id).toBe(card.id);
+    expect(restored?.phase).toBe('new');
+    expect(restored?.interval).toBe(0);
+    expect(await repository.getCard(card.id)).toMatchObject({ phase: 'new', interval: 0 });
+    expect(await repository.ratingCounts('u1')).toEqual({ again: 0, hard: 0, good: 0, easy: 0 });
+    expect(reviewed.phase).toBe('review');
   });
 
   it('drops the ease factor on lapses but never below the floor', async () => {

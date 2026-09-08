@@ -20,18 +20,14 @@ import type { Card, CardPhase, CardStatus, IsoDate, RatingName } from './types.j
  *  - A lapse multiplies the interval by `lapseMultiplier` (0 by default, so the
  *    card restarts at `minimumLapseInterval`) and counts toward leech status.
  *
- * Two deliberate departures from Anki, both because this app has no notion of
- * a collection-wide "day":
- *
- *  - Anki rolls the day over at 4am local time and schedules review cards to a
- *    day number. Here `nextReview` is an instant, and "days late" is measured
- *    in elapsed 24-hour periods.
- *  - Anki's per-deck new/review daily limits and its learn-ahead limit belong
- *    to queue building, not to scheduling; they are the study screen's job.
+ * `nextReview` remains an instant for intraday learning steps and ordering,
+ * while `dueDay` carries Anki's collection-day semantics for day-level review
+ * cards. Per-deck daily limits are enforced by the queue builder below.
  */
 
 export const MS_PER_DAY = 86_400_000;
 export const MS_PER_MINUTE = 60_000;
+export const DEFAULT_DAY_START_HOUR = 4;
 
 export const MIN_EASE_FACTOR = 1.3;
 export const DEFAULT_EASE_FACTOR = 2.5;
@@ -117,6 +113,52 @@ export interface SchedulingState {
   nextReview: IsoDate;
   leech: boolean;
   status: CardStatus;
+}
+
+/** The local calendar day Anki considers "today". */
+export function collectionDayKey(
+  date: Date = new Date(),
+  dayStartHour = DEFAULT_DAY_START_HOUR,
+): string {
+  const adjusted = new Date(date);
+  if (adjusted.getHours() < dayStartHour) adjusted.setDate(adjusted.getDate() - 1);
+  return `${adjusted.getFullYear()}-${String(adjusted.getMonth() + 1).padStart(2, '0')}-${String(adjusted.getDate()).padStart(2, '0')}`;
+}
+
+/** Add collection days without going through UTC arithmetic. */
+export function addCollectionDays(day: string, delta: number): string {
+  const [year, month, date] = day.split('-').map(Number);
+  const result = new Date(year || 1970, (month || 1) - 1, date || 1, 12);
+  result.setDate(result.getDate() + delta);
+  return `${result.getFullYear()}-${String(result.getMonth() + 1).padStart(2, '0')}-${String(result.getDate()).padStart(2, '0')}`;
+}
+
+/** Start of the current collection day in local time. */
+export function collectionDayStart(
+  date: Date = new Date(),
+  dayStartHour = DEFAULT_DAY_START_HOUR,
+): Date {
+  const start = new Date(date);
+  start.setHours(dayStartHour, 0, 0, 0);
+  if (date.getHours() < dayStartHour) start.setDate(start.getDate() - 1);
+  return start;
+}
+
+/** Whether a card belongs in the normal due queue right now. */
+export function isCardDue(
+  card: Pick<Card, 'phase' | 'nextReview' | 'dueDay' | 'suspended' | 'buriedUntil'>,
+  now: Date = new Date(),
+): boolean {
+  if (card.suspended) return false;
+  if (card.buriedUntil && collectionDayKey(now) < card.buriedUntil) return false;
+  const phase = card.phase ?? 'new';
+  if (phase === 'review' && card.dueDay) {
+    return collectionDayKey(now) >= card.dueDay || Date.parse(card.nextReview) <= now.getTime();
+  }
+  if ((phase === 'learning' || phase === 'relearning') && card.dueDay) {
+    return collectionDayKey(now) > card.dueDay || Date.parse(card.nextReview) <= now.getTime();
+  }
+  return Date.parse(card.nextReview) <= now.getTime();
 }
 
 export interface ReviewOptions {
@@ -487,14 +529,21 @@ export function schedulingStateFor(card: Card): SchedulingState {
  * anything else was mid-lapse.
  */
 export function normalizeCard(card: Card): Card {
-  if (card.phase && card.lapses !== undefined && card.learningStep !== undefined) return card;
   const phase = card.phase ?? inferPhase(card);
+  if (card.phase && card.lapses !== undefined && card.learningStep !== undefined && card.dueDay) {
+    return card;
+  }
   return {
     ...card,
     phase,
     lapses: card.lapses ?? 0,
     learningStep: card.learningStep ?? 0,
     status: card.status ?? statusFor(phase, card.interval),
+    ...(card.dueDay
+      ? { dueDay: card.dueDay }
+      : phase === 'review'
+        ? { dueDay: collectionDayKey(new Date(card.nextReview)) }
+        : {}),
   };
 }
 
@@ -516,6 +565,10 @@ export function reviewCard(card: Card, rating: RatingName, options: ReviewOption
     lapses: result.lapses,
     learningStep: result.learningStep,
     nextReview: result.nextReview,
+    dueDay:
+      result.phase === 'review'
+        ? addCollectionDays(collectionDayKey(now), Math.max(1, Math.round(result.interval)))
+        : collectionDayKey(new Date(result.nextReview)),
     status: result.status,
     ...(result.leech ? { leech: true } : {}),
     lastModified: now.toISOString(),
@@ -525,10 +578,68 @@ export function reviewCard(card: Card, rating: RatingName, options: ReviewOption
 
 /** Cards whose `nextReview` has come due, hardest-overdue first. */
 export function dueCards(cards: Card[], now: Date = new Date()): Card[] {
-  const cutoff = now.getTime();
   return cards
-    .filter((card) => !card.deleted && Date.parse(card.nextReview) <= cutoff)
+    .filter((card) => !card.deleted && isCardDue(card, now))
     .sort((a, b) => Date.parse(a.nextReview) - Date.parse(b.nextReview));
+}
+
+export type QueueBucket = 'learning' | 'review' | 'new';
+
+export interface StudyQueueOptions {
+  now?: Date;
+  limit?: number;
+  newCardsPerDay?: number | null;
+  maxReviewsPerDay?: number | null;
+  newCardsIntroducedToday?: number;
+  reviewsAnsweredToday?: number;
+}
+
+export interface StudyQueue {
+  cards: Card[];
+  learning: number;
+  review: number;
+  new: number;
+}
+
+/**
+ * Gather a normal Anki-style queue: learning first, then reviews, then new
+ * cards. Daily limits are applied after the cards are classified, so a large
+ * backlog cannot hide learning cards behind a new-card query.
+ */
+export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptions = {}): StudyQueue {
+  const now = options.now ?? new Date();
+  const live = cards.filter((card) => !card.deleted && !card.suspended && (!card.buriedUntil || card.buriedUntil <= collectionDayKey(now)));
+  const learning = live
+    .filter((card) => (card.phase === 'learning' || card.phase === 'relearning') && isCardDue(card, now))
+    .sort(compareDue);
+  const reviews = live.filter((card) => card.phase === 'review' && isCardDue(card, now)).sort(compareDue);
+  // The caller supplies new cards in insertion order, matching Anki's default
+  // insertion order. Their timestamps are not a useful ordering signal because
+  // several can be created in the same operation.
+  const newCards = live.filter(
+    (card) => (card.phase ?? 'new') === 'new' && isCardDue(card, now) && !card.introducedAt,
+  );
+
+  const reviewAllowance = options.maxReviewsPerDay === null
+    ? Number.MAX_SAFE_INTEGER
+    : Math.max(0, (options.maxReviewsPerDay ?? 200) - (options.reviewsAnsweredToday ?? 0));
+  const reviewCards = [...learning, ...reviews].slice(0, reviewAllowance);
+  const newAllowance = options.newCardsPerDay === null
+    ? Number.MAX_SAFE_INTEGER
+    : Math.max(0, (options.newCardsPerDay ?? 20) - (options.newCardsIntroducedToday ?? 0));
+  const result = [...reviewCards, ...newCards.slice(0, newAllowance)].slice(0, options.limit ?? 200);
+
+  return {
+    cards: result,
+    learning: result.filter((card) => card.phase === 'learning' || card.phase === 'relearning').length,
+    review: result.filter((card) => card.phase === 'review').length,
+    new: result.filter((card) => (card.phase ?? 'new') === 'new').length,
+  };
+}
+
+function compareDue(a: Card, b: Card): number {
+  const byTime = Date.parse(a.nextReview) - Date.parse(b.nextReview);
+  return byTime || a.id.localeCompare(b.id);
 }
 
 export interface DeckProgress {

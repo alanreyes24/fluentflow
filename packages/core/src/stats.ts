@@ -1,5 +1,5 @@
 import type { Card, RatingName } from './types.js';
-import { deckProgress, type DeckProgress } from './scheduler.js';
+import { collectionDayKey, deckProgress, type DeckProgress } from './scheduler.js';
 
 /**
  * Study statistics: streaks, history, retention and the forecast.
@@ -72,7 +72,7 @@ export interface HeatmapCell {
 
 // --- day arithmetic ---------------------------------------------------------
 
-/** The local day a moment falls on. */
+/** The local calendar day a moment falls on (not the Anki collection day). */
 export function dayKey(date: Date = new Date()): DayKey {
   const month = `${date.getMonth() + 1}`.padStart(2, '0');
   const day = `${date.getDate()}`.padStart(2, '0');
@@ -288,14 +288,14 @@ export function forecast(
 ): DayCount[] {
   const days = Math.max(1, options.days ?? 14);
   const now = options.now ?? new Date();
-  const today = dayKey(now);
+  const today = collectionDayKey(now);
   const horizon = addDays(today, days - 1);
 
   const counts = new Map<DayKey, number>(dayRange(today, horizon).map((day) => [day, 0]));
 
   for (const card of cards) {
     if (card.deleted) continue;
-    const due = dayKey(new Date(card.nextReview));
+    const due = card.dueDay ?? collectionDayKey(new Date(card.nextReview));
     const day = daysBetween(today, due) < 0 ? today : due;
     const current = counts.get(day);
     if (current !== undefined) counts.set(day, current + 1);

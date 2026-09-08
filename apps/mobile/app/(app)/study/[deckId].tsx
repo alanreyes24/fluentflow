@@ -61,7 +61,7 @@ export default function StudyScreen() {
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const { wide } = useLayout();
-  const { repository, examples: exampleService, refreshDecks } = useApp();
+  const { repository, examples: exampleService, refreshDecks, user } = useApp();
 
   const [deck, setDeck] = useState<Deck | null>(null);
   const [queue, setQueue] = useState<Card[]>([]);
@@ -71,6 +71,7 @@ export default function StudyScreen() {
   const [generating, setGenerating] = useState(false);
   const [reviewed, setReviewed] = useState(0);
   const [lapses, setLapses] = useState(0);
+  const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [loading, setLoading] = useState(true);
 
   const card = queue[index] ?? null;
@@ -84,7 +85,13 @@ export default function StudyScreen() {
       const loadedDeck = await repository.getDeck(deckId);
       const due = studyAhead
         ? await repository.upcomingCards(deckId)
-        : await repository.dueCards(deckId, new Date(), 200, loadedDeck?.newCardsPerDay ?? 20);
+        : await repository.dueCards(
+            deckId,
+            new Date(),
+            200,
+            loadedDeck?.newCardsPerDay ?? 20,
+            loadedDeck?.maxReviewsPerDay ?? 200,
+          );
       if (cancelled) return;
       setDeck(loadedDeck);
       setQueue(due);
@@ -154,7 +161,9 @@ export default function StudyScreen() {
       if (!repository || !card || !revealed) return;
 
       void (async () => {
+        const before = { queue, index, reviewed, lapses };
         const answered = await repository.rateCard(card, rating);
+        setUndoState(before);
         setReviewed((count) => count + 1);
         if (rating === 'again') setLapses((count) => count + 1);
         setRevealed(false);
@@ -166,7 +175,35 @@ export default function StudyScreen() {
         await refreshDecks();
       })();
     },
-    [repository, card, revealed, refreshDecks],
+    [repository, card, revealed, refreshDecks, queue, index, reviewed, lapses],
+  );
+
+  const undo = useCallback(async () => {
+    if (!repository || !user || !undoState) return;
+    const restored = await repository.undoLastReview(user.id);
+    if (!restored) return;
+    setQueue(undoState.queue);
+    setIndex(undoState.index);
+    setReviewed(undoState.reviewed);
+    setLapses(undoState.lapses);
+    setUndoState(null);
+    setRevealed(false);
+    setExamples(null);
+    await refreshDecks();
+  }, [repository, user, undoState, refreshDecks]);
+
+  const removeFromSession = useCallback(
+    async (action: 'bury' | 'suspend') => {
+      if (!repository || !card) return;
+      if (action === 'bury') await repository.buryCard(card);
+      else await repository.suspendCard(card);
+      setQueue((current) => current.filter((item) => item.id !== card.id));
+      setUndoState(null);
+      setRevealed(false);
+      setExamples(null);
+      await refreshDecks();
+    },
+    [repository, card, refreshDecks],
   );
 
   const regenerate = useCallback(() => {
@@ -318,6 +355,24 @@ export default function StudyScreen() {
                     onPress={rate}
                   />
                 ))}
+              </Row>
+              <Spacer size={theme.spacing.sm} />
+              <Row gap={theme.spacing.xs}>
+                <Button
+                  label={t('bury')}
+                  variant="secondary"
+                  onPress={() => void removeFromSession('bury')}
+                  style={styles.flex}
+                />
+                <Button
+                  label={t('suspend')}
+                  variant="ghostDanger"
+                  onPress={() => void removeFromSession('suspend')}
+                  style={styles.flex}
+                />
+                {undoState ? (
+                  <Button label={t('undo')} variant="ghost" onPress={() => void undo()} style={styles.flex} />
+                ) : null}
               </Row>
               {Platform.OS === 'web' ? (
                 <>
@@ -492,6 +547,13 @@ function statusKey(status: Card['status']): 'statusNew' | 'statusLearning' | 'st
  * a real index card held at arm's length.
  */
 const STAGE_WIDTH = 620;
+
+interface UndoState {
+  queue: Card[];
+  index: number;
+  reviewed: number;
+  lapses: number;
+}
 
 const styles = StyleSheet.create({
   ratingInterval: { marginTop: 4 },

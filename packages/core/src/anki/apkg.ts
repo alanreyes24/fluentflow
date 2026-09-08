@@ -2,7 +2,7 @@ import { unzipSync } from 'fflate';
 import type { Card, CardPhase, Deck, TargetLanguage } from '../types.js';
 import { detectLanguage, type LanguageDetection } from '../language.js';
 import { stableId } from '../id.js';
-import { MIN_EASE_FACTOR, DEFAULT_EASE_FACTOR, statusFor } from '../scheduler.js';
+import { MIN_EASE_FACTOR, DEFAULT_EASE_FACTOR, statusFor, collectionDayKey } from '../scheduler.js';
 import { extractNote, mapFields, splitFields, type FieldMapping, type NoteTypeField } from './fields.js';
 
 /**
@@ -442,6 +442,7 @@ function ensureDeck(
     name: args.name,
     language,
     newCardsPerDay: 20,
+    maxReviewsPerDay: 200,
     cardCount: 0,
     createdAt: args.nowIso,
     lastModified: args.nowIso,
@@ -488,6 +489,9 @@ function toCard(args: {
     lapses,
     learningStep: learningStepFor(type, num(cardRow.left)),
     nextReview: nextReviewFor(type, num(cardRow.due), crt, now),
+    ...(phase === 'review'
+      ? { dueDay: collectionDayKey(new Date(nextReviewFor(type, num(cardRow.due), crt, now))) }
+      : {}),
     status: statusFor(phase, interval),
     lastModified: nowIso,
     syncStatus: 'pending',

@@ -50,6 +50,10 @@ function parseDeck(value: unknown, userId: string, path: string): Deck {
       raw.newCardsPerDay === null
         ? null
         : integer(raw.newCardsPerDay ?? 20, `${path}.newCardsPerDay`, 1),
+    maxReviewsPerDay:
+      raw.maxReviewsPerDay === null
+        ? null
+        : integer(raw.maxReviewsPerDay ?? 200, `${path}.maxReviewsPerDay`, 1),
     cardCount: integer(raw.cardCount ?? 0, `${path}.cardCount`, 0),
     createdAt: isoDate(raw.createdAt, `${path}.createdAt`),
     lastModified: isoDate(raw.lastModified, `${path}.lastModified`),
@@ -89,6 +93,11 @@ function parseCard(value: unknown, userId: string, path: string): Card {
     ...(raw.introducedAt === undefined
       ? {}
       : { introducedAt: isoDate(raw.introducedAt, `${path}.introducedAt`) }),
+    ...(raw.dueDay === undefined ? {} : { dueDay: text(raw.dueDay, `${path}.dueDay`, 10, 10) }),
+    ...(raw.buriedUntil === undefined
+      ? {}
+      : { buriedUntil: text(raw.buriedUntil, `${path}.buriedUntil`, 10, 10) }),
+    ...(raw.suspended === true ? { suspended: true } : {}),
     nextReview: isoDate(raw.nextReview, `${path}.nextReview`),
     status: oneOf(raw.status, ['new', 'learning', 'mastered'], `${path}.status`),
     lastModified: isoDate(raw.lastModified, `${path}.lastModified`),

@@ -46,6 +46,11 @@ export interface Card {
   phase?: CardPhase;
   /** Timestamp for the first answer that introduced this card. */
   introducedAt?: IsoDate;
+  /** Anki-style collection day on which a review card becomes due. */
+  dueDay?: string;
+  /** Cards hidden until the next collection day, or manually disabled. */
+  buriedUntil?: string;
+  suspended?: boolean;
   /** Times this card has been failed as a review card (Anki's `lapses`). */
   lapses?: number;
   /** Position in the active learning or relearning step list. */
@@ -83,6 +88,8 @@ export interface Deck {
   language: TargetLanguage;
   /** New cards introduced per local day; null means unlimited. */
   newCardsPerDay: number | null;
+  /** Review/learning cards shown per collection day; null means unlimited. */
+  maxReviewsPerDay: number | null;
   cardCount: number;
   createdAt: IsoDate;
   lastModified: IsoDate;

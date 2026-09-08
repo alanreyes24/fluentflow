@@ -4,7 +4,7 @@ import { router, useFocusEffect } from 'expo-router';
 import {
   LANGUAGE_NAMES,
   RATING_NAMES,
-  dayKey,
+  collectionDayKey,
   dayToDate,
   fillDays,
   heatmap,
@@ -83,7 +83,7 @@ export default function StatsScreen() {
 
   // `today` is captured once per render rather than per call so every chart on
   // screen agrees about where "now" is, even across a midnight boundary.
-  const today = useMemo(() => dayKey(), []);
+  const today = useMemo(() => collectionDayKey(), []);
 
   const initials = t('weekdayInitials');
   const view = useMemo(
