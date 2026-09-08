@@ -36,6 +36,10 @@ export interface Card {
   language: TargetLanguage;
   /** Cached AI-generated example sentences, always in `language`. */
   examples: string[];
+  /** Optional learner-authored grammar or usage reminders. */
+  grammarNotes: string[];
+  /** Optional related words or phrases, in the target language. */
+  relatedWords: string[];
   /** Day-level interval. Zero while a new card is still on its learning steps. */
   interval: number;
   /** Anki ease factor, clamped to >= 1.3. */
@@ -90,6 +94,11 @@ export interface Deck {
   newCardsPerDay: number | null;
   /** Review/learning cards shown per collection day; null means unlimited. */
   maxReviewsPerDay: number | null;
+  /** Study presentation preferences, synced with the deck. */
+  reverseCards: boolean;
+  showExamples: boolean;
+  showGrammarNotes: boolean;
+  showRelatedWords: boolean;
   cardCount: number;
   createdAt: IsoDate;
   lastModified: IsoDate;

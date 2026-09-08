@@ -210,6 +210,45 @@ export default function DeckScreen() {
 
             <Spacer size={theme.spacing.sm} />
 
+            <Surface style={styles.limitCard}>
+              <SectionLabel>{t('studyPresentation')}</SectionLabel>
+              <Spacer size={theme.spacing.xs} />
+              <ToggleRow
+                label={t('reverseCards')}
+                value={deck.reverseCards === true}
+                onChange={(value) => {
+                  if (!repository) return;
+                  void repository.setStudyPresentation(deck, { reverseCards: value }).then((updated) => setDeck(updated));
+                }}
+              />
+              <ToggleRow
+                label={t('showExamples')}
+                value={deck.showExamples !== false}
+                onChange={(value) => {
+                  if (!repository) return;
+                  void repository.setStudyPresentation(deck, { showExamples: value }).then((updated) => setDeck(updated));
+                }}
+              />
+              <ToggleRow
+                label={t('showGrammarNotes')}
+                value={deck.showGrammarNotes !== false}
+                onChange={(value) => {
+                  if (!repository) return;
+                  void repository.setStudyPresentation(deck, { showGrammarNotes: value }).then((updated) => setDeck(updated));
+                }}
+              />
+              <ToggleRow
+                label={t('showRelatedWords')}
+                value={deck.showRelatedWords !== false}
+                onChange={(value) => {
+                  if (!repository) return;
+                  void repository.setStudyPresentation(deck, { showRelatedWords: value }).then((updated) => setDeck(updated));
+                }}
+              />
+            </Surface>
+
+            <Spacer size={theme.spacing.sm} />
+
             {adding ? (
               <NewCardForm
                 onCancel={() => {
@@ -217,13 +256,13 @@ export default function DeckScreen() {
                   setDuplicateCardId(null);
                 }}
                 error={duplicateCardId === 'new' ? t('duplicateCardHint') : undefined}
-                onCreate={async (front, back) => {
+                onCreate={async (front, back, grammarNotes, relatedWords) => {
                   if (!repository || !user) return false;
                   if (await repository.findCardByFront(deck.id, front)) {
                     setDuplicateCardId('new');
                     return false;
                   }
-                  await repository.addCard(user.id, deck, front, back);
+                  await repository.addCard(user.id, deck, front, back, [], grammarNotes, relatedWords);
                   await load();
                   await refreshDecks();
                   setDuplicateCardId(null);
@@ -285,16 +324,18 @@ export default function DeckScreen() {
             <NewCardForm
               initialFront={item.front}
               initialBack={item.back}
+              initialGrammarNotes={item.grammarNotes ?? []}
+              initialRelatedWords={item.relatedWords ?? []}
               onCancel={() => setEditingCardId(null)}
               error={duplicateCardId === item.id ? t('duplicateCardHint') : undefined}
-              onCreate={async (front, back) => {
+              onCreate={async (front, back, grammarNotes, relatedWords) => {
                 if (!repository) return false;
                 const duplicate = await repository.findCardByFront(deck.id, front);
                 if (duplicate && duplicate.id !== item.id) {
                   setDuplicateCardId(item.id);
                   return false;
                 }
-                await repository.updateCard(item, { front, back });
+                await repository.updateCard(item, { front, back, grammarNotes, relatedWords });
                 setDuplicateCardId(null);
                 setEditingCardId(null);
                 await load();
@@ -391,34 +432,61 @@ function CardRow({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; o
   );
 }
 
+function ToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (value: boolean) => void }) {
+  const { t } = useI18n();
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityLabel={label}
+      accessibilityState={{ checked: value }}
+      onPress={() => onChange(!value)}
+      style={styles.toggleRow}
+    >
+      <Label variant="body" style={styles.grow}>{label}</Label>
+      <View style={[styles.toggle, { backgroundColor: value ? theme.colors.accent : theme.colors.surfaceSunken }]}>
+        <Label variant="caption" tone={value ? 'inverse' : 'muted'}>{value ? t('on') : t('off')}</Label>
+      </View>
+    </Pressable>
+  );
+}
+
 function NewCardForm({
   onCreate,
   onCancel,
   initialFront = '',
   initialBack = '',
+  initialGrammarNotes = [],
+  initialRelatedWords = [],
   error,
 }: {
-  onCreate: (front: string, back: string) => Promise<boolean>;
+  onCreate: (front: string, back: string, grammarNotes: string[], relatedWords: string[]) => Promise<boolean>;
   onCancel: () => void;
   initialFront?: string;
   initialBack?: string;
+  initialGrammarNotes?: string[];
+  initialRelatedWords?: string[];
   error?: string;
 }) {
   const { t } = useI18n();
   const theme = useTheme();
   const [front, setFront] = useState(initialFront);
   const [back, setBack] = useState(initialBack);
+  const [grammarNotes, setGrammarNotes] = useState(initialGrammarNotes.join(', '));
+  const [relatedWords, setRelatedWords] = useState(initialRelatedWords.join(', '));
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
     if (!front.trim() || !back.trim() || busy) return;
     setBusy(true);
     try {
-      const saved = await onCreate(front.trim(), back.trim());
+      const saved = await onCreate(front.trim(), back.trim(), splitList(grammarNotes), splitList(relatedWords));
       if (saved && !initialFront && !initialBack) {
         // Stay open and clear: adding ten cards in a row is the common case.
         setFront('');
         setBack('');
+        setGrammarNotes('');
+        setRelatedWords('');
       }
     } finally {
       setBusy(false);
@@ -436,6 +504,19 @@ function NewCardForm({
         returnKeyType="done"
         onSubmitEditing={() => void submit()}
       />
+      <Field
+        label={t('grammarNotes')}
+        hint={t('grammarNotesHint')}
+        value={grammarNotes}
+        onChangeText={setGrammarNotes}
+        multiline
+      />
+      <Field
+        label={t('relatedWords')}
+        hint={t('relatedWordsHint')}
+        value={relatedWords}
+        onChangeText={setRelatedWords}
+      />
       <Row gap={theme.spacing.sm}>
         <Button label={t('cancel')} variant="ghost" onPress={onCancel} style={styles.grow} />
         <Button
@@ -448,6 +529,13 @@ function NewCardForm({
       </Row>
     </Surface>
   );
+}
+
+function splitList(value: string): string[] {
+  return value
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 /**
@@ -478,6 +566,8 @@ const styles = StyleSheet.create({
   grow: { flex: 1 },
   form: { gap: 16 },
   limitCard: { gap: 4 },
+  toggleRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  toggle: { minWidth: 44, alignItems: 'center', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999 },
   cardsHeader: { paddingVertical: 8 },
   footer: { marginTop: 24 },
 });

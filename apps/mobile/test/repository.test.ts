@@ -23,7 +23,7 @@ describe('Repository', () => {
     const row = await context.database.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version',
     );
-    expect(row?.user_version).toBe(10);
+    expect(row?.user_version).toBe(11);
   });
 
   it('round-trips a deck and its cards', async () => {
@@ -77,6 +77,34 @@ describe('Repository', () => {
     expect(updated.newCardsPerDay).toBe(40);
     expect((await repository.getDeck(deck.id))?.newCardsPerDay).toBe(40);
     expect((await repository.pendingDecks('u1'))[0]?.newCardsPerDay).toBe(40);
+  });
+
+  it('persists study presentation settings and card context', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const configured = await repository.setStudyPresentation(deck, {
+      reverseCards: true,
+      showExamples: false,
+      showGrammarNotes: false,
+      showRelatedWords: false,
+    });
+    const card = await repository.addCard(
+      'u1',
+      configured,
+      'hablar',
+      'to speak',
+      [],
+      ['verb; regular -ar'],
+      ['conversar', 'hablante'],
+    );
+
+    expect((await repository.getDeck(deck.id))?.reverseCards).toBe(true);
+    expect((await repository.getDeck(deck.id))?.showExamples).toBe(false);
+    expect((await repository.listCards(deck.id))[0]).toMatchObject({
+      id: card.id,
+      grammarNotes: ['verb; regular -ar'],
+      relatedWords: ['conversar', 'hablante'],
+    });
   });
 
   it('stamps a new card once and enforces the remaining daily allowance', async () => {

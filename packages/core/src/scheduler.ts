@@ -530,11 +530,20 @@ export function schedulingStateFor(card: Card): SchedulingState {
  */
 export function normalizeCard(card: Card): Card {
   const phase = card.phase ?? inferPhase(card);
-  if (card.phase && card.lapses !== undefined && card.learningStep !== undefined && card.dueDay) {
+  if (
+    card.phase &&
+    card.lapses !== undefined &&
+    card.learningStep !== undefined &&
+    card.dueDay &&
+    card.grammarNotes !== undefined &&
+    card.relatedWords !== undefined
+  ) {
     return card;
   }
   return {
     ...card,
+    grammarNotes: card.grammarNotes ?? [],
+    relatedWords: card.relatedWords ?? [],
     phase,
     lapses: card.lapses ?? 0,
     learningStep: card.learningStep ?? 0,

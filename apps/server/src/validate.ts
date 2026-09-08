@@ -54,6 +54,10 @@ function parseDeck(value: unknown, userId: string, path: string): Deck {
       raw.maxReviewsPerDay === null
         ? null
         : integer(raw.maxReviewsPerDay ?? 50, `${path}.maxReviewsPerDay`, 1),
+    reverseCards: raw.reverseCards === true,
+    showExamples: raw.showExamples !== false,
+    showGrammarNotes: raw.showGrammarNotes !== false,
+    showRelatedWords: raw.showRelatedWords !== false,
     cardCount: integer(raw.cardCount ?? 0, `${path}.cardCount`, 0),
     createdAt: isoDate(raw.createdAt, `${path}.createdAt`),
     lastModified: isoDate(raw.lastModified, `${path}.lastModified`),
@@ -72,6 +76,8 @@ function parseCard(value: unknown, userId: string, path: string): Card {
     back: text(raw.back, `${path}.back`, 1),
     language: language(raw.language, `${path}.language`),
     examples: examples(raw.examples, `${path}.examples`),
+    grammarNotes: stringList(raw.grammarNotes, `${path}.grammarNotes`, 20, 300),
+    relatedWords: stringList(raw.relatedWords, `${path}.relatedWords`, 20, 120),
     interval: number(raw.interval, `${path}.interval`, 0, 36500),
     easeFactor: number(raw.easeFactor, `${path}.easeFactor`, 1.3, 10),
     repetitions: integer(raw.repetitions ?? 0, `${path}.repetitions`, 0),
@@ -193,4 +199,10 @@ function examples(value: unknown, path: string): string[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new ValidationError([`${path} must be an array of strings.`]);
   return value.slice(0, MAX_EXAMPLES).map((item, index) => text(item, `${path}[${index}]`, 0, 500));
+}
+
+function stringList(value: unknown, path: string, maxItems: number, maxLength: number): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new ValidationError([`${path} must be an array of strings.`]);
+  return value.slice(0, maxItems).map((item, index) => text(item, `${path}[${index}]`, 0, maxLength));
 }

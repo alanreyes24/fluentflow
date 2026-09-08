@@ -9,24 +9,14 @@ import { renderScreen, TEST_USER } from './setup';
  * The statistics screen, over a real review log.
  *
  * Nothing here is handed to the component: the reviews are made through
- * `rateCard`, so the streak, the retention and the rating split are computed
- * from rows the app itself wrote. The dates are the interesting part — a
- * streak is a claim about consecutive local days, and it is the claim a user
- * will notice being wrong.
+ * `rateCard`, so the retention and rating split are computed from rows the app
+ * itself wrote.
  */
 
 describe('StatsScreen', () => {
   let context: Awaited<ReturnType<typeof createTestRepository>>;
   let repository: Repository;
   let deck: Deck;
-
-  /** Local noon `days` ago, well clear of either midnight. */
-  function daysAgo(days: number): Date {
-    const date = new Date();
-    date.setHours(12, 0, 0, 0);
-    date.setDate(date.getDate() - days);
-    return date;
-  }
 
   async function card(front: string, back: string): Promise<Card> {
     return repository.addCard(TEST_USER.id, deck, front, back);
@@ -46,35 +36,19 @@ describe('StatsScreen', () => {
     await context.close();
   });
 
+  /** Local noon `days` ago, well clear of either midnight. */
+  function daysAgo(days: number): Date {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() - days);
+    return date;
+  }
+
   it('says there is nothing to show before the first review', async () => {
     await show();
 
     await screen.findByText('No reviews yet');
     expect(screen.getByText('Rate a card and this screen fills in.')).toBeTruthy();
-  });
-
-  it('counts consecutive days ending today as the current streak', async () => {
-    const subject = await card('hablar', 'to speak');
-    await repository.rateCard(subject, 'good', daysAgo(2));
-    await repository.rateCard(subject, 'good', daysAgo(1));
-    await repository.rateCard(subject, 'good', daysAgo(0));
-
-    await show();
-
-    await screen.findByLabelText('3 day streak');
-    expect(screen.getByText('Kept up today')).toBeTruthy();
-  });
-
-  it('keeps a streak alive but warns when today is still untouched', async () => {
-    const subject = await card('hablar', 'to speak');
-    await repository.rateCard(subject, 'good', daysAgo(2));
-    await repository.rateCard(subject, 'good', daysAgo(1));
-
-    await show();
-
-    // The streak survives — it expires at midnight, not at breakfast.
-    await screen.findByLabelText('2 day streak');
-    expect(screen.getByText('Study today to keep it')).toBeTruthy();
   });
 
   it('reports retention as the share of reviews not rated Again', async () => {

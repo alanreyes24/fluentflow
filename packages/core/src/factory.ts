@@ -20,6 +20,10 @@ export function createDeck(input: CreateDeckInput): Deck {
     language: input.language,
     newCardsPerDay: 20,
     maxReviewsPerDay: 50,
+    reverseCards: false,
+    showExamples: true,
+    showGrammarNotes: true,
+    showRelatedWords: true,
     cardCount: 0,
     createdAt: iso,
     lastModified: iso,
@@ -34,6 +38,8 @@ export interface CreateCardInput {
   back: string;
   language: TargetLanguage;
   examples?: string[];
+  grammarNotes?: string[];
+  relatedWords?: string[];
   id?: string;
   now?: Date;
 }
@@ -49,6 +55,8 @@ export function createCard(input: CreateCardInput): Card {
     back: input.back.trim(),
     language: input.language,
     examples: input.examples ?? [],
+    grammarNotes: input.grammarNotes ?? [],
+    relatedWords: input.relatedWords ?? [],
     interval: state.interval,
     easeFactor: state.easeFactor,
     repetitions: state.repetitions,

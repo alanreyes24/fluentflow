@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
-import { Link, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { FlatList, Platform, StyleSheet, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
 import {
   LANGUAGE_NAMES,
-  TARGET_LANGUAGES,
+  collectionDayKey,
+  studyStreak,
   type Deck,
   type DeckProgress,
-  type TargetLanguage,
+  type StreakSummary,
+  type StudyDay,
 } from '@fluentflow/core';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
@@ -14,17 +16,16 @@ import {
   Badge,
   Button,
   EmptyState,
-  Field,
   Label,
   ProgressBar,
   Row,
   Screen,
-  SegmentedControl,
   Spacer,
   Surface,
   useContentStyle,
 } from '../../src/ui/components';
-import { useTheme } from '../../src/ui/theme';
+import { StreakCard } from '../../src/ui/Streak';
+import { useLayout, useTheme } from '../../src/ui/theme';
 
 /**
  * The deck list, and the home screen in practice.
@@ -32,33 +33,40 @@ import { useTheme } from '../../src/ui/theme';
  * The due count is the only number that drives a decision here, so it gets the
  * accent treatment while totals stay muted.
  *
- * The actions that make decks live in the window's bottom bar, so this screen
- * does not repeat them. What it adds above the list is the question the bar
- * cannot answer: how much is waiting, across everything.
+ * On a wide window the activity calendar and deck collection are two useful
+ * panes: the calendar anchors the left side and the decks stay together on
+ * the right. Narrow windows stack those panes so neither becomes cramped.
  */
 export default function DecksScreen() {
   const { t } = useI18n();
   const theme = useTheme();
-  const content = useContentStyle();
-  const { new: startNew } = useLocalSearchParams<{ new?: string }>();
+  const { wide } = useLayout();
+  const content = useContentStyle({ full: wide });
   const { decks, repository, user, refreshDecks } = useApp();
 
   const [progress, setProgress] = useState<Record<string, DeckProgress>>({});
-  const [creating, setCreating] = useState(false);
-
-  // The bottom bar's "New deck" opens the form that lives on this screen, so
-  // the intent arrives as a route parameter rather than as duplicated state.
-  useEffect(() => {
-    if (startNew === '1') setCreating(true);
-  }, [startNew]);
-
+  const [streakData, setStreakData] = useState<{
+    streak: StreakSummary;
+    days: StudyDay[];
+    today: string;
+  } | null>(null);
   const loadProgress = useCallback(async () => {
     if (!repository) return;
     const entries = await Promise.all(
       decks.map(async (deck) => [deck.id, await repository.deckProgress(deck.id)] as const),
     );
     setProgress(Object.fromEntries(entries));
-  }, [repository, decks]);
+
+    if (user) {
+      const stats = await repository.studyStats(user.id);
+      const today = collectionDayKey();
+      setStreakData({
+        streak: studyStreak(stats.days, today),
+        days: stats.days,
+        today,
+      });
+    }
+  }, [repository, decks, user]);
 
   useEffect(() => {
     void loadProgress();
@@ -84,43 +92,44 @@ export default function DecksScreen() {
 
   return (
     <Screen>
-      <FlatList
-        data={decks}
-        keyExtractor={(deck) => deck.id}
-        contentContainerStyle={content}
-        ListHeaderComponent={
-          creating ? (
-            <NewDeckForm
-              onCancel={() => setCreating(false)}
-              onCreate={async (name, language) => {
-                if (!repository || !user) return;
-                const deck = await repository.createDeck(user.id, name, language);
-                setCreating(false);
-                await refreshDecks();
-                router.push({ pathname: '/(app)/deck/[id]', params: { id: deck.id } });
-              }}
-            />
-          ) : decks.length > 0 ? (
-            <View style={styles.summaryWrap}>
-              <Summary due={totals.due} cards={totals.cards} />
-              <Spacer size={theme.spacing.lg} />
-            </View>
-          ) : null
-        }
-        ListEmptyComponent={
-          creating ? null : (
-            <EmptyState
-              title={t('noDecksYet')}
-              hint={t('noDecksHint')}
-              action={<Button label={t('newDeck')} onPress={() => setCreating(true)} />}
-            />
-          )
-        }
-        renderItem={({ item }) => (
-          <DeckRow deck={item} progress={progress[item.id]} />
-        )}
-        ItemSeparatorComponent={() => <Spacer size={theme.spacing.sm} />}
-      />
+      <View style={[styles.split, wide ? styles.splitWide : null]}>
+        {streakData ? (
+          <View style={[styles.calendarPane, wide ? styles.calendarPaneWide : null]}>
+            <Surface elevation="sm">
+              <StreakCard
+                streak={streakData.streak}
+                days={streakData.days}
+                today={streakData.today}
+              />
+            </Surface>
+          </View>
+        ) : null}
+
+        <View style={styles.decksPane}>
+          <FlatList
+            data={decks}
+            keyExtractor={(deck) => deck.id}
+            contentContainerStyle={content}
+            ListHeaderComponent={
+              decks.length > 0 ? (
+                <View style={styles.summaryWrap}>
+                  <Summary due={totals.due} cards={totals.cards} />
+                  <Spacer size={theme.spacing.lg} />
+                </View>
+              ) : null
+            }
+            ListEmptyComponent={
+              <EmptyState
+                title={t('noDecksYet')}
+                hint={t('noDecksHint')}
+                action={<Button label={t('newDeck')} onPress={() => router.push('/(app)/new-deck')} />}
+              />
+            }
+            renderItem={({ item }) => <DeckRow deck={item} progress={progress[item.id]} />}
+            ItemSeparatorComponent={() => <Spacer size={theme.spacing.sm} />}
+          />
+        </View>
+      </View>
     </Screen>
   );
 }
@@ -165,130 +174,86 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
   const [hovered, setHovered] = useState(false);
 
   return (
-    <Link
-      href={{ pathname: '/(app)/deck/[id]', params: { id: deck.id } }}
-      asChild
-      accessibilityLabel={`${deck.name}, ${t('dueCount', { count: due })}`}
+    <View
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
     >
-      <Pressable
-        onPointerEnter={() => setHovered(true)}
-        onPointerLeave={() => setHovered(false)}
+      <Surface
+        elevation={hovered ? 'md' : 'sm'}
+        style={[
+          styles.deck,
+          Platform.OS === 'web' && hovered ? styles.lifted : null,
+        ]}
       >
-        {({ pressed }) => (
-          <Surface
-            elevation={hovered && !pressed ? 'md' : 'sm'}
-            style={[
-              styles.deck,
-              pressed ? styles.pressed : null,
-              Platform.OS === 'web' && hovered && !pressed ? styles.lifted : null,
-            ]}
-          >
-            <Row style={styles.deckHeader}>
-              <View style={styles.grow}>
-                <Label variant="heading" numberOfLines={2}>
-                  {deck.name}
+        <View>
+          <View style={styles.deckHeader}>
+            <View style={styles.grow}>
+              <Label variant="heading" numberOfLines={2}>
+                {deck.name}
+              </Label>
+              <Label variant="caption" tone="faint">
+                {LANGUAGE_NAMES[deck.language]} · {t('cardCount', { count: deck.cardCount })}
+              </Label>
+            </View>
+            {due > 0 ? <Badge>{due}</Badge> : <Badge tone="plain">✓</Badge>}
+          </View>
+
+          {progress && progress.total > 0 ? (
+            <>
+              <Spacer size={theme.spacing.sm} />
+              <ProgressBar progress={progress} />
+              <Spacer size={theme.spacing.xs} />
+              <Row gap={theme.spacing.md}>
+                <Label variant="caption" tone="faint">
+                  {t('statusNew')} {progress.new}
                 </Label>
                 <Label variant="caption" tone="faint">
-                  {LANGUAGE_NAMES[deck.language]} · {t('cardCount', { count: deck.cardCount })}
+                  {t('statusLearning')} {progress.learning}
                 </Label>
-              </View>
-              {due > 0 ? <Badge>{due}</Badge> : <Badge tone="plain">✓</Badge>}
-            </Row>
+                <Label variant="caption" tone="faint">
+                  {t('statusMastered')} {progress.mastered}
+                </Label>
+              </Row>
+            </>
+          ) : null}
+        </View>
 
-            {progress && progress.total > 0 ? (
-              <>
-                <Spacer size={theme.spacing.sm} />
-                <ProgressBar progress={progress} />
-                <Spacer size={theme.spacing.xs} />
-                <Row gap={theme.spacing.md}>
-                  <Label variant="caption" tone="faint">
-                    {t('statusNew')} {progress.new}
-                  </Label>
-                  <Label variant="caption" tone="faint">
-                    {t('statusLearning')} {progress.learning}
-                  </Label>
-                  <Label variant="caption" tone="faint">
-                    {t('statusMastered')} {progress.mastered}
-                  </Label>
-                </Row>
-              </>
-            ) : null}
-          </Surface>
-        )}
-      </Pressable>
-    </Link>
-  );
-}
-
-function NewDeckForm({
-  onCreate,
-  onCancel,
-}: {
-  onCreate: (name: string, language: TargetLanguage) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const { t } = useI18n();
-  const theme = useTheme();
-  const [name, setName] = useState('');
-  const [language, setLanguage] = useState<TargetLanguage>('es');
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    if (!name.trim() || busy) return;
-    setBusy(true);
-    try {
-      await onCreate(name.trim(), language);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Surface style={styles.form}>
-      <Field
-        label={t('deckName')}
-        value={name}
-        onChangeText={setName}
-        autoFocus
-        returnKeyType="done"
-        onSubmitEditing={() => void submit()}
-        placeholder="Spanish Verbs"
-      />
-
-      <View style={styles.field}>
-        <Label variant="caption" tone="muted" style={styles.fieldLabel}>
-          {t('deckLanguage')}
-        </Label>
-        <SegmentedControl
-          options={TARGET_LANGUAGES.map((code) => ({ value: code, label: LANGUAGE_NAMES[code] }))}
-          value={language}
-          onChange={setLanguage}
-        />
-      </View>
-
-      <Row gap={theme.spacing.sm}>
-        <Button label={t('cancel')} variant="ghost" onPress={onCancel} style={styles.grow} />
-        <Button
-          label={t('createDeck')}
-          onPress={() => void submit()}
-          disabled={!name.trim()}
-          loading={busy}
-          style={styles.grow}
-        />
-      </Row>
-    </Surface>
+        <Spacer size={theme.spacing.md} />
+        <Row gap={theme.spacing.sm}>
+          <Button
+            label={t('study')}
+            onPress={() =>
+              router.push({
+                pathname: '/(app)/study/[deckId]',
+                params: { deckId: deck.id, ahead: due > 0 ? '0' : '1' },
+              })
+            }
+            disabled={deck.cardCount === 0}
+            style={styles.deckAction}
+          />
+          <Button
+            label={t('settings')}
+            variant="secondary"
+            onPress={() => router.push({ pathname: '/(app)/deck/[id]', params: { id: deck.id } })}
+            style={styles.deckAction}
+          />
+        </Row>
+      </Surface>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  split: { flex: 1, width: '100%' },
+  splitWide: { flexDirection: 'row', alignSelf: 'center', maxWidth: 1240 },
+  calendarPane: { padding: 16 },
+  calendarPaneWide: { width: 340, paddingRight: 0 },
+  decksPane: { flex: 1, minWidth: 0 },
   summaryWrap: { marginBottom: 16 },
   summary: { paddingVertical: 20 },
   grow: { flex: 1 },
   deck: {},
   deckHeader: { alignItems: 'flex-start', gap: 12 },
-  pressed: { opacity: 0.7 },
+  deckAction: { flex: 1 },
   lifted: { transform: [{ translateY: -1 }] },
-  form: { gap: 16, marginBottom: 16 },
-  field: { gap: 6 },
-  fieldLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
 });

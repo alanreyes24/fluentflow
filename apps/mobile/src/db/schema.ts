@@ -186,6 +186,18 @@ const migrations: Migration[] = [
       WHERE maxReviewsPerDay = 200;
     `);
   },
+
+  // 11 — study presentation preferences and optional card context.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE decks ADD COLUMN reverseCards INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE decks ADD COLUMN showExamples INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE decks ADD COLUMN showGrammarNotes INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE decks ADD COLUMN showRelatedWords INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE cards ADD COLUMN grammarNotes TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE cards ADD COLUMN relatedWords TEXT NOT NULL DEFAULT '[]';
+    `);
+  },
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

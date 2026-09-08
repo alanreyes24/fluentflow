@@ -75,6 +75,7 @@ export default function AppLayout() {
           }}
         >
           <Stack.Screen name="decks" options={{ title: t('decks') }} />
+          <Stack.Screen name="new-deck" options={{ title: t('newDeck') }} />
           <Stack.Screen name="deck/[id]" options={{ title: t('cards') }} />
           <Stack.Screen name="study/[deckId]" options={{ title: t('study') }} />
           <Stack.Screen name="import" options={{ title: t('importDeck') }} />

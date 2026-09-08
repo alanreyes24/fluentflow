@@ -116,13 +116,17 @@ export default function StudyScreen() {
   // that grows: a card rated "again" is pushed back onto the end and is picked
   // up again when it comes round.
   useEffect(() => {
-    if (!exampleService || queue.length === 0) return;
+    if (!exampleService || deck?.showExamples === false || queue.length === 0) return;
     exampleService.prefetch(queue.slice(index));
-  }, [exampleService, queue, index]);
+  }, [exampleService, deck?.showExamples, queue, index]);
 
   const reveal = useCallback(() => {
-    if (revealed || !card || !exampleService) return;
+    if (revealed || !card) return;
     setRevealed(true);
+    if (deck?.showExamples === false || !exampleService) {
+      setGenerating(false);
+      return;
+    }
     setGenerating(true);
     setExamples(null);
 
@@ -133,7 +137,7 @@ export default function StudyScreen() {
       .then((result) => setExamples(result))
       .catch(() => setExamples({ examples: [], source: 'fallback', durationMs: 0 }))
       .finally(() => setGenerating(false));
-  }, [revealed, card, exampleService]);
+  }, [revealed, card, deck, exampleService]);
 
   /**
    * What each button would schedule, from the card's current state.
@@ -325,33 +329,39 @@ export default function StudyScreen() {
   if (!card) {
     return (
       <Screen>
-        <EmptyState
-          title={t('sessionComplete')}
-          hint={
-            reviewed > 0
-              ? `${t('reviewedToday', { count: reviewed })} · ${t('sessionCompleteHint')}`
-              : t('sessionCompleteHint')
-          }
-          action={<Button label={t('decks')} onPress={() => router.back()} />}
-        />
-        {/* How the session went, while it is still worth knowing. The
-            statistics screen has the long view; this is the one sitting. */}
-        {reviewed > 0 ? (
-          <>
-            <Spacer size={theme.spacing.lg} />
-            <Surface>
-              <Row gap={theme.spacing.md} justify="space-between" align="flex-start">
-                <StatTile value={String(reviewed)} label={t('reviews')} />
-                <StatTile value={String(lapses)} label={t('againLabel')} />
-                <StatTile
-                  value={`${Math.round(((reviewed - lapses) / reviewed) * 100)}%`}
-                  label={t('sessionAccuracy')}
-                  tone="accent"
-                />
-              </Row>
-            </Surface>
-          </>
-        ) : null}
+        <View style={styles.sessionComplete}>
+          <View>
+            <EmptyState
+              title={t('sessionComplete')}
+              hint={
+                reviewed > 0
+                  ? `${t('reviewedToday', { count: reviewed })} · ${t('sessionCompleteHint')}`
+                  : t('sessionCompleteHint')
+              }
+            />
+            {/* How the session went, while it is still worth knowing. The
+                statistics screen has the long view; this is the one sitting. */}
+            {reviewed > 0 ? (
+              <>
+                <Spacer size={theme.spacing.lg} />
+                <Surface style={styles.sessionSummary}>
+                  <Row gap={theme.spacing.md} justify="space-between" align="flex-start">
+                    <StatTile value={String(reviewed)} label={t('reviews')} />
+                    <StatTile value={String(lapses)} label={t('againLabel')} />
+                    <StatTile
+                      value={`${Math.round(((reviewed - lapses) / reviewed) * 100)}%`}
+                      label={t('sessionAccuracy')}
+                      tone="accent"
+                    />
+                  </Row>
+                </Surface>
+              </>
+            ) : null}
+          </View>
+          <View style={styles.sessionCompleteAction}>
+            <Button label={t('decks')} onPress={() => router.back()} />
+          </View>
+        </View>
       </Screen>
     );
   }
@@ -383,28 +393,40 @@ export default function StudyScreen() {
           {/* Before the answer, the whole card is the reveal button. After it,
               the card holds its own controls (Regenerate), so it must not be a
               button — a button nested in a button is invalid and a11y-hostile. */}
-          <CardShell revealed={revealed} onReveal={reveal} label={revealed ? card.back : t('showAnswer')}>
+          <CardShell
+            revealed={revealed}
+            onReveal={reveal}
+            label={revealed ? (deck?.reverseCards ? card.front : card.back) : t('showAnswer')}
+          >
             <Surface raised elevation="lg" style={[styles.card, { borderRadius: theme.radius.lg }]}>
               <ScrollView contentContainerStyle={styles.cardContent}>
                 <Label variant="cardFront" align="center" selectable>
-                  {card.front}
+                  {deck?.reverseCards ? card.back : card.front}
                 </Label>
 
                 {revealed ? (
                   <>
                     <Divider style={styles.divider} />
                     <Label variant="cardBack" align="center" tone="muted" selectable>
-                      {card.back}
+                      {deck?.reverseCards ? card.front : card.back}
                     </Label>
 
                     <Spacer size={theme.spacing.lg} />
-                    <ExampleBlock
-                      result={examples}
-                      generating={generating}
-                      onRegenerate={regenerate}
-                      onWordPress={captureWord}
-                      toast={toast}
-                    />
+                    {deck?.showExamples !== false ? (
+                      <ExampleBlock
+                        result={examples}
+                        generating={generating}
+                        onRegenerate={regenerate}
+                        onWordPress={captureWord}
+                        toast={toast}
+                      />
+                    ) : null}
+                    {deck?.showGrammarNotes !== false && card.grammarNotes?.length ? (
+                      <ContextList title={t('grammarNotes')} items={card.grammarNotes} />
+                    ) : null}
+                    {deck?.showRelatedWords !== false && card.relatedWords?.length ? (
+                      <ContextList title={t('relatedWords')} items={card.relatedWords} />
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -570,6 +592,23 @@ function RatingButton({
   );
 }
 
+function ContextList({ title, items }: { title: string; items: string[] }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.contextBlock}>
+      <Label variant="caption" tone="faint" style={styles.contextLabel}>
+        {title}
+      </Label>
+      {items.map((item) => (
+        <Label key={item} variant="body" tone="muted">
+          · {item}
+        </Label>
+      ))}
+      <View style={{ height: theme.spacing.xs }} />
+    </View>
+  );
+}
+
 /**
  * The generated examples.
  *
@@ -720,6 +759,9 @@ interface UndoState {
 }
 
 const styles = StyleSheet.create({
+  sessionComplete: { flex: 1, justifyContent: 'space-between' },
+  sessionCompleteAction: { alignItems: 'center', padding: 16 },
+  sessionSummary: { alignSelf: 'center' },
   ratingInterval: { marginTop: 4 },
   flex: { flex: 1 },
   stage: { flex: 1 },
@@ -746,6 +788,8 @@ const styles = StyleSheet.create({
   cardContent: { flexGrow: 1, justifyContent: 'center' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 24 },
   examples: { gap: 8 },
+  contextBlock: { gap: 4, marginTop: 12 },
+  contextLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
   examplesLabel: { textTransform: 'uppercase', letterSpacing: 0.6, flex: 1 },
   example: {},
   sentenceWrap: { position: 'relative' },

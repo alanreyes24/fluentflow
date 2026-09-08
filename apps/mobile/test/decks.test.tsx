@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import type { Deck } from '@fluentflow/core';
 import DecksScreen from '../app/(app)/decks';
 import DeckScreen from '../app/(app)/deck/[id]';
+import NewDeckScreen from '../app/(app)/new-deck';
 import { BottomBar } from '../src/ui/BottomBar';
 import { SyncIndicator } from '../src/ui/SyncIndicator';
 import { Repository } from '../src/db/repository';
@@ -66,14 +67,29 @@ describe('DecksScreen', () => {
     });
   });
 
+  it('shows the streak at the top of the deck screen', async () => {
+    const deck = await repository.createDeck(TEST_USER.id, 'Spanish', 'es');
+    const subject = await repository.addCard(TEST_USER.id, deck, 'hablar', 'to speak');
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() - 1);
+    await repository.rateCard(subject, 'good', date);
+    await repository.rateCard(subject, 'good');
+    const [stored] = await repository.listDecks(TEST_USER.id);
+
+    await renderScreen(<DecksScreen />, { repository, decks: [stored!], user: TEST_USER });
+
+    await screen.findByLabelText('2 day streak');
+    expect(screen.getByText('Kept up today')).toBeTruthy();
+  });
+
   it('creates a deck and opens it', async () => {
-    const { state } = await renderScreen(<DecksScreen />, {
+    const { state } = await renderScreen(<NewDeckScreen />, {
       repository,
       decks: [],
       user: TEST_USER,
     });
 
-    await fireEvent.press(screen.getByRole('button', { name: 'New deck' }));
     await fireEvent.changeText(await screen.findByDisplayValue(''), 'Bosnian Basics');
     await fireEvent.press(screen.getByRole('button', { name: 'Create deck' }));
 
@@ -82,7 +98,7 @@ describe('DecksScreen', () => {
       expect(decks.map((deck: Deck) => deck.name)).toEqual(['Bosnian Basics']);
     });
     expect(state.refreshDecks).toHaveBeenCalled();
-    expect(mockRouter.push).toHaveBeenCalled();
+    expect(mockRouter.replace).toHaveBeenCalled();
   });
 
 });
@@ -131,21 +147,15 @@ describe('BottomBar', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Import' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/import');
 
-    await fireEvent.press(screen.getByRole('button', { name: 'Statistics' }));
-    expect(mockRouter.push).toHaveBeenCalledWith('/(app)/stats');
-
     await fireEvent.press(screen.getByRole('button', { name: 'Settings' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/settings');
   });
 
-  it('opens the new-deck form on the deck screen rather than duplicating it', async () => {
+  it('opens the dedicated new-deck screen', async () => {
     await renderScreen(<BottomBar />);
 
     await fireEvent.press(screen.getByRole('button', { name: 'New deck' }));
-    expect(mockRouter.push).toHaveBeenCalledWith({
-      pathname: '/(app)/decks',
-      params: { new: '1' },
-    });
+    expect(mockRouter.push).toHaveBeenCalledWith('/(app)/new-deck');
   });
 });
 

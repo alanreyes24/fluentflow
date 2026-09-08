@@ -9,7 +9,6 @@ import {
   fillDays,
   heatmap,
   recentWindow,
-  studyStreak,
   summariseReviews,
   weekday,
   type RatingName,
@@ -36,7 +35,6 @@ import {
   StatTile,
   Surface,
 } from '../../src/ui/components';
-import { StreakCard } from '../../src/ui/Streak';
 import { useTheme } from '../../src/ui/theme';
 
 /**
@@ -97,9 +95,9 @@ export default function StatsScreen() {
     );
   }
 
-  const { streak, summary, windowDays, calendar, chart, forecastBars, reviewsToday } = view;
+  const { summary, windowDays, calendar, chart, forecastBars } = view;
 
-  if (summary.reviews === 0 && streak.activeDays === 0) {
+  if (summary.reviews === 0) {
     return (
       <Screen>
         <EmptyState
@@ -122,12 +120,6 @@ export default function StatsScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={[styles.content, content]}>
-        <Surface elevation="sm">
-          <StreakCard streak={streak} reviewsToday={reviewsToday} />
-        </Surface>
-
-        <Spacer size={theme.spacing.lg} />
-
         <SegmentedControl<string>
           options={[
             { value: '7', label: t('range7') },
@@ -317,9 +309,8 @@ export default function StatsScreen() {
 /**
  * Everything the screen draws, computed in one place.
  *
- * Kept out of the component so the chart, the calendar and the streak cannot
- * disagree about which days they cover — the bug that produces a "3 day
- * streak" above a chart showing four.
+ * Kept out of the component so the chart and calendar cannot disagree about
+ * which days they cover.
  */
 function derive(stats: StudyStats, range: Range, today: string, initials: string) {
   const [from, to] =
@@ -327,8 +318,6 @@ function derive(stats: StudyStats, range: Range, today: string, initials: string
 
   const windowDays = fillDays(stats.days, from, to);
   const summary = summariseReviews(windowDays);
-  const streak = studyStreak(stats.days, today);
-  const reviewsToday = stats.days.find((entry) => entry.day === today)?.reviews ?? 0;
 
   // All-time can span years; 90 bars would be a smear, so the chart always
   // shows the most recent stretch and the summary above it covers the range.
@@ -338,10 +327,8 @@ function derive(stats: StudyStats, range: Range, today: string, initials: string
   const labelEvery = bars.length <= 15 ? 3 : 0;
 
   return {
-    streak,
     summary,
     windowDays,
-    reviewsToday,
     calendar: heatmap(stats.days, { today, weeks: 17 }),
     chart: bars.map<Bar>((entry, index) => ({
       key: entry.day,

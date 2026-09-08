@@ -50,21 +50,16 @@ export function BottomBar() {
       ]}
     >
       <BarAction
+        label={t('decks')}
+        selected={pathname === '/decks'}
+        onPress={() => router.push('/(app)/decks')}
+      />
+      <BarAction
         label={t('newDeck')}
-        // The form lives on the deck screen. Carrying the intent as a
-        // parameter rather than lifting the form into shared state keeps one
-        // implementation of it for both layouts.
-        onPress={() => router.push({ pathname: '/(app)/decks', params: { new: '1' } })}
+        onPress={() => router.push('/(app)/new-deck')}
       />
       <BarAction label={t('pasteShort')} onPress={() => router.push('/(app)/text-import')} />
       <BarAction label={t('importShort')} onPress={() => router.push('/(app)/import')} />
-      {/* Statistics belongs here for the same reason the rest do: it is about
-          the whole collection, not the deck that happens to be open. */}
-      <BarAction
-        label={t('statistics')}
-        selected={pathname === '/stats'}
-        onPress={() => router.push('/(app)/stats')}
-      />
       <BarAction
         label={t('settings')}
         selected={pathname === '/settings'}
