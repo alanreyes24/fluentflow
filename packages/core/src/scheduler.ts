@@ -659,6 +659,10 @@ export interface StudyQueue {
   learning: number;
   review: number;
   new: number;
+  /** Learning/relearning cards whose next-step timer has not elapsed yet. */
+  pendingLearning: number;
+  /** Earliest pending learning step, when one exists. */
+  nextLearningAt?: IsoDate;
 }
 
 /**
@@ -682,6 +686,13 @@ export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptio
   const newCards = live.filter(
     (card) => (card.phase ?? 'new') === 'new' && isCardDue(card, now) && !card.introducedAt,
   );
+  const pendingLearningCards = live
+    .filter(
+      (card) =>
+        (card.phase === 'learning' || card.phase === 'relearning') &&
+        !isCardDue(card, now),
+    )
+    .sort(compareDue);
 
   const reviewAllowance = options.maxReviewsPerDay === null
     ? Number.MAX_SAFE_INTEGER
@@ -698,6 +709,8 @@ export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptio
     learning: result.filter((card) => card.phase === 'learning' || card.phase === 'relearning').length,
     review: result.filter((card) => card.phase === 'review').length,
     new: result.filter((card) => (card.phase ?? 'new') === 'new').length,
+    pendingLearning: pendingLearningCards.length,
+    ...(pendingLearningCards[0] ? { nextLearningAt: pendingLearningCards[0].nextReview } : {}),
   };
 }
 

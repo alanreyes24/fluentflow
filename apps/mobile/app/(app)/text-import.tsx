@@ -13,6 +13,10 @@ import {
   type TextImportSummary,
 } from '@fluentflow/core';
 import { useI18n } from '../../src/i18n';
+import {
+  dictionaryAvailableFor,
+  normalizedFrontFrom,
+} from '../../src/ai/card-fronts';
 import { useApp } from '../../src/state/app';
 import {
   Button,
@@ -279,6 +283,23 @@ export default function TextImportScreen() {
     setBusy(true);
     setError(null);
     try {
+      // Explicit word/meaning pairs do not need translation, but their fronts
+      // still need the same free conjugation check as bare-word pastes.
+      const dictionary = sources?.dictionary ?? (await lookupSources()).dictionary;
+      let finalizedOrigins = origins;
+      if (dictionaryAvailableFor(dictionary, targetLanguage)) {
+        const normalization = await lookUpMeanings(
+          preview.entries.map((entry) => entry.front),
+          targetLanguage,
+          undefined,
+          { useModel: false },
+        );
+        finalizedOrigins = {
+          ...Object.fromEntries(normalization.meanings.map((entry) => [entry.word, entry])),
+          ...origins,
+        };
+      }
+
       const result = buildTextImport(text, {
         userId: user.id,
         swap,
@@ -286,7 +307,11 @@ export default function TextImportScreen() {
         // Reviewed meanings for the words the paste did not carry. Anything
         // left blank is not written: core drops it and reports the count.
         meanings: drafts,
-        correctedFronts: correctedFrontsFrom(origins),
+        correctedFronts: correctedFrontsFrom(finalizedOrigins),
+        normalizedFronts: dictionaryInfinitivesFrom(
+          finalizedOrigins,
+          Object.fromEntries(preview.entries.map((entry) => [entry.front, entry.back])),
+        ),
         ...(deck
           ? { deck: { id: deck.id, language: deck.language } }
           : {
@@ -333,7 +358,7 @@ export default function TextImportScreen() {
     }
   }, [
     repository, user, preview.entries.length, text, swap, existingFronts, drafts, origins,
-    deck, deckName, language, refreshDecks, syncNow, t, targetDeckId,
+    deck, deckName, language, refreshDecks, syncNow, t, targetDeckId, sources, targetLanguage,
     missingMeanings.length, skipApproved,
   ]);
 
@@ -719,15 +744,32 @@ function draftsFrom(resolved: ResolvedMeaning[]): Record<string, string> {
   return drafts;
 }
 
-/** Corrections are applied only for model answers that produced a meaning. */
+/** Apply model spelling corrections to bare-word card fronts. */
 function correctedFrontsFrom(
   origins: Record<string, ResolvedMeaning>,
 ): Record<string, string> {
   const corrected: Record<string, string> = {};
   for (const [word, entry] of Object.entries(origins)) {
-    if (entry.meaning && entry.correctedWord) corrected[word] = entry.correctedWord;
+    if (entry.source === 'model' && entry.meaning && entry.correctedWord) {
+      corrected[word] = entry.correctedWord;
+    }
   }
   return corrected;
+}
+
+/** Dictionary-recognized conjugations become infinitives for every paste format. */
+function dictionaryInfinitivesFrom(
+  origins: Record<string, ResolvedMeaning>,
+  suppliedMeanings: Record<string, string>,
+): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [word, entry] of Object.entries(origins)) {
+    if (entry.source === 'dictionary' && entry.meaning && entry.correctedWord) {
+      const front = normalizedFrontFrom(entry, word, suppliedMeanings[word]);
+      if (front !== word) normalized[word] = front;
+    }
+  }
+  return normalized;
 }
 
 /** How many meanings came from where, for the automatic-results summary. */

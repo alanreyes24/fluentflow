@@ -13,6 +13,7 @@ import NetInfo from '@react-native-community/netinfo';
 import type { Deck } from '@fluentflow/core';
 import { DATABASE_NAME, migrate } from '../db/schema';
 import { Repository } from '../db/repository';
+import { normalizeExistingCards } from '../ai/card-fronts';
 import { ExampleService } from '../ai/service';
 import { SyncEngine, type SyncStatus } from '../sync/engine';
 import { authApi, type AuthApi } from '../firebase/client';
@@ -83,6 +84,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await migrate(opened);
         if (cancelled) return;
         const repo = new Repository(opened);
+        try {
+          const normalized = await normalizeExistingCards(repo);
+          if (normalized.frontsChanged > 0 || normalized.meaningsChanged > 0) {
+            console.info(
+              `[fluentflow] normalized ${normalized.frontsChanged} card front(s) and ` +
+              `${normalized.meaningsChanged} pointer meaning(s)`,
+            );
+          }
+        } catch (cause) {
+          // A missing or temporarily unavailable dictionary must not keep the
+          // collection from opening. The audit runs again at the next launch.
+          console.warn('[fluentflow] card-front normalization skipped:', cause);
+        }
+        if (cancelled) return;
         setRepository(repo);
         setExamples(new ExampleService(repo));
       } catch (cause) {

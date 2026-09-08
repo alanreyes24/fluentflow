@@ -13,6 +13,7 @@ import {
   type RatingName,
 } from '@fluentflow/core';
 import { useI18n } from '../../../src/i18n';
+import { normalizeCardFront } from '../../../src/ai/card-fronts';
 import { useApp } from '../../../src/state/app';
 import type { ExampleResult } from '../../../src/ai/service';
 import { lookUpMeanings, lookupSources } from '../../../src/ai/desktop';
@@ -28,6 +29,7 @@ import {
   StatusDot,
   Surface,
 } from '../../../src/ui/components';
+import { CardForm } from '../../../src/ui/CardForm';
 import { formatInterval } from '../../../src/ui/format';
 
 import { useCardGestures } from '../../../src/ui/useCardGestures';
@@ -74,6 +76,8 @@ export default function StudyScreen() {
   const [lapses, setLapses] = useState(0);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addingWords = useRef(new Set<string>());
@@ -183,6 +187,8 @@ export default function StudyScreen() {
         setRevealed(false);
         setExamples(null);
         setToolsOpen(false);
+        setEditing(false);
+        setEditError(null);
         // A card whose next step lands inside the learn-ahead window goes back
         // on the end of the queue; anything further out is done for today.
         if (dueWithinSession(answered)) setQueue((current) => [...current, answered]);
@@ -198,7 +204,7 @@ export default function StudyScreen() {
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!revealed || event.defaultPrevented) return;
+      if (!revealed || editing || event.defaultPrevented) return;
       const target = event.target as { tagName?: string; isContentEditable?: boolean } | null;
       if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')) {
         return;
@@ -210,7 +216,7 @@ export default function StudyScreen() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [revealed, rate]);
+  }, [revealed, editing, rate]);
 
   const undo = useCallback(async () => {
     if (!repository || !user || !undoState) return;
@@ -224,6 +230,8 @@ export default function StudyScreen() {
     setRevealed(false);
     setExamples(null);
     setToolsOpen(false);
+    setEditing(false);
+    setEditError(null);
     await refreshDecks();
   }, [repository, user, undoState, refreshDecks]);
 
@@ -237,9 +245,56 @@ export default function StudyScreen() {
       setRevealed(false);
       setExamples(null);
       setToolsOpen(false);
+      setEditing(false);
+      setEditError(null);
       await refreshDecks();
     },
     [repository, card, refreshDecks],
+  );
+
+  /**
+   * Save edits to the card on screen without disturbing its place in the
+   * session: only the content fields change, so the scheduling state — and any
+   * copy of this card already re-queued behind a lapse — keeps its due date.
+   */
+  const saveCardEdit = useCallback(
+    async (front: string, back: string, grammarNotes: string[], relatedWords: string[]) => {
+      if (!repository || !card) return false;
+      const normalizedFront = await normalizeCardFront(front, card.language, back);
+      const duplicate = await repository.findCardByFront(card.deckId, normalizedFront);
+      if (duplicate && duplicate.id !== card.id) {
+        setEditError(t('duplicateCardHint'));
+        return false;
+      }
+      const updated = await repository.updateCard(card, {
+        front: normalizedFront,
+        back,
+        grammarNotes,
+        relatedWords,
+      });
+      setQueue((current) =>
+        current.map((item) =>
+          item.id === updated.id
+            ? {
+                ...item,
+                front: updated.front,
+                back: updated.back,
+                grammarNotes: updated.grammarNotes,
+                relatedWords: updated.relatedWords,
+              }
+            : item,
+        ),
+      );
+      // The examples on screen were written for the old wording.
+      setExamples(null);
+      setGenerating(false);
+      setEditError(null);
+      setEditing(false);
+      setToolsOpen(false);
+      await refreshDecks();
+      return true;
+    },
+    [repository, card, refreshDecks, t],
   );
 
   const showToast = useCallback((message: string) => {
@@ -361,118 +416,154 @@ export default function StudyScreen() {
           </View>
         </View>
 
-        <Animated.View
-          style={[
-            styles.cardWrap,
-            wide ? styles.cardWrapWide : null,
-          ]}
-          {...gestures.handlers}
-        >
-          {/* Before the answer, the whole card is the reveal button. After it,
-              the card holds its own controls (Regenerate), so it must not be a
-              button — a button nested in a button is invalid and a11y-hostile. */}
-          <CardShell
-            revealed={revealed}
-            onReveal={reveal}
-            label={revealed ? (deck?.reverseCards ? card.front : card.back) : t('showAnswer')}
+        {editing ? (
+          <ScrollView
+            style={styles.flex}
+            contentContainerStyle={styles.editScroll}
+            keyboardShouldPersistTaps="handled"
           >
-            <Surface raised elevation="lg" style={[styles.card, { borderRadius: theme.radius.lg }]}>
-              <ScrollView contentContainerStyle={styles.cardContent}>
-                <Label variant="cardFront" align="center" selectable>
-                  {deck?.reverseCards ? card.back : card.front}
-                </Label>
-
-                {revealed ? (
-                  <>
-                    <Divider style={styles.divider} />
-                    <Label variant="cardBack" align="center" tone="muted" selectable>
-                      {deck?.reverseCards ? card.front : card.back}
-                    </Label>
-
-                    <Spacer size={theme.spacing.lg} />
-                    {deck?.showExamples !== false ? (
-                      <ExampleBlock
-                        result={examples}
-                        generating={generating}
-                        onRegenerate={regenerate}
-                        onWordPress={captureWord}
-                        toast={toast}
-                      />
-                    ) : null}
-                    {deck?.showGrammarNotes !== false && card.grammarNotes?.length ? (
-                      <ContextList title={t('grammarNotes')} items={card.grammarNotes} />
-                    ) : null}
-                    {deck?.showRelatedWords !== false && card.relatedWords?.length ? (
-                      <ContextList title={t('relatedWords')} items={card.relatedWords} />
-                    ) : null}
-                  </>
-                ) : (
-                  <>
-                    <Spacer size={theme.spacing.lg} />
-                    <Label variant="caption" tone="faint" align="center">
-                      {t('showAnswer')}
-                    </Label>
-                  </>
-                )}
-              </ScrollView>
-            </Surface>
-          </CardShell>
-        </Animated.View>
-
-        <View style={styles.controls}>
-          {revealed ? (
-            <>
-              <Row gap={theme.spacing.xs} align="flex-start">
-                <Row gap={theme.spacing.xs} style={styles.ratingRow}>
-                  {RATING_NAMES.map((rating) => (
-                    <RatingButton
-                      key={rating}
-                      rating={rating}
-                      tone={theme.colors[rating]}
-                      interval={intervals?.[rating]}
-                      onPress={rate}
-                    />
-                  ))}
-                </Row>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={t('studyOptions')}
-                  accessibilityState={{ expanded: toolsOpen }}
-                  onPress={() => setToolsOpen((open) => !open)}
-                  style={styles.gearButton}
-                >
-                  <Label variant="body" align="center" style={styles.gearIcon}>
-                    ⚙
+            <CardForm
+              initialFront={card.front}
+              initialBack={card.back}
+              initialGrammarNotes={card.grammarNotes ?? []}
+              initialRelatedWords={card.relatedWords ?? []}
+              error={editError ?? undefined}
+              onCancel={() => {
+                setEditing(false);
+                setEditError(null);
+              }}
+              onCreate={saveCardEdit}
+            />
+          </ScrollView>
+        ) : (
+          <>
+          <Animated.View
+            style={[
+              styles.cardWrap,
+              wide ? styles.cardWrapWide : null,
+            ]}
+            {...gestures.handlers}
+          >
+            {/* Before the answer, the whole card is the reveal button. After it,
+                the card holds its own controls (Regenerate), so it must not be a
+                button — a button nested in a button is invalid and a11y-hostile. */}
+            <CardShell
+              revealed={revealed}
+              onReveal={reveal}
+              label={revealed ? (deck?.reverseCards ? card.front : card.back) : t('showAnswer')}
+            >
+              <Surface raised elevation="lg" style={[styles.card, { borderRadius: theme.radius.lg }]}>
+                <ScrollView contentContainerStyle={styles.cardContent}>
+                  <Label variant="cardFront" align="center" selectable>
+                    {deck?.reverseCards ? card.back : card.front}
                   </Label>
-                </Pressable>
-              </Row>
-              {toolsOpen ? (
-                <>
-                  <Spacer size={theme.spacing.sm} />
-                  <Row gap={theme.spacing.xs}>
-                    <Button
-                      label={t('bury')}
-                      variant="secondary"
-                      onPress={() => void removeFromSession('bury')}
-                      style={styles.flex}
-                    />
-                    <Button
-                      label={t('suspend')}
-                      variant="ghostDanger"
-                      onPress={() => void removeFromSession('suspend')}
-                      style={styles.flex}
-                    />
-                    {undoState ? (
-                      <Button label={t('undo')} variant="ghost" onPress={() => void undo()} style={styles.flex} />
-                    ) : null}
+
+                  {revealed ? (
+                    <>
+                      <Divider style={styles.divider} />
+                      <Label variant="cardBack" align="center" tone="muted" selectable>
+                        {deck?.reverseCards ? card.front : card.back}
+                      </Label>
+
+                      <Spacer size={theme.spacing.lg} />
+                      {deck?.showExamples !== false ? (
+                        <ExampleBlock
+                          result={examples}
+                          generating={generating}
+                          onRegenerate={regenerate}
+                          onWordPress={captureWord}
+                          toast={toast}
+                        />
+                      ) : null}
+                      {deck?.showGrammarNotes !== false && card.grammarNotes?.length ? (
+                        <ContextList title={t('grammarNotes')} items={card.grammarNotes} />
+                      ) : null}
+                      {deck?.showRelatedWords !== false && card.relatedWords?.length ? (
+                        <ContextList title={t('relatedWords')} items={card.relatedWords} />
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <Spacer size={theme.spacing.lg} />
+                      <Label variant="caption" tone="faint" align="center">
+                        {t('showAnswer')}
+                      </Label>
+                    </>
+                  )}
+                </ScrollView>
+              </Surface>
+            </CardShell>
+          </Animated.View>
+
+          <View style={styles.controls}>
+            {revealed ? (
+              <>
+                <Row gap={theme.spacing.xs} align="flex-start">
+                  <Row gap={theme.spacing.xs} style={styles.ratingRow}>
+                    {RATING_NAMES.map((rating) => (
+                      <RatingButton
+                        key={rating}
+                        rating={rating}
+                        tone={theme.colors[rating]}
+                        interval={intervals?.[rating]}
+                        onPress={rate}
+                      />
+                    ))}
                   </Row>
-                </>
-              ) : null}
-            </>
-          ) : (
-            <Button label={t('showAnswer')} onPress={reveal} />
-          )}
-        </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('studyOptions')}
+                    accessibilityState={{ expanded: toolsOpen }}
+                    onPress={() => setToolsOpen((open) => !open)}
+                    style={styles.gearButton}
+                  >
+                    <Label variant="body" align="center" style={styles.gearIcon}>
+                      ⚙
+                    </Label>
+                  </Pressable>
+                </Row>
+                {toolsOpen ? (
+                  <>
+                    <Spacer size={theme.spacing.sm} />
+                    <Row gap={theme.spacing.xs}>
+                      <Button
+                        label={t('edit')}
+                        variant="secondary"
+                        onPress={() => {
+                          setToolsOpen(false);
+                          setEditError(null);
+                          setEditing(true);
+                        }}
+                        style={styles.flex}
+                      />
+                      <Button
+                        label={t('bury')}
+                        variant="secondary"
+                        onPress={() => void removeFromSession('bury')}
+                        style={styles.flex}
+                      />
+                    </Row>
+                    <Spacer size={theme.spacing.xs} />
+                    <Row gap={theme.spacing.xs}>
+                      <Button
+                        label={t('suspend')}
+                        variant="ghostDanger"
+                        onPress={() => void removeFromSession('suspend')}
+                        style={styles.flex}
+                      />
+                      {undoState ? (
+                        <Button label={t('undo')} variant="ghost" onPress={() => void undo()} style={styles.flex} />
+                      ) : null}
+                    </Row>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              <Button label={t('showAnswer')} onPress={reveal} />
+            )}
+          </View>
+          </>
+        )}
       </View>
     </Screen>
   );
@@ -793,4 +884,5 @@ const styles = StyleSheet.create({
     maxWidth: 440,
   },
   controls: { padding: 16 },
+  editScroll: { padding: 16, flexGrow: 1 },
 });

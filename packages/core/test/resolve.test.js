@@ -15,11 +15,19 @@ const ENTRIES = {
   anguila: [{ word: 'anguila', gloss: 'eel' }],
   // An inflected form, pointing at the word it inflects.
   comieron: [{ word: 'comieron', gloss: 'third-person plural preterite of comer', lemma: 'comer' }],
-  comer: [{ word: 'comer', gloss: 'to eat' }, { word: 'comer', gloss: 'to have lunch' }],
+  comer: [{ word: 'comer', gloss: 'to eat', pos: 'verb' }, { word: 'comer', gloss: 'to have lunch', pos: 'verb' }],
   molim: [{ word: 'molim', gloss: 'first-person singular present of moliti', lemma: 'moliti' }],
-  moliti: [{ word: 'moliti', gloss: 'to pray' }, { word: 'moliti', gloss: 'to ask, beg' }],
+  moliti: [{ word: 'moliti', gloss: 'to pray', pos: 'verb' }, { word: 'moliti', gloss: 'to ask, beg', pos: 'verb' }],
+  acordarse: [{ word: 'acordarse', gloss: '', lemma: 'acordar' }],
+  acordar: [{ word: 'acordar', gloss: 'to agree', pos: 'verb' }],
+  imanes: [{ word: 'imanes', gloss: '', lemma: 'imanar' }],
+  imanar: [{ word: 'imanar', gloss: 'alternative form of imantar', pos: 'verb' }],
+  imantar: [{ word: 'imantar', gloss: 'to magnetize', pos: 'verb' }],
+  cacahuate: [{ word: 'cacahuate', gloss: 'alternative form of cacahuete (“peanut”)', pos: 'noun' }],
+  cacahuete: [{ word: 'cacahuete', gloss: 'peanut', pos: 'noun' }],
   stići: [{ word: 'stići', gloss: 'alternative form of stȉgnuti' }],
-  stȉgnuti: [{ word: 'stȉgnuti', gloss: 'to arrive, reach' }],
+  // Stress marks in pointer glosses are absent from the distilled headwords.
+  stignuti: [{ word: 'stignuti', gloss: 'to arrive, reach', pos: 'verb' }],
   zdravo: [
     { word: 'zdravo', gloss: 'hello! hi!', pos: 'intj' },
     { word: 'zdravo', gloss: 'bye! farewell!', pos: 'intj' },
@@ -52,16 +60,43 @@ test('an inflected form is followed to the word it inflects', async () => {
 
   assert.equal(spanish[0].meaning, 'to eat, to have lunch');
   assert.equal(spanish[0].lemma, 'comer');
+  assert.equal(spanish[0].correctedWord, 'comer');
   assert.equal(bosnian[0].meaning, 'to pray, to ask, beg');
   assert.equal(bosnian[0].lemma, 'moliti');
+  assert.equal(bosnian[0].correctedWord, 'moliti');
 });
 
 test('an alternate-form gloss is followed to its English meaning', async () => {
   const [resolved] = await resolveMeanings(['stići'], 'bs', { dictionary });
 
   assert.equal(resolved.meaning, 'to arrive, reach');
-  assert.equal(resolved.lemma, 'stȉgnuti');
+  assert.equal(resolved.lemma, 'stignuti');
+  assert.equal(resolved.correctedWord, undefined);
   assert.equal(resolved.source, 'dictionary');
+});
+
+test('an infinitive stays unchanged even when the form table points elsewhere', async () => {
+  const [resolved] = await resolveMeanings(['acordarse'], 'es', { dictionary });
+
+  assert.equal(resolved.meaning, 'to agree');
+  assert.equal(resolved.lemma, 'acordar');
+  assert.equal(resolved.correctedWord, undefined);
+});
+
+test('an inflection can pass through one alternate-form pointer', async () => {
+  const [resolved] = await resolveMeanings(['imanes'], 'es', { dictionary });
+
+  assert.equal(resolved.meaning, 'to magnetize');
+  assert.equal(resolved.lemma, 'imantar');
+  assert.equal(resolved.correctedWord, 'imantar');
+});
+
+test('a translated hint in an alternate-form gloss is not part of its headword', async () => {
+  const [resolved] = await resolveMeanings(['cacahuate'], 'es', { dictionary });
+
+  assert.equal(resolved.meaning, 'peanut');
+  assert.equal(resolved.lemma, 'cacahuete');
+  assert.equal(resolved.correctedWord, undefined);
 });
 
 test('several senses become one card back, capped', async () => {

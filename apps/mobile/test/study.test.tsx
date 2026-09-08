@@ -256,6 +256,34 @@ describe('StudyScreen', () => {
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(app)/decks'));
   });
 
+  it('edits the card on screen without losing its place in the session', async () => {
+    const [card] = await seed([
+      ['hablar', 'to speak'],
+      ['comer', 'to eat'],
+    ]);
+    await show();
+
+    await screen.findByText('hablar');
+    await reveal();
+    await screen.findByText('to speak');
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Study options' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Edit' }));
+
+    const back = await screen.findByLabelText('Meaning or translation');
+    await fireEvent.changeText(back, 'to talk');
+    await fireEvent.press(screen.getByRole('button', { name: 'Save' }));
+
+    // Back on the same card, still first in the queue, with the new wording.
+    await screen.findByText('to talk');
+    expect(screen.getByText('hablar')).toBeTruthy();
+    expect(screen.getByText('1 / 2')).toBeTruthy();
+
+    const stored = await repository.getCard(card!.id);
+    expect(stored?.back).toBe('to talk');
+    expect(stored?.phase).toBe('new');
+  });
+
   it('offers nothing to review when the queue is empty', async () => {
     await show();
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(app)/decks'));

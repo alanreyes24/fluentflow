@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
-import type { Deck } from '@fluentflow/core';
+import { collectionDayKey, type Deck } from '@fluentflow/core';
 import DecksScreen from '../app/(app)/decks';
 import DeckScreen from '../app/(app)/deck/[id]';
 import NewDeckScreen from '../app/(app)/new-deck';
@@ -80,6 +80,27 @@ describe('DecksScreen', () => {
       expect(screen.getByText('Learning 1')).toBeTruthy();
       expect(screen.getByText('Mastered 0')).toBeTruthy();
     });
+  });
+
+  it('shows waiting learning steps across the day boundary instead of claiming the cycle is finished', async () => {
+    let deck = await repository.createDeck(TEST_USER.id, 'Spanish', 'es');
+    deck = await repository.setNewCardsPerDay(deck, 1);
+    const card = await repository.addCard(TEST_USER.id, deck, 'hablar', 'to speak');
+    const learning = await repository.rateCard(card, 'good');
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    await repository.updateCard(learning, {
+      nextReview: tomorrow.toISOString(),
+      dueDay: collectionDayKey(tomorrow),
+    });
+    const [stored] = await repository.listDecks(TEST_USER.id);
+
+    await renderScreen(<DecksScreen />, { repository, decks: [stored!] });
+
+    expect(await screen.findByText('Learning steps pending: 1')).toBeTruthy();
+    expect(screen.queryByText('All caught up')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Study ahead' })).toBeTruthy();
+    expect(screen.getByText('⏱ 1')).toBeTruthy();
   });
 
   it('shows the streak at the top of the deck screen', async () => {

@@ -503,6 +503,8 @@ export interface TextImportOptions extends TextParseOptions {
   deck?: Pick<Deck, 'id' | 'language'>;
   /** Force a language instead of detecting one. */
   language?: TargetLanguage;
+  /** Dictionary infinitives, applied whether or not the paste supplied a meaning. */
+  normalizedFronts?: Record<string, string>;
   /** Language used when detection finds nothing. */
   fallbackLanguage?: TargetLanguage;
   /** Import time; injected for deterministic tests. */
@@ -585,6 +587,7 @@ export function buildTextImport(text: string, options: TextImportOptions): TextI
   const deckId = options.deck?.id ?? deck?.id ?? '';
   const meanings = options.meanings ?? {};
   const correctedFronts = options.correctedFronts ?? {};
+  const normalizedFronts = options.normalizedFronts ?? {};
 
   // Corrected spellings can make formerly distinct pasted rows converge. Pick
   // the unchanged spelling even when it appeared later, then preserve source
@@ -593,7 +596,8 @@ export function buildTextImport(text: string, options: TextImportOptions): TextI
     [...(options.existingFronts ?? [])].map(dedupeKey),
   );
   const candidates = parsed.entries.map((entry) => {
-    const proposed = entry.back ? '' : clean(correctedFronts[entry.front] ?? '');
+    const normalized = clean(normalizedFronts[entry.front] ?? '');
+    const proposed = normalized || (entry.back ? '' : clean(correctedFronts[entry.front] ?? ''));
     const front = proposed && proposed.length <= MAX_FRONT ? proposed : entry.front;
     return { entry, front, corrected: front !== entry.front };
   });

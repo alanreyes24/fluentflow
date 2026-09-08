@@ -295,6 +295,18 @@ test('model spelling corrections apply only to bare-word entries', () => {
   assert.equal(explicit.cards[0].front, 'mal escrito');
 });
 
+test('dictionary infinitives apply even when the paste supplies a meaning', () => {
+  const result = buildTextImport('comieron - they ate', {
+    userId: 'u1',
+    deckName: 'Spanish',
+    language: 'es',
+    normalizedFronts: { comieron: 'comer' },
+  });
+
+  assert.equal(result.cards[0].front, 'comer');
+  assert.equal(result.cards[0].back, 'they ate');
+});
+
 test('an unchanged spelling wins when a correction creates a duplicate', () => {
   const result = buildTextImport('angila\nanguila', {
     userId: 'u1',

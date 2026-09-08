@@ -67,7 +67,7 @@ export interface ResolvedMeaning {
   source: MeaningSource;
   /** The headword the meaning came from, when it is not the word itself. */
   lemma?: string;
-  /** A model-supplied spelling correction for the card front. */
+  /** A dictionary-supplied infinitive or model-supplied spelling correction. */
   correctedWord?: string;
   /**
    * Whether a person should check this before it becomes a card.
@@ -129,7 +129,7 @@ export async function resolveMeanings(
       deps.onProgress?.(results.length, words.length);
       continue;
     }
-    const found = deps.dictionary ? await lookUp(deps.dictionary, word) : null;
+    const found = deps.dictionary ? await lookUp(deps.dictionary, word, language) : null;
     if (found) {
       // Sanitizing is for lookup and prompting only. The renderer keys state by
       // the exact pasted front, so changing the identity here strands results.
@@ -235,29 +235,62 @@ export async function resolveMeanings(
  * usable at all — `comieron` is in the dictionary only as "the third-person
  * plural preterite of comer", and the meaning lives under `comer`.
  */
-async function lookUp(dictionary: DictionaryLookup, word: string): Promise<ResolvedMeaning | null> {
+async function lookUp(
+  dictionary: DictionaryLookup,
+  word: string,
+  language: TargetLanguage,
+): Promise<ResolvedMeaning | null> {
   const trimmed = word.trim();
   if (!trimmed) return null;
 
-  const forms = [trimmed, trimmed.toLowerCase()];
-  let rows: DictionaryEntry[] = [];
-  for (const form of [...new Set(forms)]) {
-    rows = await dictionary(form);
-    if (rows.length > 0) break;
-  }
+  const rows = await dictionaryRows(dictionary, trimmed);
   if (rows.length === 0) return null;
 
-  // An inflected form: follow it once to the word it inflects. Once, not in a
-  // loop — a data error that made two forms point at each other would
-  // otherwise hang the import.
-  const lemma = rows[0]?.lemma ?? rows.map((row) => referencedLemma(row.gloss)).find(Boolean) ?? null;
+  // An inflected form: follow it to the word it inflects. Pointer-only lemma
+  // entries get one additional bounded hop below.
+  const explicitLemma = rows[0]?.lemma ?? null;
+  const lemma = explicitLemma ?? rows.map((row) => referencedLemma(row.gloss)).find(Boolean) ?? null;
   if (lemma && lemma !== trimmed) {
-    const lemmaRows = await dictionary(lemma);
-    if (lemmaRows.length > 0) {
-      const meaning = joinGlosses(lemmaRows);
-      if (meaning) {
-        return { word: trimmed, meaning, source: 'dictionary', lemma, needsReview: false };
+    let lemmaRows = await dictionaryRows(dictionary, lemma);
+    let resolvedLemma = lemmaRows[0]?.word ?? lemma;
+    let meaning = joinGlosses(lemmaRows);
+
+    // Some distilled entries need two hops: `imanes` -> `imanar` ->
+    // `imantar`. Keep the bound explicit so malformed pointer cycles cannot
+    // turn a card import into an infinite lookup.
+    if (!meaning) {
+      const nextLemma = lemmaRows.map((row) => referencedLemma(row.gloss)).find(Boolean);
+      if (nextLemma && wordKey(nextLemma) !== wordKey(resolvedLemma)) {
+        const nextRows = await dictionaryRows(dictionary, nextLemma);
+        const nextMeaning = joinGlosses(nextRows);
+        if (nextMeaning) {
+          lemmaRows = nextRows;
+          resolvedLemma = nextRows[0]?.word ?? nextLemma;
+          meaning = nextMeaning;
+        }
       }
+    }
+
+    if (meaning) {
+      // Alternate spellings are dereferenced for their English meaning, but
+      // they are not conjugations. Spanish reflexive infinitives such as
+      // `acordarse` are also already infinitives even when the form table
+      // points them at a non-reflexive headword.
+      const conjugatedVerb = Boolean(
+        explicitLemma &&
+        lemmaRows.some((row) => row.pos === 'verb') &&
+        !isInfinitive(trimmed, language),
+      );
+      return {
+        word: trimmed,
+        meaning,
+        source: 'dictionary',
+        lemma: resolvedLemma,
+        needsReview: false,
+        ...(conjugatedVerb && wordKey(resolvedLemma) !== wordKey(trimmed)
+          ? { correctedWord: resolvedLemma }
+          : {}),
+      };
     }
 
     // An explicit inflection or an alternate-form gloss is a pointer, not a
@@ -269,6 +302,29 @@ async function lookUp(dictionary: DictionaryLookup, word: string): Promise<Resol
   const meaning = joinGlosses(rows);
   if (!meaning) return null;
   return { word: trimmed, meaning, source: 'dictionary', needsReview: false };
+}
+
+/** Exact spelling first, then lowercase and an accentless dictionary fallback. */
+async function dictionaryRows(
+  dictionary: DictionaryLookup,
+  word: string,
+): Promise<DictionaryEntry[]> {
+  const lower = word.toLowerCase();
+  const accentless = word.normalize('NFD').replace(/\p{M}/gu, '').normalize('NFC');
+  const forms = [word, lower, accentless, accentless.toLowerCase()];
+  for (const form of [...new Set(forms)]) {
+    const rows = await dictionary(form);
+    if (rows.length > 0) return rows;
+  }
+  return [];
+}
+
+/** Whether a single-word card front is already a verb infinitive. */
+function isInfinitive(word: string, language: TargetLanguage): boolean {
+  const normalized = word.trim().toLowerCase();
+  return language === 'es'
+    ? /(?:ar|er|ir)(?:se)?$/.test(normalized)
+    : /(?:ti|ći)$/.test(normalized);
 }
 
 /** The first few glosses, as one card back. */
@@ -292,7 +348,10 @@ function referencedLemma(gloss: string): string | null {
   const match = gloss.match(
     /^(?:an?\s+)?(?:alternative|alternate)\s+(?:form|spelling|variant)\s+of\s+(.+?)[.!?]?$/i,
   );
-  return match?.[1] ? sanitizeWord(match[1]) : null;
+  if (!match?.[1]) return null;
+  // Wiktionary often appends a translated hint — `cacahuete (“peanut”)` —
+  // which is useful prose but is not part of the headword lookup key.
+  return sanitizeWord(match[1].replace(/\s+[（(].*[)）]\s*$/, '')) || null;
 }
 
 /** The subset that produced something, as the `meanings` map an import takes. */

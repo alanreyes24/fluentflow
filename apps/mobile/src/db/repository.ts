@@ -141,11 +141,13 @@ export class Repository {
     return rows.map(toCard);
   }
 
-  async listAllCards(userId: string): Promise<Card[]> {
-    const rows = await this.db.getAllAsync<CardRow>(
-      'SELECT * FROM cards WHERE userId = ? AND deleted = 0',
-      userId,
-    );
+  async listAllCards(userId?: string): Promise<Card[]> {
+    const rows = userId
+      ? await this.db.getAllAsync<CardRow>(
+          'SELECT * FROM cards WHERE userId = ? AND deleted = 0',
+          userId,
+        )
+      : await this.db.getAllAsync<CardRow>('SELECT * FROM cards WHERE deleted = 0');
     return rows.map(toCard);
   }
 
@@ -192,10 +194,19 @@ export class Repository {
     maxReviewsPerDay: number | null = 50,
   ): Promise<StudyQueue> {
     const candidateLimit = Math.max(limit * 4, 1000);
-    const [reviewRows, newRows, introduced, reviewed] = await Promise.all([
+    const [learningRows, reviewRows, newRows, introduced, reviewed] = await Promise.all([
+      // Learning cards are transient and all of them matter to completion:
+      // even a step scheduled beyond today's 4 a.m. boundary means the
+      // learning cycle is not finished yet.
       this.db.getAllAsync<CardRow>(
         `SELECT * FROM cards
-         WHERE deckId = ? AND deleted = 0 AND phase <> 'new'
+         WHERE deckId = ? AND deleted = 0 AND phase IN ('learning', 'relearning')
+         ORDER BY nextReview, rowid`,
+        deckId,
+      ),
+      this.db.getAllAsync<CardRow>(
+        `SELECT * FROM cards
+         WHERE deckId = ? AND deleted = 0 AND phase = 'review'
          ORDER BY nextReview, rowid
          LIMIT ?`,
         deckId,
@@ -212,7 +223,7 @@ export class Repository {
       this.newCardsIntroducedToday(deckId, now),
       this.reviewsAnsweredTodayForDeck(deckId, now),
     ]);
-    return buildStudyQueue([...reviewRows, ...newRows].map(toCard), {
+    return buildStudyQueue([...learningRows, ...reviewRows, ...newRows].map(toCard), {
       now,
       limit,
       newCardsPerDay,

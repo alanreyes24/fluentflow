@@ -7,6 +7,7 @@ import {
   studyStreak,
   type Deck,
   type DeckProgress,
+  type StudyQueue,
   type StreakSummary,
   type StudyDay,
 } from '@fluentflow/core';
@@ -44,7 +45,7 @@ export default function DecksScreen() {
   const content = useContentStyle({ full: wide });
   const { decks, repository, user, refreshDecks } = useApp();
 
-  const [progress, setProgress] = useState<Record<string, DeckProgress>>({});
+  const [progress, setProgress] = useState<Record<string, DeckStudyProgress>>({});
   const [streakData, setStreakData] = useState<{
     streak: StreakSummary;
     days: StudyDay[];
@@ -64,7 +65,12 @@ export default function DecksScreen() {
             deck.maxReviewsPerDay,
           ),
         ]);
-        return [deck.id, { ...deckProgress, due: queue.cards.length }] as const;
+        return [deck.id, {
+          ...deckProgress,
+          due: queue.cards.length,
+          pendingLearning: queue.pendingLearning,
+          nextLearningAt: queue.nextLearningAt,
+        }] as const;
       }),
     );
     setProgress(Object.fromEntries(entries));
@@ -96,12 +102,27 @@ export default function DecksScreen() {
       const deckProgress = progress[deck.id];
       return {
         due: sum.due + (deckProgress?.due ?? 0),
+        pendingLearning: sum.pendingLearning + (deckProgress?.pendingLearning ?? 0),
         cards: sum.cards + deck.cardCount,
       };
     },
-    { due: 0, cards: 0 },
+    { due: 0, pendingLearning: 0, cards: 0 },
   );
   const progressReady = decks.length > 0 && decks.every((deck) => progress[deck.id] !== undefined);
+  const nextLearningAt = Object.values(progress)
+    .map((item) => item.nextLearningAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()[0];
+
+  // A deck can be temporarily empty while a learning-step timer runs.
+  // Refresh when the earliest one elapses so "Study ahead" becomes ordinary
+  // due study without requiring a navigation or manual reload.
+  useEffect(() => {
+    if (!nextLearningAt) return;
+    const delay = Math.max(0, Date.parse(nextLearningAt) - Date.now() + 100);
+    const timer = setTimeout(() => void loadProgress(), Math.min(delay, 2_147_483_647));
+    return () => clearTimeout(timer);
+  }, [nextLearningAt, loadProgress]);
 
   return (
     <Screen>
@@ -128,7 +149,11 @@ export default function DecksScreen() {
             ListHeaderComponent={
               progressReady ? (
                 <View style={styles.summaryWrap}>
-                  <Summary due={totals.due} cards={totals.cards} />
+                  <Summary
+                    due={totals.due}
+                    pendingLearning={totals.pendingLearning}
+                    cards={totals.cards}
+                  />
                   <Spacer size={theme.spacing.xl} />
                   <Label variant="heading">{t('yourDecks')}</Label>
                   <Spacer size={theme.spacing.sm} />
@@ -162,7 +187,7 @@ export default function DecksScreen() {
  * collected, but how much is owed right now. When nothing is owed it says so
  * plainly rather than showing a zero, which reads as an error.
  */
-function Summary({ due, cards }: { due: number; cards: number }) {
+function Summary({ due, pendingLearning, cards }: { due: number; pendingLearning: number; cards: number }) {
   const { t } = useI18n();
   const theme = useTheme();
 
@@ -184,10 +209,18 @@ function Summary({ due, cards }: { due: number; cards: number }) {
         </Label>
         <Spacer size={theme.spacing.xs} />
         <Label variant="title" tone={due > 0 ? 'accent' : 'default'}>
-          {due > 0 ? t('dueCount', { count: due }) : t('allCaughtUp')}
+          {due > 0
+            ? t('dueCount', { count: due })
+            : pendingLearning > 0
+              ? t('learningPending', { count: pendingLearning })
+              : t('allCaughtUp')}
         </Label>
         <Label variant="caption" tone="faint">
-          {due > 0 ? t('cardCount', { count: cards }) : t('allCaughtUpHint')}
+          {due > 0
+            ? t('cardCount', { count: cards })
+            : pendingLearning > 0
+              ? t('learningPendingHint')
+              : t('allCaughtUpHint')}
         </Label>
       </View>
       <View style={styles.summaryMetric} accessible accessibilityLabel={t('cardCount', { count: cards })}>
@@ -203,7 +236,9 @@ function Summary({ due, cards }: { due: number; cards: number }) {
   );
 }
 
-function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
+type DeckStudyProgress = DeckProgress & Pick<StudyQueue, 'pendingLearning' | 'nextLearningAt'>;
+
+function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress }) {
   const { t } = useI18n();
   const theme = useTheme();
   const due = progress?.due ?? 0;
@@ -232,7 +267,11 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
               </Label>
             </View>
             {progress ? (
-              progress.due > 0 ? <Badge>{progress.due}</Badge> : <Badge tone="plain">✓</Badge>
+              progress.due > 0
+                ? <Badge>{progress.due}</Badge>
+                : progress.pendingLearning > 0
+                  ? <Badge tone="plain">⏱ {progress.pendingLearning}</Badge>
+                  : <Badge tone="plain">✓</Badge>
             ) : null}
           </View>
 
@@ -259,7 +298,7 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckProgress }) {
         <Spacer size={theme.spacing.md} />
         <Row gap={theme.spacing.sm}>
           <Button
-            label={t('study')}
+            label={due > 0 ? t('study') : t('studyAhead')}
             onPress={() =>
               router.push({
                 pathname: '/(app)/study/[deckId]',

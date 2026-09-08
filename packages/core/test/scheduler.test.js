@@ -450,3 +450,25 @@ test('interday learning shares the review allowance while new cards stay separat
   assert.deepEqual(queue.cards.map((card) => card.id), ['interday', 'new']);
 
 });
+
+test('study queue reports every unfinished learning step even across the day boundary', () => {
+  const nextStep = {
+    ...reviewState(0),
+    id: 'next-step',
+    phase: 'learning',
+    nextReview: minutesAfter(10),
+    dueDay: collectionDayKey(NOW),
+  };
+  const tomorrow = {
+    ...nextStep,
+    id: 'tomorrow',
+    nextReview: daysAfter(1),
+    dueDay: addCollectionDays(collectionDayKey(NOW), 1),
+  };
+
+  const queue = buildStudyQueue([nextStep, tomorrow], { now: NOW });
+
+  assert.equal(queue.cards.length, 0);
+  assert.equal(queue.pendingLearning, 2);
+  assert.equal(queue.nextLearningAt, minutesAfter(10));
+});

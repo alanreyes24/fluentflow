@@ -23,6 +23,15 @@ const GUESSES: Record<string, string> = { lodazal: 'lodestar' };
 
 /** One word's answer, from whichever source this pass is allowed to use. */
 function answer(word: string, useModel?: boolean) {
+  if (word === 'comieron') {
+    return {
+      word,
+      correctedWord: 'comer',
+      meaning: 'to eat',
+      source: 'dictionary',
+      needsReview: false,
+    };
+  }
   if (DICTIONARY[word]) {
     return { word, meaning: DICTIONARY[word], source: 'dictionary', needsReview: false };
   }
@@ -164,6 +173,20 @@ describe('TextImportScreen', () => {
     expect(mockRouter.replace).toHaveBeenCalledWith({
       pathname: '/(app)/deck/[id]',
       params: { id: deck!.id },
+    });
+  });
+
+  it('normalizes conjugated fronts even when the paste already includes meanings', async () => {
+    installBridge();
+    await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
+
+    await paste('comieron - they ate');
+    await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));
+
+    await waitFor(async () => {
+      const [deck] = await repository.listDecks(TEST_USER.id);
+      const cards = deck ? await repository.listCards(deck.id) : [];
+      expect(cards.map((card) => `${card.front}=${card.back}`)).toEqual(['comer=they ate']);
     });
   });
 

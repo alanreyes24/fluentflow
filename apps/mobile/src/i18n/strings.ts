@@ -215,6 +215,8 @@ export const en = {
   reviewedLabel: 'Reviewed',
   allCaughtUp: 'All caught up',
   allCaughtUpHint: 'Nothing is due right now. Study ahead, or come back tomorrow.',
+  learningPending: 'Learning steps pending: {count}',
+  learningPendingHint: 'Their timers are still running. Study ahead, or wait until they are due.',
   yourDecks: 'Your decks',
 
   // Streak
@@ -480,6 +482,8 @@ const es: Strings = {
   reviewedLabel: 'Repasadas',
   allCaughtUp: 'Todo al día',
   allCaughtUpHint: 'No hay nada pendiente. Adelanta trabajo o vuelve mañana.',
+  learningPending: 'Pasos de aprendizaje pendientes: {count}',
+  learningPendingHint: 'Sus temporizadores siguen activos. Adelanta el estudio o espera hasta que venzan.',
   yourDecks: 'Tus mazos',
 
   dayStreak: 'Días seguidos',
@@ -732,6 +736,8 @@ const bs: Strings = {
   reviewedLabel: 'Ponovljeno',
   allCaughtUp: 'Sve je odrađeno',
   allCaughtUpHint: 'Trenutno nema ništa na redu. Učite unaprijed ili se vratite sutra.',
+  learningPending: 'Preostali koraci učenja: {count}',
+  learningPendingHint: 'Njihovi tajmeri još traju. Učite unaprijed ili pričekajte da dođu na red.',
   yourDecks: 'Vaši špilovi',
 
   dayStreak: 'Dana zaredom',
