@@ -4,7 +4,9 @@ import type { RatingName } from '@fluentflow/core';
 import { useCardGestures } from '../src/ui/useCardGestures';
 
 /**
- * Keyboard rating, on the platform that has a keyboard.
+ * Keyboard rating, on the platform that has a keyboard. Pointer gestures are
+ * intentionally not part of the study controls: cards only advance through
+ * the four rating buttons or the matching 1–4 keys.
  *
  * This file runs under jest-expo's web preset so `Platform.OS` is genuinely
  * 'web' and the listener really binds; mocking Platform would only test the
@@ -23,7 +25,7 @@ async function mount({ enabled }: { enabled: boolean }): Promise<Harness> {
   const reveal = jest.fn<void, []>();
 
   await renderHook(() =>
-    useCardGestures({ onRate: rate, onReveal: reveal, enabled, cardWidth: 400 }),
+    useCardGestures({ onRate: rate, onReveal: reveal, enabled }),
   );
 
   return {
@@ -94,7 +96,7 @@ describe('useCardGestures on web', () => {
   it('unbinds when the card unmounts', async () => {
     const rate = jest.fn<void, [RatingName]>();
     const { unmount } = await renderHook(() =>
-      useCardGestures({ onRate: rate, onReveal: jest.fn(), enabled: true, cardWidth: 400 }),
+      useCardGestures({ onRate: rate, onReveal: jest.fn(), enabled: true }),
     );
 
     await unmount();

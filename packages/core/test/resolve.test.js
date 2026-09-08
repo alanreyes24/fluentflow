@@ -18,6 +18,8 @@ const ENTRIES = {
   comer: [{ word: 'comer', gloss: 'to eat' }, { word: 'comer', gloss: 'to have lunch' }],
   molim: [{ word: 'molim', gloss: 'first-person singular present of moliti', lemma: 'moliti' }],
   moliti: [{ word: 'moliti', gloss: 'to pray' }, { word: 'moliti', gloss: 'to ask, beg' }],
+  stići: [{ word: 'stići', gloss: 'alternative form of stȉgnuti' }],
+  stȉgnuti: [{ word: 'stȉgnuti', gloss: 'to arrive, reach' }],
   zdravo: [
     { word: 'zdravo', gloss: 'hello! hi!', pos: 'intj' },
     { word: 'zdravo', gloss: 'bye! farewell!', pos: 'intj' },
@@ -52,6 +54,14 @@ test('an inflected form is followed to the word it inflects', async () => {
   assert.equal(spanish[0].lemma, 'comer');
   assert.equal(bosnian[0].meaning, 'to pray, to ask, beg');
   assert.equal(bosnian[0].lemma, 'moliti');
+});
+
+test('an alternate-form gloss is followed to its English meaning', async () => {
+  const [resolved] = await resolveMeanings(['stići'], 'bs', { dictionary });
+
+  assert.equal(resolved.meaning, 'to arrive, reach');
+  assert.equal(resolved.lemma, 'stȉgnuti');
+  assert.equal(resolved.source, 'dictionary');
 });
 
 test('several senses become one card back, capped', async () => {

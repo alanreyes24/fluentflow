@@ -4,7 +4,7 @@ import StudyScreen from '../app/(app)/study/[deckId]';
 import { ExampleService } from '../src/ai/service';
 import { Repository } from '../src/db/repository';
 import { createTestRepository } from './fakes/database';
-import { mockSearchParams, renderScreen, TEST_USER } from './setup';
+import { mockRouter, mockSearchParams, renderScreen, TEST_USER } from './setup';
 
 /**
  * The study session, rendered.
@@ -204,8 +204,7 @@ describe('StudyScreen', () => {
     await reveal();
     await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
 
-    await screen.findByText('Nothing left to review');
-    expect(screen.getByText(/2 reviewed/)).toBeTruthy();
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(app)/decks'));
   });
 
   it('previews the interval each rating would schedule', async () => {
@@ -226,7 +225,7 @@ describe('StudyScreen', () => {
     expect(screen.getByText(/^[345] d$/)).toBeTruthy();
   });
 
-  it('summarises the session once the queue runs out', async () => {
+  it('returns home once the queue runs out', async () => {
     await seed([
       ['hablar', 'to speak'],
       ['comer', 'to eat'],
@@ -235,8 +234,7 @@ describe('StudyScreen', () => {
 
     // Neither of the first two answers ends the card's day: Good and Again both
     // leave a new card on a learning step inside the twenty-minute learn-ahead
-    // window, so both come back. Easy graduates them, and only then does the
-    // queue actually run out — which is the thing being summarised.
+    // window, so both come back. Easy graduates them, and the app returns home.
     await screen.findByText('hablar');
     await reveal();
     await screen.findByText('to speak');
@@ -255,17 +253,12 @@ describe('StudyScreen', () => {
     await reveal();
     await fireEvent.press(screen.getByRole('button', { name: 'Easy' }));
 
-    await screen.findByText('Nothing left to review');
-    expect(screen.getByLabelText('Reviews: 4')).toBeTruthy();
-    expect(screen.getByLabelText('Again: 1')).toBeTruthy();
-    expect(screen.getByLabelText('Accuracy: 75%')).toBeTruthy();
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(app)/decks'));
   });
 
   it('offers nothing to review when the queue is empty', async () => {
     await show();
-    await screen.findByText('Nothing left to review');
-    // No count when the session reviewed nothing — "0 reviewed" would be noise.
-    expect(screen.queryByText(/reviewed/)).toBeNull();
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(app)/decks'));
   });
 
   it('leaves a card scheduled in the future out of the queue', async () => {
@@ -274,7 +267,7 @@ describe('StudyScreen', () => {
 
     await show();
 
-    await screen.findByText('Nothing left to review');
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(app)/decks'));
     expect(screen.queryByText('hablar')).toBeNull();
   });
 });

@@ -250,7 +250,7 @@ async function lookUp(dictionary: DictionaryLookup, word: string): Promise<Resol
   // An inflected form: follow it once to the word it inflects. Once, not in a
   // loop — a data error that made two forms point at each other would
   // otherwise hang the import.
-  const lemma = rows[0]?.lemma ?? null;
+  const lemma = rows[0]?.lemma ?? rows.map((row) => referencedLemma(row.gloss)).find(Boolean) ?? null;
   if (lemma && lemma !== trimmed) {
     const lemmaRows = await dictionary(lemma);
     if (lemmaRows.length > 0) {
@@ -259,6 +259,11 @@ async function lookUp(dictionary: DictionaryLookup, word: string): Promise<Resol
         return { word: trimmed, meaning, source: 'dictionary', lemma, needsReview: false };
       }
     }
+
+    // An explicit inflection or an alternate-form gloss is a pointer, not a
+    // usable meaning. Let the model handle it if the referenced headword is
+    // missing instead of treating the pointer text as an English translation.
+    return null;
   }
 
   const meaning = joinGlosses(rows);
@@ -272,14 +277,22 @@ function joinGlosses(rows: DictionaryEntry[]): string {
   for (const row of rows) {
     const gloss = row.gloss?.trim();
     if (!gloss) continue;
-    // A "form of" gloss is a signpost, not a meaning: it is only useful when
-    // the lemma could not be followed, and never as the whole card back.
-    if (glosses.length > 0 && /\b(of|form of)\b/.test(gloss) && /\bof\s+\S+$/.test(gloss)) continue;
+    // A "form of" gloss is a signpost, not a meaning. Alternate forms are
+    // sometimes encoded in the gloss rather than Wiktionary's form_of field.
+    if (referencedLemma(gloss)) continue;
     if (!glosses.includes(gloss)) glosses.push(gloss);
     if (glosses.length >= MAX_GLOSSES) break;
   }
 
   return glosses.join(', ').slice(0, MAX_MEANING_LENGTH).trim();
+}
+
+/** Extract a headword from Wiktionary's alternate-form glosses. */
+function referencedLemma(gloss: string): string | null {
+  const match = gloss.match(
+    /^(?:an?\s+)?(?:alternative|alternate)\s+(?:form|spelling|variant)\s+of\s+(.+?)[.!?]?$/i,
+  );
+  return match?.[1] ? sanitizeWord(match[1]) : null;
 }
 
 /** The subset that produced something, as the `meanings` map an import takes. */

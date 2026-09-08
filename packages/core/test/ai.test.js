@@ -18,10 +18,15 @@ test('the instruction names the word, the language and the output format', () =>
   assert.match(instruction, /JSON array of strings/);
   assert.match(instruction, /to speak/);
   // The localised half keeps a small model producing the target language.
-  assert.match(instruction, /frases sencillas en español/);
+  assert.match(instruction, /frases naturales en español/);
+  assert.match(instruction, /entre 12 y 20 palabras/);
   assert.match(instruction, /colocación y la preposición más naturales/);
   assert.match(instruction, /no traduzcas literalmente del inglés/);
   assert.match(instruction, /entrar por la fuerza/);
+  assert.match(instruction, /genuinely C1-C2 level/);
+  assert.match(instruction, /12-20 words/);
+  assert.match(instruction, /C1-C2 words or collocations/);
+  assert.match(instruction, /generic beginner patterns/);
 });
 
 test('the prompt is the bare instruction, with no chat template around it', () => {
@@ -216,8 +221,8 @@ test('a retry asks a different question, because a greedy decode repeats itself'
 
   assert.equal(asked.length, 2);
   assert.notEqual(asked[0], asked[1], 'the second attempt must not repeat the first prompt');
-  assert.match(asked[0], /Generate 2 simple/);
-  assert.match(asked[1], /Generate 3 simple/);
+  assert.match(asked[0], /Generate 2 example/);
+  assert.match(asked[1], /Generate 3 example/);
 });
 
 test('the same sentence twice counts as one example and triggers the retry', async () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Animated, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Animated, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   RATING_NAMES,
@@ -20,14 +20,12 @@ import {
   Button,
   Badge,
   Divider,
-  EmptyState,
   Label,
   Loading,
   Row,
   Screen,
   Spacer,
   StatusDot,
-  StatTile,
   Surface,
 } from '../../../src/ui/components';
 import { formatInterval } from '../../../src/ui/format';
@@ -63,7 +61,6 @@ export default function StudyScreen() {
   const { deckId, ahead } = useLocalSearchParams<{ deckId: string; ahead?: string }>();
   const { t } = useI18n();
   const theme = useTheme();
-  const { width } = useWindowDimensions();
   const { wide } = useLayout();
   const { repository, examples: exampleService, refreshDecks, user } = useApp();
 
@@ -255,6 +252,10 @@ export default function StudyScreen() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
 
+  useEffect(() => {
+    if (!loading && !card) router.replace('/(app)/decks');
+  }, [loading, card]);
+
   const regenerate = useCallback(() => {
     if (!card || !exampleService || generating) return;
     const previous = examples;
@@ -315,13 +316,10 @@ export default function StudyScreen() {
     [card, deck, repository, user, showToast, t, refreshDecks],
   );
 
-  const stageWidth = wide ? Math.min(width, STAGE_WIDTH) : width;
-
   const gestures = useCardGestures({
     onRate: rate,
     onReveal: reveal,
     enabled: revealed,
-    cardWidth: stageWidth,
   });
 
   if (loading) {
@@ -333,43 +331,7 @@ export default function StudyScreen() {
   }
 
   if (!card) {
-    return (
-      <Screen>
-        <View style={styles.sessionComplete}>
-          <View>
-            <EmptyState
-              title={t('sessionComplete')}
-              hint={
-                reviewed > 0
-                  ? `${t('reviewedToday', { count: reviewed })} · ${t('sessionCompleteHint')}`
-                  : t('sessionCompleteHint')
-              }
-            />
-            {/* How the session went, while it is still worth knowing. The
-                statistics screen has the long view; this is the one sitting. */}
-            {reviewed > 0 ? (
-              <>
-                <Spacer size={theme.spacing.lg} />
-                <Surface style={styles.sessionSummary}>
-                  <Row gap={theme.spacing.md} justify="space-between" align="flex-start">
-                    <StatTile value={String(reviewed)} label={t('reviews')} />
-                    <StatTile value={String(lapses)} label={t('againLabel')} />
-                    <StatTile
-                      value={`${Math.round(((reviewed - lapses) / reviewed) * 100)}%`}
-                      label={t('sessionAccuracy')}
-                      tone="accent"
-                    />
-                  </Row>
-                </Surface>
-              </>
-            ) : null}
-          </View>
-          <View style={styles.sessionCompleteAction}>
-            <Button label={t('decks')} onPress={() => router.back()} />
-          </View>
-        </View>
-      </Screen>
-    );
+    return null;
   }
 
   return (
@@ -403,7 +365,6 @@ export default function StudyScreen() {
           style={[
             styles.cardWrap,
             wide ? styles.cardWrapWide : null,
-            { transform: [{ translateX: gestures.translateX }] },
           ]}
           {...gestures.handlers}
         >
@@ -455,22 +416,6 @@ export default function StudyScreen() {
                 )}
               </ScrollView>
             </Surface>
-            {/* A left/right drag pulls this border toward Again / Good, so the
-                gesture has an answer before the finger lifts. */}
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                StyleSheet.absoluteFill,
-                styles.swipeHint,
-                {
-                  borderRadius: theme.radius.lg,
-                  borderColor: gestures.progress.interpolate({
-                    inputRange: [-1, 0, 1],
-                    outputRange: [theme.colors.again, 'rgba(0, 0, 0, 0)', theme.colors.good],
-                  }),
-                },
-              ]}
-            />
           </CardShell>
         </Animated.View>
 
@@ -536,7 +481,8 @@ export default function StudyScreen() {
 /**
  * The card container: a reveal button while the answer is hidden, a plain view
  * once it is showing (so the Regenerate control inside it is not a nested
- * button). The swipe gesture lives on the parent either way.
+ * button). The parent deliberately has no pointer gesture, so holding or
+ * dragging the card cannot advance the session.
  */
 function CardShell({
   revealed,
@@ -784,9 +730,6 @@ interface UndoState {
 }
 
 const styles = StyleSheet.create({
-  sessionComplete: { flex: 1, justifyContent: 'space-between' },
-  sessionCompleteAction: { alignItems: 'center', padding: 16 },
-  sessionSummary: { alignSelf: 'center' },
   ratingInterval: { marginTop: 4 },
   flex: { flex: 1 },
   stage: { flex: 1 },
@@ -804,7 +747,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   cardWrap: { flex: 1, paddingHorizontal: 16 },
-  swipeHint: { borderWidth: 3 },
   // Tall enough for a word, its meaning and two examples; short enough that a
   // three-word card is not floating in half a window of nothing. Anything
   // longer scrolls inside the card.
@@ -812,7 +754,9 @@ const styles = StyleSheet.create({
   card: { flex: 1, justifyContent: 'center', padding: 24 },
   cardContent: { flexGrow: 1, justifyContent: 'center' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 24 },
-  examples: { gap: 8 },
+  // Toasts shown for word actions are positioned within this area so they do
+  // not add height and shift the examples or the controls below the card.
+  examples: { gap: 8, position: 'relative' },
   contextBlock: { gap: 4, marginTop: 12 },
   contextLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
   examplesLabel: { textTransform: 'uppercase', letterSpacing: 0.6, flex: 1 },
@@ -827,9 +771,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   toast: {
-    alignSelf: 'stretch',
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 28,
     alignItems: 'center',
-    marginTop: 4,
+    zIndex: 10,
   },
   ratingRow: { flex: 1 },
   gearButton: {
