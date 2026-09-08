@@ -12,6 +12,7 @@ import {
   deckProgress,
   dueCards,
   forecast,
+  isInterdayLearningCard,
   recomputeCardCounts,
   reviewCard,
   schedulingStateFor,
@@ -316,7 +317,7 @@ export class Repository {
   async reviewsAnsweredTodayForDeck(deckId: string, now: Date = new Date()): Promise<number> {
     const start = collectionDayStart(now);
     const rows = await this.db.getAllAsync<ReviewCountRow>(
-      `SELECT previousState FROM review_log
+      `SELECT previousState, reviewedAt FROM review_log
        WHERE cardId IN (SELECT id FROM cards WHERE deckId = ?)
          AND reviewedAt >= ? AND reviewedAt <= ?`,
       deckId,
@@ -330,7 +331,10 @@ export class Repository {
     return rows.filter((row) => {
       if (!row.previousState) return true;
       const previous = parseCardSnapshot(row.previousState);
-      return previous ? schedulingStateFor(previous).phase === 'review' : true;
+      return previous
+        ? schedulingStateFor(previous).phase === 'review' ||
+            isInterdayLearningCard(previous, new Date(row.reviewedAt))
+        : true;
     }).length;
   }
 
@@ -920,6 +924,7 @@ interface UndoRow {
 
 interface ReviewCountRow {
   previousState: string | null;
+  reviewedAt: string;
 }
 
 function toDeck(row: DeckRow): Deck {

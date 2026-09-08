@@ -156,7 +156,7 @@ describe('Repository', () => {
     expect(await repository.newCardsIntroducedToday(deck.id, tomorrow)).toBe(0);
 
     const unlimited = await repository.setNewCardsPerDay(deck, null);
-    expect(await repository.dueCards(deck.id, new Date(), 200, unlimited.newCardsPerDay)).toHaveLength(3);
+    expect(await repository.dueCards(deck.id, tomorrow, 200, unlimited.newCardsPerDay)).toHaveLength(3);
   });
 
   it('limits review cards separately from new cards', async () => {
@@ -399,10 +399,11 @@ describe('Repository', () => {
       expect(stats.ratings.good).toBe(1);
       expect(stats.collection.total).toBe(2);
       expect(stats.collection.decks).toBe(1);
-      // One card is still new and therefore due; the rated one is a day out.
+      // One card is still new; Future Due only projects the day-level review
+      // card, which is scheduled beyond this forecast's current day.
       expect(stats.collection.due).toBe(1);
       expect(stats.forecast).toHaveLength(14);
-      expect(stats.forecast.reduce((total, entry) => total + entry.count, 0)).toBe(2);
+      expect(stats.forecast.reduce((total, entry) => total + entry.count, 0)).toBe(0);
       expect(stats.decks[0]?.progress.total).toBe(2);
     });
 

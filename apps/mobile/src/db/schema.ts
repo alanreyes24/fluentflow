@@ -176,15 +176,9 @@ const migrations: Migration[] = [
     `);
   },
 
-  // 10 — update decks that still carry the previous out-of-the-box review limit.
+  // 10 — reserved for the old review-limit migration; preserve user settings.
   async (db) => {
-    await db.execAsync(`
-      UPDATE decks
-      SET maxReviewsPerDay = 50,
-          lastModified = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-          syncStatus = 'pending'
-      WHERE maxReviewsPerDay = 200;
-    `);
+    await db.execAsync('SELECT 1;');
   },
 
   // 11 — study presentation preferences and optional card context.

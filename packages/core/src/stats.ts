@@ -284,9 +284,9 @@ export function intensity(reviews: number, busiest: number): 0 | 1 | 2 | 3 | 4 {
 /**
  * How many cards come due over the next `days` days.
  *
- * Anything already overdue is folded into today, which is where it will
- * actually be studied. Without that, a neglected deck shows an empty forecast
- * and a hundred cards waiting behind it.
+ * This follows Anki's Future Due graph: only review cards are projected, and
+ * cards already overdue are omitted rather than folded into today. New and
+ * intraday learning cards are not stable future-review projections.
  */
 export function forecast(
   cards: readonly Card[],
@@ -300,9 +300,10 @@ export function forecast(
   const counts = new Map<DayKey, number>(dayRange(today, horizon).map((day) => [day, 0]));
 
   for (const card of cards) {
-    if (card.deleted) continue;
+    if (card.deleted || card.suspended || card.buriedUntil || card.phase !== 'review') continue;
     const due = card.dueDay ?? collectionDayKey(new Date(card.nextReview));
-    const day = daysBetween(today, due) < 0 ? today : due;
+    if (daysBetween(today, due) < 0) continue;
+    const day = due;
     const current = counts.get(day);
     if (current !== undefined) counts.set(day, current + 1);
   }

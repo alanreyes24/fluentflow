@@ -223,7 +223,7 @@ describe('StudyScreen', () => {
     expect(screen.getByText('1 min')).toBeTruthy();
     expect(screen.getByText('6 min')).toBeTruthy();
     expect(screen.getByText('10 min')).toBeTruthy();
-    expect(screen.getByText('4 d')).toBeTruthy();
+    expect(screen.getByText(/^[345] d$/)).toBeTruthy();
   });
 
   it('summarises the session once the queue runs out', async () => {

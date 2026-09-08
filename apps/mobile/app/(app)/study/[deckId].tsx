@@ -4,6 +4,7 @@ import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import {
   RATING_NAMES,
   RATINGS,
+  fuzzRandomForCard,
   ratingFromValue,
   review,
   schedulingStateFor,
@@ -162,9 +163,14 @@ export default function StudyScreen() {
         // spreads intervals so a day's reviews do not all come back together,
         // but a preview that changed on every render — or disagreed with the
         // button beside it — would read as a bug.
-        const answer = review(state, rating, { random: () => 0.5 });
+        const answer = review(state, rating, { random: fuzzRandomForCard(card.id) });
         const ahead = Math.max(0, Date.parse(answer.nextReview) - now);
-        return [rating, { days: ahead / 86_400_000, minutes: Math.round(ahead / 60_000) }];
+        return [rating, {
+          // Day-level answers display Anki's scheduled interval, not the
+          // remaining wall-clock time until the 4am collection-day boundary.
+          days: answer.phase === 'review' ? answer.interval : ahead / 86_400_000,
+          minutes: Math.round(ahead / 60_000),
+        }];
       }),
     ) as Record<RatingName, { days: number; minutes: number }>;
   }, [card]);

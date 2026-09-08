@@ -19,6 +19,7 @@ import {
   collectionDayKey,
   addCollectionDays,
   buildStudyQueue,
+  fuzzRandomForCard,
 } from '../dist/index.js';
 
 const NOW = new Date('2024-09-03T10:00:00.000Z');
@@ -41,7 +42,12 @@ const reviewState = (interval, easeFactor = DEFAULT_EASE_FACTOR, extra = {}) => 
 });
 
 const minutesAfter = (minutes) => new Date(NOW.getTime() + minutes * MS_PER_MINUTE).toISOString();
-const daysAfter = (days) => new Date(NOW.getTime() + days * MS_PER_DAY).toISOString();
+const daysAfter = (days) => {
+  const date = new Date(NOW);
+  date.setDate(date.getDate() + days);
+  date.setHours(4, 0, 0, 0);
+  return date.toISOString();
+};
 
 // --- learning steps --------------------------------------------------------
 
@@ -85,6 +91,14 @@ test('hard on the first learning step waits the average of the first two steps',
     config: { ...exact.config, learningSteps: [10] },
   });
   assert.equal(single.nextReview, minutesAfter(15));
+});
+
+test('hard on a long one-step deck is capped at one day beyond the step', () => {
+  const hard = review(newCardState(NOW), 'hard', {
+    ...exact,
+    config: { ...exact.config, learningSteps: [3 * 24 * 60] },
+  });
+  assert.equal(hard.nextReview, minutesAfter(4 * 24 * 60));
 });
 
 test('easy skips the remaining learning steps for the easy interval', () => {
@@ -135,6 +149,15 @@ test('studying ahead is credited elapsed time, not the whole interval', () => {
   const good = review(fourDaysEarly, 'good', exact);
   assert.equal(good.interval, 15, '6 elapsed days * 2.5, not 10 * 2.5');
   assert.ok(good.interval < review(reviewState(10), 'good', exact).interval);
+});
+
+test('studying ahead uses Anki early-review floors and the reduced Easy bonus', () => {
+  const fourDaysEarly = reviewState(10, DEFAULT_EASE_FACTOR, {
+    nextReview: new Date(NOW.getTime() + 4 * MS_PER_DAY).toISOString(),
+  });
+  assert.equal(review(fourDaysEarly, 'hard', exact).interval, 7);
+  assert.equal(review(fourDaysEarly, 'good', exact).interval, 15);
+  assert.equal(review(fourDaysEarly, 'easy', exact).interval, 17);
 });
 
 test('a better answer always schedules further out than a worse one', () => {
@@ -276,6 +299,24 @@ test('reviewCard carries the scheduler fields onto the card and marks it dirty',
   assert.equal(reviewed.lastModified, NOW.toISOString());
 });
 
+test('the saved answer and interval preview use the same per-card fuzz draw', () => {
+  const card = {
+    ...createCard({
+      userId: 'u1', deckId: 'd1', front: 'hablar', back: 'to speak', language: 'es', now: NOW,
+      id: 'stable-card',
+    }),
+    phase: 'review', interval: 10, repetitions: 5, nextReview: NOW.toISOString(),
+    dueDay: collectionDayKey(NOW), status: 'learning',
+  };
+  const preview = review(schedulingStateFor(card), 'good', {
+    now: NOW,
+    random: fuzzRandomForCard(card.id),
+  });
+  const saved = reviewCard(card, 'good', { now: NOW });
+  assert.equal(saved.interval, preview.interval);
+  assert.equal(saved.nextReview, preview.nextReview);
+});
+
 test('a card written before the Anki scheduler is given a phase', () => {
   const legacy = {
     id: 'c1',
@@ -395,4 +436,17 @@ test('study queue applies review limits, new limits, and manual hiding', () => {
   assert.equal(queue.learning, 1);
   assert.equal(queue.review, 1);
   assert.equal(queue.new, 1);
+});
+
+test('interday learning shares the review allowance while new cards stay separate', () => {
+  const yesterday = addCollectionDays(collectionDayKey(NOW), -1);
+  const interday = { ...reviewState(0), id: 'interday', phase: 'learning', nextReview: NOW.toISOString(), dueDay: yesterday };
+  const review = { ...reviewState(2), id: 'review', phase: 'review', nextReview: NOW.toISOString(), dueDay: collectionDayKey(NOW) };
+  const fresh = { ...reviewState(0), id: 'new', phase: 'new', nextReview: NOW.toISOString(), status: 'new' };
+
+  const queue = buildStudyQueue([interday, review, fresh], {
+    now: NOW, maxReviewsPerDay: 1, newCardsPerDay: 20,
+  });
+  assert.deepEqual(queue.cards.map((card) => card.id), ['interday', 'new']);
+
 });

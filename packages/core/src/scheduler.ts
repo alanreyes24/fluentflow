@@ -111,6 +111,7 @@ export interface SchedulingState {
   /** Position in the active step list; 0 outside a (re)learning phase. */
   learningStep: number;
   nextReview: IsoDate;
+  dueDay?: string;
   leech: boolean;
   status: CardStatus;
 }
@@ -179,10 +180,11 @@ export function review(
   const config = { ...DEFAULT_SCHEDULER_CONFIG, ...options.config };
   const now = options.now ?? new Date();
   const random = options.random ?? Math.random;
+  const fuzzFactor = config.fuzz ? random() : undefined;
 
   return state.phase === 'review'
-    ? answerReview(state, rating, config, now, random)
-    : answerLearning(state, rating, config, now, random);
+    ? answerReview(state, rating, config, now, fuzzFactor)
+    : answerLearning(state, rating, config, now);
 }
 
 /**
@@ -197,7 +199,6 @@ function answerLearning(
   rating: RatingName,
   config: SchedulerConfig,
   now: Date,
-  random: () => number,
 ): SchedulingState {
   const relearning = state.phase === 'relearning';
   const steps = relearning ? config.relearningSteps : config.learningSteps;
@@ -209,7 +210,7 @@ function answerLearning(
   if (rating === 'easy') {
     const target = relearning ? state.interval + 1 : config.easyInterval;
     const minimum = relearning ? config.minimumLapseInterval : 1;
-    return graduate(state, repetitions, constrain(target, minimum, config, random), now);
+    return graduate(state, repetitions, constrain(target, minimum, config), now);
   }
 
   const step = nextStep(state.learningStep, rating, steps.length);
@@ -219,10 +220,10 @@ function answerLearning(
   if (step >= steps.length) {
     const target = relearning ? state.interval : config.graduatingInterval;
     const minimum = relearning ? config.minimumLapseInterval : 1;
-    return graduate(state, repetitions, constrain(target, minimum, config, random), now);
+    return graduate(state, repetitions, constrain(target, minimum, config), now);
   }
 
-  const delay = rating === 'hard' ? hardDelay(steps, step) : stepAt(steps, step);
+  const delay = roundLearningDelay(rating === 'hard' ? hardDelay(steps, step) : stepAt(steps, step));
   return {
     ...state,
     phase: relearning ? 'relearning' : 'learning',
@@ -257,7 +258,11 @@ function hardDelay(steps: number[], step: number): number {
   const current = stepAt(steps, step);
   if (step > 0) return current;
   const second = steps.length > 1 ? stepAt(steps, 1) : undefined;
-  return second === undefined ? current * 1.5 : (current + second) / 2;
+  return second === undefined ? Math.min(current * 1.5, current + 24 * 60) : (current + second) / 2;
+}
+
+function roundLearningDelay(minutes: number): number {
+  return minutes > 24 * 60 ? Math.round(minutes / (24 * 60)) * 24 * 60 : minutes;
 }
 
 function graduate(
@@ -272,7 +277,7 @@ function graduate(
     learningStep: 0,
     interval,
     repetitions,
-    nextReview: after(now, interval * MS_PER_DAY),
+    nextReview: reviewDueAt(now, interval),
     status: statusFor('review', interval),
   };
 }
@@ -283,18 +288,18 @@ function answerReview(
   rating: RatingName,
   config: SchedulerConfig,
   now: Date,
-  random: () => number,
+  fuzzFactor?: number,
 ): SchedulingState {
   const repetitions = state.repetitions + 1;
   const easeFactor = clampEase(state.easeFactor + EASE_DELTA[rating], config);
 
-  if (rating === 'again') return lapse(state, repetitions, easeFactor, config, now, random);
+  if (rating === 'again') return lapse(state, repetitions, easeFactor, config, now, fuzzFactor);
 
   // Intervals are computed from the ease the card had *before* this answer;
   // Anki updates ease afterwards.
-  const [target, minimum] = passingInterval(state, rating, config, now);
+  const [target, minimum, fuzz] = passingInterval(state, rating, config, now, fuzzFactor);
 
-  const interval = constrain(target, minimum, config, random);
+  const interval = constrain(target, minimum, config, fuzz);
   return {
     ...state,
     phase: 'review',
@@ -302,7 +307,7 @@ function answerReview(
     interval,
     easeFactor,
     repetitions,
-    nextReview: after(now, interval * MS_PER_DAY),
+    nextReview: reviewDueAt(now, interval),
     status: statusFor('review', interval),
   };
 }
@@ -319,24 +324,27 @@ function passingInterval(
   rating: RatingName,
   config: SchedulerConfig,
   now: Date,
-): [target: number, minimum: number] {
+  fuzzFactor?: number,
+): [target: number, minimum: number, fuzzFactor?: number] {
   const current = Math.max(1, state.interval);
-  const daysLate = (now.getTime() - Date.parse(state.nextReview)) / MS_PER_DAY;
+  const daysLate = daysLateFor(state, now);
   const ease = state.easeFactor;
 
-  if (daysLate < 0) return earlyInterval(current, daysLate, ease, rating, config);
+  if (daysLate < 0) return [...earlyInterval(current, daysLate, ease, rating, config), undefined];
 
   const late = Math.floor(daysLate);
   const hardMinimum = config.hardMultiplier > 1 ? current + 1 : 0;
-  const hard = constrain(current * config.hardMultiplier, hardMinimum, config);
-  if (rating === 'hard') return [current * config.hardMultiplier, hardMinimum];
+  const hard = constrain(current * config.hardMultiplier, hardMinimum, config, fuzzFactor);
+  // `hard` is already constrained/fuzzed because good/easy use it as their
+  // lower bound. Do not fuzz it a second time in answerReview.
+  if (rating === 'hard') return [hard, hard, undefined];
 
   const goodMinimum = config.hardMultiplier > 1 ? hard + 1 : current + 1;
   const goodTarget = (current + late / 2) * ease;
-  if (rating === 'good') return [goodTarget, goodMinimum];
+  if (rating === 'good') return [goodTarget, goodMinimum, fuzzFactor];
 
-  const good = constrain(goodTarget, goodMinimum, config);
-  return [(current + late) * ease * config.easyBonus, good + 1];
+  const good = constrain(goodTarget, goodMinimum, config, fuzzFactor);
+  return [(current + late) * ease * config.easyBonus, good + 1, fuzzFactor];
 }
 
 /**
@@ -359,14 +367,17 @@ function earlyInterval(
 ): [target: number, minimum: number] {
   // `daysLate` is negative here, so this is the interval minus the time left.
   const elapsed = Math.max(1, current + daysLate);
+  const hardTarget = Math.max(elapsed * config.hardMultiplier, current * (config.hardMultiplier / 2));
 
-  if (rating === 'hard') return [elapsed * config.hardMultiplier, 1];
+  if (rating === 'hard') return [hardTarget, 1];
 
-  const hard = constrain(elapsed * config.hardMultiplier, 1, config);
-  if (rating === 'good') return [elapsed * ease, hard + 1];
+  const hard = constrain(hardTarget, 1, config);
+  const goodTarget = Math.max(elapsed * ease, current);
+  if (rating === 'good') return [goodTarget, hard + 1];
 
-  const good = constrain(elapsed * ease, hard + 1, config);
-  return [elapsed * ease * config.easyBonus, good + 1];
+  const good = constrain(goodTarget, hard + 1, config);
+  const reducedEasyBonus = config.easyBonus - (config.easyBonus - 1) / 2;
+  return [goodTarget * reducedEasyBonus, good + 1];
 }
 
 /**
@@ -382,14 +393,14 @@ function lapse(
   easeFactor: number,
   config: SchedulerConfig,
   now: Date,
-  random: () => number,
+  fuzzFactor?: number,
 ): SchedulingState {
   const lapses = state.lapses + 1;
   const interval = constrain(
     state.interval * config.lapseMultiplier,
     config.minimumLapseInterval,
     config,
-    random,
+    fuzzFactor,
   );
   const leech = state.leech || lapses >= config.leechThreshold;
 
@@ -404,7 +415,7 @@ function lapse(
       repetitions,
       lapses,
       leech,
-      nextReview: after(now, interval * MS_PER_DAY),
+      nextReview: reviewDueAt(now, interval),
       status: statusFor('review', interval),
     };
   }
@@ -427,18 +438,20 @@ function lapse(
  * Turn a raw interval into the one that gets scheduled: apply the deck's
  * multiplier, fuzz it, then hold it inside [minimum, maximumInterval].
  *
- * Passing no `random` skips fuzz, which is what the minimum chain in
+ * Passing no `fuzzFactor` skips fuzz, which is what the minimum chain in
  * {@link passingInterval} needs — those bounds have to be stable.
  */
 function constrain(
   days: number,
   minimum: number,
   config: SchedulerConfig,
-  random?: () => number,
+  fuzzFactor?: number,
 ): number {
   const scaled = days * config.intervalMultiplier;
-  const value = random && config.fuzz ? fuzzed(scaled, minimum, config, random) : Math.round(scaled);
-  return Math.min(config.maximumInterval, Math.max(minimum, value));
+  const value = fuzzFactor !== undefined && config.fuzz
+    ? fuzzed(scaled, minimum, config, fuzzFactor)
+    : Math.round(scaled);
+  return Math.min(config.maximumInterval, Math.max(1, minimum, value));
 }
 
 /**
@@ -450,14 +463,15 @@ function fuzzed(
   interval: number,
   minimum: number,
   config: SchedulerConfig,
-  random: () => number,
+  fuzzFactor: number,
 ): number {
   const delta = fuzzDelta(interval);
   if (delta === 0) return Math.round(interval);
 
-  const lower = Math.max(minimum, Math.round(interval - delta));
-  const upper = Math.max(lower, Math.min(config.maximumInterval, Math.round(interval + delta)));
-  return lower + Math.floor(random() * (upper - lower + 1));
+  const lower = Math.max(1, minimum, Math.round(interval - delta));
+  let upper = Math.max(lower, Math.min(config.maximumInterval, Math.round(interval + delta)));
+  if (upper === lower && upper > 2 && upper < config.maximumInterval) upper = lower + 1;
+  return lower + Math.floor(fuzzFactor * (upper - lower + 1));
 }
 
 function fuzzDelta(interval: number): number {
@@ -481,6 +495,25 @@ function after(now: Date, ms: number): IsoDate {
   return new Date(now.getTime() + ms).toISOString();
 }
 
+function reviewDueAt(now: Date, interval: number): IsoDate {
+  const dueDay = addCollectionDays(collectionDayKey(now), Math.max(1, Math.round(interval)));
+  return collectionDayStart(dayForKey(dueDay)).toISOString();
+}
+
+function dayForKey(day: string): Date {
+  const [year, month, date] = day.split('-').map(Number);
+  return new Date(year || 1970, (month || 1) - 1, date || 1, 12);
+}
+
+function daysLateFor(state: SchedulingState, now: Date): number {
+  const timestampDelta = (now.getTime() - Date.parse(state.nextReview)) / MS_PER_DAY;
+  if (timestampDelta < 0) return timestampDelta;
+  if (!state.dueDay) return timestampDelta;
+  const current = dayForKey(collectionDayKey(now)).getTime();
+  const scheduled = dayForKey(state.dueDay).getTime();
+  return Math.round((current - scheduled) / MS_PER_DAY);
+}
+
 /**
  * The three-way status the UI shows. Anki's four phases collapse into it:
  * anything short of a review card at maturity is still being learned.
@@ -500,6 +533,7 @@ export function newCardState(now: Date = new Date()): SchedulingState {
     lapses: 0,
     learningStep: 0,
     nextReview: now.toISOString(),
+    dueDay: collectionDayKey(now),
     leech: false,
     status: 'new',
   };
@@ -516,6 +550,7 @@ export function schedulingStateFor(card: Card): SchedulingState {
     lapses: card.lapses ?? 0,
     learningStep: card.learningStep ?? 0,
     nextReview: card.nextReview,
+    dueDay: card.dueDay,
     leech: card.leech ?? false,
     status: card.status,
   };
@@ -564,7 +599,11 @@ function inferPhase(card: Card): CardPhase {
 /** Apply a rating directly to a card, returning the updated card. */
 export function reviewCard(card: Card, rating: RatingName, options: ReviewOptions = {}): Card {
   const now = options.now ?? new Date();
-  const result = review(schedulingStateFor(card), rating, { ...options, now });
+  const result = review(schedulingStateFor(card), rating, {
+    ...options,
+    now,
+    random: options.random ?? fuzzRandomForCard(card.id),
+  });
   return {
     ...card,
     phase: result.phase,
@@ -585,6 +624,17 @@ export function reviewCard(card: Card, rating: RatingName, options: ReviewOption
   };
 }
 
+/** Stable per-card fuzz source so the interval preview and saved answer agree. */
+export function fuzzRandomForCard(cardId: string): () => number {
+  cardId = String(cardId ?? '');
+  let hash = 2166136261;
+  for (let i = 0; i < cardId.length; i++) {
+    hash ^= cardId.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return () => (hash >>> 0) / 4_294_967_296;
+}
+
 /** Cards whose `nextReview` has come due, hardest-overdue first. */
 export function dueCards(cards: Card[], now: Date = new Date()): Card[] {
   return cards
@@ -601,6 +651,7 @@ export interface StudyQueueOptions {
   maxReviewsPerDay?: number | null;
   newCardsIntroducedToday?: number;
   reviewsAnsweredToday?: number;
+  newCardsIgnoreReviewLimit?: boolean;
 }
 
 export interface StudyQueue {
@@ -611,12 +662,10 @@ export interface StudyQueue {
 }
 
 /**
- * Gather a normal Anki-style queue: learning first, then reviews, then new
- * cards. Daily limits are applied after the cards are classified, so a large
- * backlog cannot hide learning cards behind a new-card query. Learning and
- * relearning steps do not spend the review-card allowance: once Anki has
- * introduced a card, its steps stay available even when today's review limit
- * has been reached.
+ * Gather a normal Anki-style queue: intraday learning first, then interday
+ * learning/reviews sharing the review allowance, then new cards. New-card and
+ * review limits are independent, so a full review queue does not suppress the
+ * day's new-card allowance.
  */
 export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptions = {}): StudyQueue {
   const now = options.now ?? new Date();
@@ -625,6 +674,8 @@ export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptio
     .filter((card) => (card.phase === 'learning' || card.phase === 'relearning') && isCardDue(card, now))
     .sort(compareDue);
   const reviews = live.filter((card) => card.phase === 'review' && isCardDue(card, now)).sort(compareDue);
+  const interdayLearning = learning.filter((card) => isInterdayLearningCard(card, now));
+  const intradayLearning = learning.filter((card) => !isInterdayLearningCard(card, now));
   // The caller supplies new cards in insertion order, matching Anki's default
   // insertion order. Their timestamps are not a useful ordering signal because
   // several can be created in the same operation.
@@ -635,11 +686,12 @@ export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptio
   const reviewAllowance = options.maxReviewsPerDay === null
     ? Number.MAX_SAFE_INTEGER
     : Math.max(0, (options.maxReviewsPerDay ?? 50) - (options.reviewsAnsweredToday ?? 0));
-  const reviewCards = reviews.slice(0, reviewAllowance);
+  const reviewCards = [...interdayLearning, ...reviews].slice(0, reviewAllowance);
   const newAllowance = options.newCardsPerDay === null
     ? Number.MAX_SAFE_INTEGER
     : Math.max(0, (options.newCardsPerDay ?? 20) - (options.newCardsIntroducedToday ?? 0));
-  const result = [...learning, ...reviewCards, ...newCards.slice(0, newAllowance)].slice(0, options.limit ?? 200);
+  const newCapacity = newAllowance;
+  const result = [...intradayLearning, ...reviewCards, ...newCards.slice(0, newCapacity)].slice(0, options.limit ?? 200);
 
   return {
     cards: result,
@@ -647,6 +699,14 @@ export function buildStudyQueue(cards: readonly Card[], options: StudyQueueOptio
     review: result.filter((card) => card.phase === 'review').length,
     new: result.filter((card) => (card.phase ?? 'new') === 'new').length,
   };
+}
+
+export function isInterdayLearningCard(
+  card: Pick<Card, 'phase' | 'nextReview' | 'dueDay'>,
+  now: Date,
+): boolean {
+  return (card.phase === 'learning' || card.phase === 'relearning') &&
+    Boolean(card.dueDay && collectionDayKey(now) > card.dueDay);
 }
 
 function compareDue(a: Card, b: Card): number {

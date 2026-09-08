@@ -259,10 +259,10 @@ test('the forecast counts cards by the day they come due', () => {
   assert.equal(rows[0].day, dayKey(now));
 });
 
-test('overdue cards are folded into today rather than dropped', () => {
+test('overdue cards are omitted from the future-due forecast', () => {
   const now = new Date(2026, 8, 3, 12, 0);
   const rows = forecast([cardDue(now, -9), cardDue(now, -1)], { days: 3, now });
-  assert.equal(rows[0].count, 2);
+  assert.equal(rows[0].count, 0);
 });
 
 test('cards beyond the horizon are left out of the forecast', () => {
@@ -314,5 +314,12 @@ function cardDue(now, inDays) {
     language: 'es',
     now,
   });
-  return { ...card, nextReview: new Date(now.getTime() + inDays * 86_400_000).toISOString() };
+  const due = new Date(now);
+  due.setDate(due.getDate() + inDays);
+  return {
+    ...card,
+    phase: 'review',
+    dueDay: dayKey(due),
+    nextReview: due.toISOString(),
+  };
 }
