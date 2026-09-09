@@ -397,6 +397,19 @@ export default function StudyScreen() {
     <Screen>
       <View style={[styles.stage, wide ? styles.stageWide : null]}>
         <View style={styles.studyHeader}>
+          {revealed && !editing ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('studyOptions')}
+              accessibilityState={{ expanded: toolsOpen }}
+              onPress={() => setToolsOpen((open) => !open)}
+              style={[styles.gearButton, styles.headerGear]}
+            >
+              <Label variant="body" align="center" style={styles.gearIcon}>
+                ⚙
+              </Label>
+            </Pressable>
+          ) : null}
           <StudyQueueCounts
             compact
             counts={remainingCounts}
@@ -476,7 +489,6 @@ export default function StudyScreen() {
                           generating={generating}
                           onRegenerate={regenerate}
                           onWordPress={captureWord}
-                          toast={toast}
                         />
                       ) : null}
                       {deck?.showGrammarNotes !== false && card.grammarNotes?.length ? (
@@ -514,18 +526,8 @@ export default function StudyScreen() {
                       />
                     ))}
                   </Row>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t('studyOptions')}
-                    accessibilityState={{ expanded: toolsOpen }}
-                    onPress={() => setToolsOpen((open) => !open)}
-                    style={styles.gearButton}
-                  >
-                    <Label variant="body" align="center" style={styles.gearIcon}>
-                      ⚙
-                    </Label>
-                  </Pressable>
                 </Row>
+                <Toast message={toast} />
                 {toolsOpen ? (
                   <>
                     <Spacer size={theme.spacing.sm} />
@@ -679,13 +681,11 @@ function ExampleBlock({
   generating,
   onRegenerate,
   onWordPress,
-  toast,
 }: {
   result: ExampleResult | null;
   generating: boolean;
   onRegenerate: () => void;
   onWordPress: (word: string, sentence: string) => void;
-  toast: string | null;
 }) {
   const { t } = useI18n();
   const theme = useTheme();
@@ -719,8 +719,6 @@ function ExampleBlock({
       {result.examples.map((example) => (
         <SentenceWords key={example} sentence={example} onWordPress={onWordPress} />
       ))}
-
-      <Toast message={toast} />
 
       {isFallback ? (
         <>
@@ -834,7 +832,13 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingVertical: 8,
   },
-  studyHeader: { paddingHorizontal: 16, paddingTop: 8 },
+  studyHeader: {
+    position: 'relative',
+    paddingLeft: 16,
+    paddingRight: 72,
+    paddingTop: 8,
+  },
+  headerGear: { position: 'absolute', top: 8, right: 16, zIndex: 1 },
   progressRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -849,9 +853,7 @@ const styles = StyleSheet.create({
   card: { flex: 1, justifyContent: 'center', padding: 24 },
   cardContent: { flexGrow: 1, justifyContent: 'center' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 24 },
-  // Toasts shown for word actions are positioned within this area so they do
-  // not add height and shift the examples or the controls below the card.
-  examples: { gap: 8, position: 'relative' },
+  examples: { gap: 8 },
   contextBlock: { gap: 4, marginTop: 12 },
   contextLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
   examplesLabel: { textTransform: 'uppercase', letterSpacing: 0.6, flex: 1 },
@@ -866,12 +868,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   toast: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 28,
     alignItems: 'center',
-    zIndex: 10,
+    marginTop: 8,
   },
   ratingRow: { flex: 1 },
   gearButton: {
