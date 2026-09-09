@@ -10,6 +10,14 @@ import type { LanguageCode } from '@fluentflow/core';
 
 export const en = {
   appName: 'FluentFlow',
+  chatOpen: 'Ask Gemini',
+  chatHide: 'Hide chat',
+  chatClear: 'Clear chat',
+  chatHint: 'Ask about this word. Its meaning, language, and examples are included automatically.',
+  chatYou: 'You',
+  chatThinking: 'Thinking…',
+  chatQuestion: 'Your question',
+  chatSend: 'Send',
 
   // Auth
   signIn: 'Sign in',
@@ -81,6 +89,9 @@ export const en = {
   regenerateDefinitionFailed: 'Could not regenerate the definition.',
   regenerateFailed: 'Could not regenerate examples.',
   studyOptions: 'Study options',
+  starCard: 'Star card',
+  unstarCard: 'Unstar card',
+  starFailed: 'Could not save favorite. Try again.',
   studyPresentation: 'Study presentation',
   reverseCards: 'Reverse card direction',
   showExamples: 'Show sentence context',
@@ -291,6 +302,14 @@ export type StringKey = keyof Strings;
 
 const es: Strings = {
   appName: 'FluentFlow',
+  chatOpen: 'Preguntar a Gemini',
+  chatHide: 'Ocultar chat',
+  chatClear: 'Borrar chat',
+  chatHint: 'Pregunta sobre esta palabra. Su significado, idioma y ejemplos se incluyen automáticamente.',
+  chatYou: 'Tú',
+  chatThinking: 'Pensando…',
+  chatQuestion: 'Tu pregunta',
+  chatSend: 'Enviar',
 
   signIn: 'Iniciar sesión',
   signUp: 'Crear cuenta',
@@ -358,6 +377,9 @@ const es: Strings = {
   regenerateDefinitionFailed: 'No se pudo regenerar el significado.',
   regenerateFailed: 'No se pudieron regenerar los ejemplos.',
   studyOptions: 'Opciones de estudio',
+  starCard: 'Marcar como favorito',
+  unstarCard: 'Quitar de favoritos',
+  starFailed: 'No se pudo guardar el favorito. Inténtalo de nuevo.',
   studyPresentation: 'Presentación del estudio',
   reverseCards: 'Invertir dirección de las tarjetas',
   showExamples: 'Mostrar contexto en frases',
@@ -549,6 +571,14 @@ const es: Strings = {
 
 const bs: Strings = {
   appName: 'FluentFlow',
+  chatOpen: 'Pitaj Gemini',
+  chatHide: 'Sakrij chat',
+  chatClear: 'Obriši chat',
+  chatHint: 'Pitaj o ovoj riječi. Značenje, jezik i primjeri se automatski uključuju.',
+  chatYou: 'Ti',
+  chatThinking: 'Razmišljam…',
+  chatQuestion: 'Tvoje pitanje',
+  chatSend: 'Pošalji',
 
   signIn: 'Prijava',
   signUp: 'Napravi račun',
@@ -616,6 +646,9 @@ const bs: Strings = {
   regenerateDefinitionFailed: 'Nije moguće ponovo generisati značenje.',
   regenerateFailed: 'Nije moguće ponovo generisati primjere.',
   studyOptions: 'Opcije učenja',
+  starCard: 'Označi kao omiljeno',
+  unstarCard: 'Ukloni iz omiljenih',
+  starFailed: 'Nije moguće sačuvati oznaku. Pokušajte ponovo.',
   studyPresentation: 'Prikaz učenja',
   reverseCards: 'Obrni smjer kartica',
   showExamples: 'Prikaži rečenični kontekst',

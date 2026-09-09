@@ -55,6 +55,8 @@ export interface Card {
   /** Cards hidden until the next collection day, or manually disabled. */
   buriedUntil?: string;
   suspended?: boolean;
+  /** Learner-marked favorite, independent of scheduling. */
+  starred?: boolean;
   /** Times this card has been failed as a review card (Anki's `lapses`). */
   lapses?: number;
   /** Position in the active learning or relearning step list. */

@@ -24,7 +24,7 @@ describe('Repository', () => {
     const row = await context.database.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version',
     );
-    expect(row?.user_version).toBe(11);
+    expect(row?.user_version).toBe(12);
   });
 
   it('round-trips a deck and its cards', async () => {

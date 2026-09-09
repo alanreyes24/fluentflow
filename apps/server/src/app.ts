@@ -2,6 +2,8 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors';
 import {
   ApkgError,
+  chatWithGemini,
+  validateChatMessages,
   parseApkg,
   recomputeCardCounts,
   type Card,
@@ -53,6 +55,24 @@ export function createApp({ config, store }: AppDeps): express.Express {
    */
   app.get('/api/ai/status', auth, (_req: AuthedRequest, res) => {
     res.json(aiStatus({ config }));
+  });
+
+  app.post('/api/ai/chat', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const messages = req.body?.messages;
+    try {
+      validateChatMessages(messages);
+    } catch (error) {
+      res.status(400).json({ message: (error as Error).message });
+      return;
+    }
+    try {
+      const text = await chatWithGemini({
+        apiKey: config.geminiApiKey ?? '', model: config.geminiModel,
+      }, messages);
+      res.json({ text });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post('/api/ai/resolve', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {

@@ -72,3 +72,10 @@ async function request(path: string, init: RequestInit): Promise<any> {
   }
   return body;
 }
+
+export async function chatOnWeb(messages: import('@fluentflow/core').ChatMessage[]): Promise<string> {
+  const result = await request('/api/ai/chat', {
+    method: 'POST', body: JSON.stringify({ messages }),
+  });
+  return result.text;
+}

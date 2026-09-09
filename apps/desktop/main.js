@@ -500,6 +500,13 @@ const runningExamples = new Map();
  */
 function registerAiHandlers() {
   ipcMain.handle('ai:status', () => ai.sources());
+  ipcMain.handle('ai:chat', async (_event, messages) => {
+    try {
+      return { ok: true, text: await ai.chat(messages) };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
 
   ipcMain.handle('ai:resolve', async (event, request) => {
     const { words, language, useModel, modelOnly } = request ?? {};

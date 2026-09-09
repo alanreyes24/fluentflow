@@ -103,6 +103,7 @@ function parseCard(value: unknown, userId: string, path: string): Card {
     ...(raw.buriedUntil === undefined
       ? {}
       : { buriedUntil: text(raw.buriedUntil, `${path}.buriedUntil`, 10, 10) }),
+    starred: raw.starred === true,
     ...(raw.suspended === true ? { suspended: true } : {}),
     nextReview: isoDate(raw.nextReview, `${path}.nextReview`),
     status: oneOf(raw.status, ['new', 'learning', 'mastered'], `${path}.status`),

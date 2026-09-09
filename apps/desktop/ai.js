@@ -168,4 +168,9 @@ function sources() {
   return { dictionary: dictionary.status(), cloud: cloud.status() };
 }
 
-module.exports = { sources, resolve, examples };
+async function chat(messages) {
+  const core = await import('@fluentflow/core');
+  return core.chatWithGemini({ apiKey: cloud.apiKey(), model: cloud.model() }, messages);
+}
+
+module.exports = { sources, resolve, examples, chat };

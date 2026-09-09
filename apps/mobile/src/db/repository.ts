@@ -405,7 +405,8 @@ export class Repository {
     if (!row || row.syncStatus !== 'pending') return null;
     const previous = parseCardSnapshot(row.previousState);
     if (!previous) return null;
-    const restored = touch({ ...previous, suspended: previous.suspended ?? false }, now);
+    const current = await this.getCard(previous.id);
+    const restored = touch({ ...previous, starred: current?.starred ?? false, suspended: previous.suspended ?? false }, now);
     await this.db.withTransactionAsync(async () => {
       await this.writeCards([restored]);
       await this.db.runAsync("DELETE FROM review_log WHERE id = ? AND syncStatus = 'pending'", row.id);
@@ -831,8 +832,8 @@ export class Repository {
       await this.db.runAsync(
         `INSERT INTO cards (id, deckId, userId, front, back, language, examples, grammarNotes, relatedWords, interval,
                             easeFactor, repetitions, phase, lapses, learningStep, leech,
-                            introducedAt, dueDay, buriedUntil, suspended, nextReview, status, lastModified, syncStatus, deleted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            introducedAt, dueDay, buriedUntil, suspended, nextReview, status, lastModified, syncStatus, deleted, starred)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            deckId = excluded.deckId,
            userId = excluded.userId,
@@ -857,7 +858,8 @@ export class Repository {
            status = excluded.status,
            lastModified = excluded.lastModified,
            syncStatus = excluded.syncStatus,
-           deleted = excluded.deleted`,
+           deleted = excluded.deleted,
+           starred = excluded.starred`,
         card.id,
         card.deckId,
         card.userId,
@@ -883,6 +885,7 @@ export class Repository {
         card.lastModified,
         card.syncStatus,
         card.deleted ? 1 : 0,
+        card.starred ? 1 : 0,
       );
     }
   }
@@ -895,7 +898,7 @@ const CARD_UPDATE_COLUMNS = [
   'deckId', 'userId', 'front', 'back', 'language', 'examples', 'grammarNotes',
   'relatedWords', 'interval', 'easeFactor', 'repetitions', 'phase', 'lapses',
   'learningStep', 'leech', 'introducedAt', 'dueDay', 'buriedUntil', 'suspended',
-  'nextReview', 'status', 'lastModified', 'syncStatus', 'deleted',
+  'nextReview', 'status', 'lastModified', 'syncStatus', 'deleted', 'starred',
 ] as const satisfies readonly (keyof Card)[];
 
 interface DeckRow {
@@ -937,6 +940,7 @@ interface CardRow {
   dueDay: string | null;
   buriedUntil: string | null;
   suspended: number;
+  starred: number;
   nextReview: string;
   status: string;
   lastModified: string;
@@ -1015,6 +1019,7 @@ function toCard(row: CardRow): Card {
         ? { dueDay: collectionDayKey(new Date(row.nextReview)) }
         : {}),
     ...(row.buriedUntil ? { buriedUntil: row.buriedUntil } : {}),
+    starred: Boolean(row.starred),
     ...(row.suspended ? { suspended: true } : {}),
     ...(row.leech ? { leech: true } : {}),
     ...(row.deleted ? { deleted: true } : {}),

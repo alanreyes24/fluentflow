@@ -74,6 +74,26 @@ describe('StudyScreen', () => {
     expect(screen.getByRole('button', { name: 'Good' })).toBeTruthy();
   });
 
+  it('persists favorites across reveal, review, and reopening the session', async () => {
+    const [first] = await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
+    const view = await show();
+    await screen.findByText('hablar');
+    await fireEvent.press(screen.getByRole('button', { name: 'Star card' }));
+    await screen.findByRole('button', { name: 'Unstar card', selected: true });
+    expect((await repository.getCard(first!.id))?.starred).toBe(true);
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Again' }));
+    await screen.findByText('comer');
+    expect(screen.getByRole('button', { name: 'Star card' })).toBeTruthy();
+    expect((await repository.getCard(first!.id))?.starred).toBe(true);
+    await view.unmount();
+    await show();
+    await screen.findByRole('button', { name: 'Unstar card' });
+    await fireEvent.press(screen.getByRole('button', { name: 'Unstar card' }));
+    await screen.findByRole('button', { name: 'Star card' });
+    expect((await repository.getCard(first!.id))?.starred).toBe(false);
+  });
+
   it('starts no more than the deck limit of untouched new cards', async () => {
     deck = await repository.setNewCardsPerDay(deck, 2);
     await seed([
@@ -119,6 +139,28 @@ describe('StudyScreen', () => {
     expect(stored?.repetitions).toBe(1);
     expect(stored?.phase).toBe('learning');
     expect(stored?.syncStatus).toBe('pending');
+  });
+
+  it('accepts only one rating while the save is pending', async () => {
+    await seed([['hablar', 'to speak'], ['comer', 'to eat'], ['vivir', 'to live']]);
+    const original = repository.rateCard.bind(repository);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const rate = jest.spyOn(repository, 'rateCard').mockImplementation(async (...args) => {
+      await pending;
+      return original(...args);
+    });
+    await show();
+    await screen.findByText('hablar');
+    await reveal();
+    const good = screen.getByRole('button', { name: 'Good' });
+    await fireEvent.press(good);
+    await fireEvent.press(good);
+    expect(rate).toHaveBeenCalledTimes(1);
+    release();
+    await screen.findByText('comer');
+    expect(screen.getByText('2 / 4')).toBeTruthy();
+    expect(screen.queryByText('to eat')).toBeNull();
   });
 
   it('separates due reviews from new cards in the remaining counters', async () => {

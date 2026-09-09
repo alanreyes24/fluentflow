@@ -19,14 +19,16 @@ test('the instruction names the word, the language and the output format', () =>
   assert.match(instruction, /to speak/);
   // The localised half keeps a small model producing the target language.
   assert.match(instruction, /frases naturales en español/);
-  assert.match(instruction, /entre 12 y 20 palabras/);
+  assert.match(instruction, /primera frase debe ser sencilla/);
+  assert.match(instruction, /segunda debe ser más compleja/);
   assert.match(instruction, /colocación y la preposición más naturales/);
   assert.match(instruction, /no traduzcas literalmente del inglés/);
   assert.match(instruction, /entrar por la fuerza/);
-  assert.match(instruction, /genuinely C1-C2 level/);
+  assert.match(instruction, /first sentence must be simple/);
+  assert.match(instruction, /second sentence must be more complex/);
   assert.match(instruction, /12-20 words/);
   assert.match(instruction, /C1-C2 words or collocations/);
-  assert.match(instruction, /generic beginner patterns/);
+  assert.doesNotMatch(instruction, /Every sentence must|Cada frase debe/);
 });
 
 test('the prompt is the bare instruction, with no chat template around it', () => {
@@ -35,6 +37,8 @@ test('the prompt is the bare instruction, with no chat template around it', () =
   // The hosted endpoint applies its own template. Control tokens here would be
   // text the model has to read past, which is why the wrappers are gone.
   assert.equal(buildPrompt(input), buildInstruction(input));
+  assert.match(buildPrompt(input), /Prva rečenica treba biti jednostavna/);
+  assert.match(buildPrompt(input), /Druga treba biti složenija/);
   assert.doesNotMatch(buildPrompt(input), /<\|/);
 });
 

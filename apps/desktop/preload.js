@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
   electronVersion: process.versions.electron,
 
   ai: {
+    chat: (messages) => ipcRenderer.invoke('ai:chat', messages),
     /** `{ dictionary, model }` — what is installed, each with its own status. */
     status: () => ipcRenderer.invoke('ai:status'),
 

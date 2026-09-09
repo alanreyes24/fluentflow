@@ -194,6 +194,49 @@ export function createRemoteInference(options: RemoteInferenceOptions): Inferenc
   };
 }
 
+/** Plain multi-turn chat; no study prompts, tools, or structured output. */
+export interface ChatMessage {
+  role: 'user' | 'model';
+  text: string;
+}
+
+export function validateChatMessages(value: unknown): asserts value is ChatMessage[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 100 ||
+      value.some((message, index) => !message ||
+        message.role !== (index % 2 === 0 ? 'user' : 'model') ||
+        typeof message.text !== 'string' || !message.text.trim()) ||
+      value[value.length - 1].role !== 'user' ||
+      value.reduce((size, message) => size + message.text.length, 0) > 100_000) {
+    throw new Error('Send a conversation ending with a question (up to 100,000 characters).');
+  }
+}
+
+export async function chatWithGemini(
+  options: RemoteInferenceOptions,
+  messages: ChatMessage[],
+): Promise<string> {
+  validateChatMessages(messages);
+  const apiKey = options.apiKey?.trim();
+  if (!apiKey) throw new Error('Add a Gemini API key in Settings to chat.');
+  const model = options.model?.trim() || DEFAULT_REMOTE_MODEL;
+  const response = await (options.fetchImpl ?? globalThis.fetch)(
+    `${options.endpoint ?? GEMINI_ENDPOINT}/${encodeURIComponent(model)}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: messages.map(({ role, text }) => ({ role, parts: [{ text }] })),
+      }),
+      signal: AbortSignal.timeout(60_000),
+    },
+  );
+  if (!response.ok) throw await httpError(response, model);
+  const body = await response.json() as GeminiResponse;
+  const text = textFrom(body);
+  if (!text) throw new Error('Gemini returned no text. Try another question.');
+  return text;
+}
+
 interface GeminiResponse {
   candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[];
   promptFeedback?: { blockReason?: string };

@@ -192,6 +192,10 @@ const migrations: Migration[] = [
       ALTER TABLE cards ADD COLUMN relatedWords TEXT NOT NULL DEFAULT '[]';
     `);
   },
+  // 12 — persistent card favorites.
+  async (db) => {
+    await db.execAsync("ALTER TABLE cards ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;");
+  },
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

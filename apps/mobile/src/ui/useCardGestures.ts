@@ -20,6 +20,8 @@ export interface CardGestureOptions {
   onRate: (rating: RatingName) => void;
   /** Number keys only rate once the answer is showing. */
   enabled: boolean;
+  /** Suspend shortcuts while dialogs or editors are open. */
+  active?: boolean;
   /** Reveal the answer; a tap or Space when the answer is hidden. */
   onReveal: () => void;
 }
@@ -28,11 +30,12 @@ export function useCardGestures({
   onRate,
   enabled,
   onReveal,
+  active = true,
 }: CardGestureOptions): CardGestures {
   // The keyboard listener is created once, so the callbacks it closes over
   // have to be read through a ref or they go stale after the first card.
-  const latest = useRef({ onRate, enabled, onReveal });
-  latest.current = { onRate, enabled, onReveal };
+  const latest = useRef({ onRate, enabled, onReveal, active });
+  latest.current = { onRate, enabled, onReveal, active };
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -40,8 +43,9 @@ export function useCardGestures({
     if (!target) return;
 
     const onKeyDown = (event: Event) => {
-      const keyboard = event as unknown as { key: string; repeat: boolean; target: unknown };
-      if (keyboard.repeat) return;
+      const keyboard = event as KeyboardEvent;
+      if (!latest.current.active || event.defaultPrevented || keyboard.repeat ||
+          keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.shiftKey) return;
       // Never steal a keystroke from a text field.
       if (isTextEntry(keyboard.target)) return;
 
@@ -75,6 +79,7 @@ function isTextEntry(target: unknown): boolean {
   return (
     element.isContentEditable === true ||
     element.tagName === 'INPUT' ||
-    element.tagName === 'TEXTAREA'
+    element.tagName === 'TEXTAREA' ||
+    element.tagName === 'SELECT'
   );
 }

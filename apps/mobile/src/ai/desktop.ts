@@ -1,10 +1,11 @@
 import type {
+  ChatMessage,
   GenerateExamplesResult,
   ModelUsage,
   ResolvedMeaning,
   TargetLanguage,
 } from '@fluentflow/core';
-import { webAiAvailable, lookupSourcesOnWeb, resolveMeaningsOnWeb } from './web';
+import { webAiAvailable, lookupSourcesOnWeb, resolveMeaningsOnWeb, chatOnWeb } from './web';
 
 /**
  * The desktop shell's lookup bridge, as the app sees it.
@@ -107,6 +108,7 @@ export interface ExampleRequest {
 interface DesktopBridge {
   platform: string;
   ai?: {
+    chat?(messages: ChatMessage[]): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
     status(): Promise<LookupSources>;
     resolve(
       words: string[],
@@ -271,4 +273,15 @@ export async function generateExamplesOnDesktop(
   } finally {
     signal?.removeEventListener('abort', cancel);
   }
+}
+
+export async function sendChat(messages: ChatMessage[]): Promise<string> {
+  const ai = bridge();
+  if (ai?.chat) {
+    const result = await ai.chat(messages);
+    if (!result.ok) throw new Error(result.error);
+    return result.text;
+  }
+  if (webAiAvailable()) return chatOnWeb(messages);
+  throw new Error('Gemini chat is unavailable. Open the desktop app and add a key in Settings.');
 }

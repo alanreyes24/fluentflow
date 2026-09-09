@@ -23,12 +23,12 @@ export interface ExamplePromptInput {
 const LANGUAGE_INSTRUCTIONS: Record<TargetLanguage, (word: string, count: number) => string> = {
   es: (word, count) =>
     `Escribe ${count} frases naturales en español que usen la palabra "${word}". ` +
-    'Cada frase debe tener entre 12 y 20 palabras y presentar una idea compleja, no una oración básica de sujeto-verbo-objeto. Usa la colocación y la preposición más naturales para un hablante nativo; no traduzcas literalmente del inglés. ' +
+    'La primera frase debe ser sencilla, con vocabulario cotidiano y una estructura clara. La segunda debe ser más compleja, con vocabulario avanzado y una oración subordinada u otra estructura elaborada. Usa la colocación y la preposición más naturales para un hablante nativo; no traduzcas literalmente del inglés. ' +
     'Si es una expresión fija, conserva su forma idiomática y añade los artículos que correspondan. ' +
     'Por ejemplo, para "entrar a la fuerza en" es preferible "entrar por la fuerza en la casa/una casa"; "en casa" normalmente significa "at home".',
   bs: (word, count) =>
     `Napiši ${count} prirodne rečenice na bosanskom jeziku koje koriste riječ "${word}". ` +
-    'Svaka rečenica treba imati između 12 i 20 riječi i izražavati složenu ideju, a ne osnovni obrazac subjekt-glagol-objekat. Koristi prirodne kolokacije i padeže; ne prevodi doslovno s engleskog. ' +
+    'Prva rečenica treba biti jednostavna, sa svakodnevnim riječima i jasnom strukturom. Druga treba biti složenija, s naprednim vokabularom i zavisnom rečenicom ili drugom složenom strukturom. Koristi prirodne kolokacije i padeže; ne prevodi doslovno s engleskog. ' +
     'Ako je riječ o ustaljenom izrazu, koristi njegov najprirodniji oblik.',
 };
 
@@ -43,10 +43,10 @@ export function buildInstruction(input: ExamplePromptInput): string {
     meaning +
     ` ${localized}` +
     ' The sentences must sound like natural, contemporary usage to a native speaker, not merely be grammatically possible.' +
-    ' Make the surrounding language genuinely C1-C2 level so the learner encounters sophisticated vocabulary, idiomatic expressions, and nuanced contexts even when the target word itself is common.' +
-    ' Every sentence must be 12-20 words and include a subordinate clause, contrast, cause-and-effect relationship, hypothetical situation, or another non-trivial structure.' +
-    ' Include one or two useful C1-C2 words or collocations that fit naturally.' +
-    ' Do not use generic beginner patterns such as "The thief decided..." or "They tried..."; make each sentence specific, vivid, and useful for learning.' +
+    ' Keep the sentences in order of difficulty: the first sentence must be simple, using everyday vocabulary and one clear main clause, ideally 5-10 words (longer if needed for the target phrase).' +
+    ' The second sentence must be more complex: use 12-20 words, with a subordinate clause, contrast, cause-and-effect relationship, or hypothetical situation, and one or two useful C1-C2 words or collocations that fit naturally.' +
+    ' If more than two sentences are requested, keep the additional sentences at the more complex level. If only one is requested, use the simple level.' +
+    ' Make each sentence specific and useful for learning, with a clear difference in difficulty between the first and second.' +
     ' Do not make the sentence obscure, artificial, or difficult to understand from context.' +
     ' Prefer a different sentence or construction if the requested phrase would sound unnatural in context.' +
     ' Format the answer as a JSON array of strings.' +

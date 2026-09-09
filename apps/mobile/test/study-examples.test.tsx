@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react-native';
 import type { Card, Deck } from '@fluentflow/core';
 import StudyScreen from '../app/(app)/study/[deckId]';
 import { ExampleService, type ExampleResult } from '../src/ai/service';
@@ -92,6 +92,31 @@ describe('StudyScreen examples', () => {
       const stored = await repository.getCard(card.id);
       expect(stored?.repetitions).toBe(1);
     });
+  });
+
+  it('does not replace the current word examples with a late previous response', async () => {
+    await repository.addCard(TEST_USER.id, deck, 'comer', 'to eat');
+    let finishFirst!: (value: ExampleResult) => void;
+    const pending = new Promise<ExampleResult>((resolve) => { finishFirst = resolve; });
+    const examples = new ExampleService(repository);
+    jest.spyOn(examples, 'prefetch').mockImplementation(() => {});
+    jest.spyOn(examples, 'forCard').mockImplementation((requested) => requested.id === card.id
+      ? pending
+      : Promise.resolve({ examples: ['Quiero comer.'], source: 'model', durationMs: 0 }));
+    await renderScreen(<StudyScreen />, { repository, examples });
+    await screen.findByText('hablar');
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+    await screen.findByText('comer');
+    await reveal();
+    await screen.findByText('Quiero comer.');
+    await act(async () => {
+      finishFirst({ examples: ['Quiero hablar.'], source: 'model', durationMs: 0 });
+      await pending;
+    });
+    expect(screen.getByText('Quiero comer.')).toBeTruthy();
+    expect(screen.queryByText('Quiero hablar.')).toBeNull();
+    expect(screen.getByText('to eat')).toBeTruthy();
   });
 
   it('falls back to written sentences when there is no model to ask', async () => {

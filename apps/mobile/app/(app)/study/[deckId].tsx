@@ -1,3 +1,4 @@
+import { StudyChat } from '../../../src/ui/StudyChat';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -5,7 +6,6 @@ import {
   RATING_NAMES,
   RATINGS,
   fuzzRandomForCard,
-  ratingFromValue,
   review,
   schedulingStateFor,
   type Card,
@@ -76,12 +76,17 @@ export default function StudyScreen() {
   const [reviewed, setReviewed] = useState(0);
   const [lapses, setLapses] = useState(0);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addingWords = useRef(new Set<string>());
+  const ratingPending = useRef(false);
+  const starPending = useRef(false);
+  const [savingStar, setSavingStar] = useState(false);
+  const exampleRequest = useRef(0);
   const [loading, setLoading] = useState(true);
 
   const card = queue[index] ?? null;
@@ -123,6 +128,8 @@ export default function StudyScreen() {
     exampleService.prefetch(queue.slice(index));
   }, [exampleService, deck?.showExamples, queue, index]);
 
+  useEffect(() => () => { exampleRequest.current += 1; }, [card?.id, index]);
+
   const reveal = useCallback(() => {
     if (revealed || !card) return;
     setRevealed(true);
@@ -135,11 +142,14 @@ export default function StudyScreen() {
 
     // Deliberately not awaited: the rating buttons are live the moment the
     // answer is on screen, whatever the model is doing.
+    const request = ++exampleRequest.current;
     exampleService
       .forCard(card)
-      .then((result) => setExamples(result))
-      .catch(() => setExamples({ examples: [], source: 'fallback', durationMs: 0 }))
-      .finally(() => setGenerating(false));
+      .then((result) => { if (request === exampleRequest.current) setExamples(result); })
+      .catch(() => {
+        if (request === exampleRequest.current) setExamples({ examples: [], source: 'fallback', durationMs: 0 });
+      })
+      .finally(() => { if (request === exampleRequest.current) setGenerating(false); });
   }, [revealed, card, deck, exampleService]);
 
   /**
@@ -177,11 +187,13 @@ export default function StudyScreen() {
 
   const rate = useCallback(
     (rating: RatingName) => {
-      if (!repository || !card || !revealed) return;
+      if (!repository || !card || !revealed || ratingPending.current || starPending.current) return;
+      ratingPending.current = true;
 
       void (async () => {
         const before = { queue, index, reviewed, lapses };
         const answered = await repository.rateCard(card, rating);
+        exampleRequest.current += 1;
         setUndoState(before);
         setReviewed((count) => count + 1);
         if (rating === 'again') setLapses((count) => count + 1);
@@ -195,35 +207,20 @@ export default function StudyScreen() {
         if (dueWithinSession(answered)) setQueue((current) => [...current, answered]);
         setIndex((current) => current + 1);
         await refreshDecks();
-      })();
+      })().catch((error) => {
+        setToast(error instanceof Error ? error.message : String(error));
+      }).finally(() => { ratingPending.current = false; });
     },
     [repository, card, revealed, refreshDecks, queue, index, reviewed, lapses],
   );
-
-  // Anki's desktop muscle memory is 1=Again, 2=Hard, 3=Good, 4=Easy.
-  // The web build is also the keyboard surface for the Electron desktop app.
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!revealed || editing || event.defaultPrevented) return;
-      const target = event.target as { tagName?: string; isContentEditable?: boolean } | null;
-      if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')) {
-        return;
-      }
-      const rating = ratingFromValue(Number(event.key));
-      if (!rating) return;
-      event.preventDefault();
-      rate(rating);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [revealed, editing, rate]);
 
   const undo = useCallback(async () => {
     if (!repository || !user || !undoState) return;
     const restored = await repository.undoLastReview(user.id);
     if (!restored) return;
-    setQueue(undoState.queue);
+    setQueue(undoState.queue.map((item) =>
+      item.id === restored.id ? { ...item, starred: restored.starred } : item,
+    ));
     setIndex(undoState.index);
     setReviewed(undoState.reviewed);
     setLapses(undoState.lapses);
@@ -304,6 +301,25 @@ export default function StudyScreen() {
     toastTimer.current = setTimeout(() => setToast(null), 2400);
   }, []);
 
+  const toggleStar = useCallback(async () => {
+    if (!repository || !card || starPending.current || ratingPending.current) return;
+    starPending.current = true;
+    setSavingStar(true);
+    try {
+      const updated = await repository.updateCard(card, { starred: !card.starred });
+      const patch = (items: Card[]) => items.map((item) =>
+        item.id === updated.id ? { ...item, starred: updated.starred } : item,
+      );
+      setQueue(patch);
+      setUndoState((current) => current ? { ...current, queue: patch(current.queue) } : null);
+    } catch {
+      showToast(t('starFailed'));
+    } finally {
+      starPending.current = false;
+      setSavingStar(false);
+    }
+  }, [repository, card, showToast, t]);
+
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
@@ -320,14 +336,16 @@ export default function StudyScreen() {
     // Previously the old sentences stayed visible throughout the request,
     // making a successful regeneration look like a no-op.
     setExamples(null);
+    const request = ++exampleRequest.current;
     exampleService
       .forCard(card, true)
-      .then(setExamples)
+      .then((result) => { if (request === exampleRequest.current) setExamples(result); })
       .catch(() => {
+        if (request !== exampleRequest.current) return;
         setExamples(previous);
         showToast(t('regenerateFailed'));
       })
-      .finally(() => setGenerating(false));
+      .finally(() => { if (request === exampleRequest.current) setGenerating(false); });
   }, [card, exampleService, examples, generating, showToast, t]);
 
   const regenerateDefinition = useCallback(async () => {
@@ -411,7 +429,8 @@ export default function StudyScreen() {
   const gestures = useCardGestures({
     onRate: rate,
     onReveal: reveal,
-    enabled: revealed,
+    enabled: revealed && !editing && !toolsOpen && !chatOpen,
+    active: !editing && !toolsOpen && !chatOpen,
   });
 
   if (loading) {
@@ -428,21 +447,49 @@ export default function StudyScreen() {
 
   return (
     <Screen style={styles.studyScreen}>
-      {revealed && !editing ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('studyOptions')}
-          accessibilityState={{ expanded: toolsOpen }}
-          onPress={() => setToolsOpen((open) => !open)}
-          style={[styles.gearButton, styles.screenGear]}
-        >
-          <Label variant="body" align="center" style={styles.gearIcon}>
-            ⚙
-          </Label>
-        </Pressable>
-      ) : null}
+      <View style={styles.studyBody}>
+      <View style={styles.studyMain}>
       <View style={[styles.stage, wide ? styles.stageWide : null]}>
         <View style={styles.studyHeader}>
+          <Row style={styles.studyToolbar}>
+            <View style={styles.toolbarSide} />
+            <View style={styles.chatButton}>
+            <Button label={chatOpen ? t('chatHide') : t('chatOpen')} variant="ghost"
+              onPress={() => setChatOpen((open) => !open)} />
+            </View>
+            <View style={styles.toolbarSide}>
+              {!editing ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t(card.starred ? 'unstarCard' : 'starCard')}
+                  accessibilityState={{ selected: Boolean(card.starred), disabled: savingStar }}
+                  disabled={savingStar}
+                  onPress={() => void toggleStar()}
+                  style={styles.gearButton}
+                >
+                  <Label variant="body" align="center" style={[
+                    styles.gearIcon,
+                    { color: card.starred ? theme.colors.hard : theme.colors.textMuted },
+                  ]}>
+                    {card.starred ? '★' : '☆'}
+                  </Label>
+                </Pressable>
+              ) : null}
+          {revealed && !editing ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('studyOptions')}
+              accessibilityState={{ expanded: toolsOpen }}
+              onPress={() => setToolsOpen((open) => !open)}
+              style={styles.gearButton}
+            >
+              <Label variant="body" align="center" style={styles.gearIcon}>
+                ⚙
+              </Label>
+            </Pressable>
+          ) : null}
+            </View>
+          </Row>
           <StudyQueueCounts
             compact
             counts={remainingCounts}
@@ -578,7 +625,6 @@ export default function StudyScreen() {
                     ))}
                   </Row>
                 </Row>
-                <Toast message={toast} />
                 {toolsOpen ? (
                   <>
                     <Spacer size={theme.spacing.sm} />
@@ -618,9 +664,13 @@ export default function StudyScreen() {
             ) : (
               <Button label={t('showAnswer')} onPress={reveal} />
             )}
+            <Toast message={toast} />
           </View>
           </>
         )}
+      </View>
+      </View>
+      <StudyChat open={chatOpen} card={{ ...card, examples: examples?.examples ?? card.examples }} />
       </View>
     </Screen>
   );
@@ -837,6 +887,22 @@ function SentenceWords({
 }) {
   const theme = useTheme();
   const tokens = sentence.match(/[\p{L}\p{M}\p{N}]+(?:['’-][\p{L}\p{M}\p{N}]+)*|[^\p{L}\p{M}\p{N}]+/gu) ?? [sentence];
+  const items = tokens.reduce<SentenceItem[]>((result, token) => {
+    const isWord = /[\p{L}\p{M}\p{N}]/u.test(token);
+    if (isWord) {
+      result.push({ word: token, punctuation: '' });
+    } else if (/[^\s]/u.test(token) && result.length > 0) {
+      // Keep punctuation with the word before it so a sentence-final mark
+      // cannot wrap onto a line by itself. Whitespace-only tokens remain
+      // separate so normal word wrapping still works.
+      const previous = result[result.length - 1];
+      if (previous.word) previous.punctuation += token;
+      else result.push({ text: token });
+    } else {
+      result.push({ text: token });
+    }
+    return result;
+  }, []);
   return (
     <View style={styles.sentenceWrap}>
       {/* Keep the sentence available as one selectable text node for screen
@@ -845,31 +911,36 @@ function SentenceWords({
         {sentence}
       </Label>
       <View style={styles.sentence}>
-        {tokens.map((token, index) => {
-          const isWord = /[\p{L}\p{M}\p{N}]/u.test(token);
-          return isWord ? (
+        {items.map((item, index) => {
+          return item.word ? (
             <Pressable
-              key={`${token}-${index}`}
+              key={`${item.word}-${index}`}
               accessibilityRole="button"
-              accessibilityLabel={token}
-              onPress={() => onWordPress(token, sentence)}
+              accessibilityLabel={item.word}
+              onPress={() => onWordPress(item.word, sentence)}
               style={({ pressed }) => [
                 styles.wordButton,
                 { borderBottomColor: theme.colors.accent },
                 pressed ? { backgroundColor: theme.colors.accentSoft } : null,
               ]}
             >
-              <Label variant="body">{token}</Label>
+              <Label variant="body">{item.word}{item.punctuation}</Label>
             </Pressable>
           ) : (
-            <Label key={`${token}-${index}`} variant="body" style={styles.sentenceText}>
-              {token}
+            <Label key={`text-${index}`} variant="body" style={styles.sentenceText}>
+              {item.text}
             </Label>
           );
         })}
       </View>
     </View>
   );
+}
+
+interface SentenceItem {
+  word?: string;
+  punctuation?: string;
+  text?: string;
 }
 
 /** Anki's learn-ahead limit: how early a learning card may be shown again. */
@@ -913,7 +984,12 @@ const styles = StyleSheet.create({
   ratingInterval: { marginTop: 4 },
   flex: { flex: 1 },
   studyScreen: { position: 'relative' },
-  stage: { flex: 1 },
+  studyToolbar: { paddingBottom: 8 },
+  toolbarSide: { width: 96, flexDirection: 'row', alignItems: 'center' },
+  chatButton: { flex: 1, alignItems: 'center' },
+  studyBody: { flex: 1, flexDirection: 'row', minHeight: 0 },
+  studyMain: { flex: 1, minWidth: 0 },
+  stage: { flex: 1, minWidth: 0 },
   stageWide: {
     width: '100%',
     maxWidth: STAGE_WIDTH,
@@ -969,7 +1045,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  screenGear: { position: 'absolute', top: 0, right: 0, zIndex: 1 },
   gearIcon: { fontSize: 22 },
   toastBubble: {
     borderRadius: 999,

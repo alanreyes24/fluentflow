@@ -17,6 +17,7 @@ import { useCardGestures } from '../src/ui/useCardGestures';
 interface Harness {
   rate: jest.Mock<void, [RatingName]>;
   reveal: jest.Mock<void, []>;
+  unmount: () => Promise<void>;
   press: (key: string, target?: unknown) => void;
 }
 
@@ -24,13 +25,14 @@ async function mount({ enabled }: { enabled: boolean }): Promise<Harness> {
   const rate = jest.fn<void, [RatingName]>();
   const reveal = jest.fn<void, []>();
 
-  await renderHook(() =>
+  const { unmount } = await renderHook(() =>
     useCardGestures({ onRate: rate, onReveal: reveal, enabled }),
   );
 
   return {
     rate,
     reveal,
+    unmount,
     press(key, target) {
       act(() => {
         const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
@@ -54,6 +56,7 @@ describe('useCardGestures on web', () => {
       const harness = await mount({ enabled: true });
       harness.press(key);
       expect(harness.rate).toHaveBeenCalledWith(rating);
+      await harness.unmount();
     }
   });
 
@@ -91,6 +94,16 @@ describe('useCardGestures on web', () => {
     for (const key of ['0', '5', '9', 'a', 'Escape']) harness.press(key);
     expect(harness.rate).not.toHaveBeenCalled();
     expect(harness.reveal).not.toHaveBeenCalled();
+  });
+
+  it('ignores held keys and modified shortcuts', async () => {
+    const harness = await mount({ enabled: true });
+    act(() => {
+      for (const options of [{ repeat: true }, { metaKey: true }, { ctrlKey: true }, { altKey: true }]) {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: '3', ...options }));
+      }
+    });
+    expect(harness.rate).not.toHaveBeenCalled();
   });
 
   it('unbinds when the card unmounts', async () => {
