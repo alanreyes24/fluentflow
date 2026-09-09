@@ -21,10 +21,25 @@ export interface ParseOptions {
 
 export interface ParsedExamples {
   examples: string[];
+  /**
+   * English translations, one per accepted sentence, in the same order as
+   * `examples`. Present only when the model returned a translation for every
+   * accepted sentence (the Bosnian path — see {@link ExamplePromptInput}).
+   */
+  translations?: string[];
   /** Which strategy produced the result; surfaced in debug builds. */
   strategy: 'json' | 'bracket' | 'quoted' | 'lines' | 'none';
   /** Candidates that were dropped, with the reason. Useful when tuning prompts. */
   rejected: { text: string; reason: string }[];
+}
+
+/**
+ * One extracted sentence before validation. The model may return bare strings
+ * (Spanish) or `{ sentence, translation }` objects (Bosnian); both land here.
+ */
+interface Candidate {
+  text: string;
+  translation?: string;
 }
 
 const DEFAULTS = { max: 3, minWords: 3, maxWords: 20 };
@@ -42,8 +57,9 @@ export function parseExamples(raw: string, options: ParseOptions): ParsedExample
 
   for (const [strategy, candidates] of extractionStrategies(cleaned)) {
     const accepted: string[] = [];
+    const acceptedTranslations: (string | undefined)[] = [];
     for (const candidate of candidates) {
-      const text = tidy(candidate);
+      const text = tidy(candidate.text);
       if (!text) continue;
       const reason = rejectionReason(text, config);
       if (reason) {
@@ -52,11 +68,17 @@ export function parseExamples(raw: string, options: ParseOptions): ParsedExample
       }
       if (!accepted.some((existing) => equivalent(existing, text))) {
         accepted.push(text);
+        acceptedTranslations.push(tidyTranslation(candidate.translation));
       }
       if (accepted.length >= config.max) break;
     }
     if (accepted.length > 0) {
-      return { examples: accepted, strategy, rejected };
+      // Only surface translations when every accepted sentence has one — a
+      // partial set would be worse than none, silently mislabelling a sentence.
+      const translations = acceptedTranslations.every((value): value is string => Boolean(value))
+        ? acceptedTranslations
+        : undefined;
+      return { examples: accepted, ...(translations ? { translations } : {}), strategy, rejected };
     }
   }
 
@@ -64,7 +86,7 @@ export function parseExamples(raw: string, options: ParseOptions): ParsedExample
 }
 
 /** Ordered extraction attempts, cheapest and most reliable first. */
-function extractionStrategies(text: string): [ParsedExamples['strategy'], string[]][] {
+function extractionStrategies(text: string): [ParsedExamples['strategy'], Candidate[]][] {
   return [
     ['json', fromJson(text)],
     ['bracket', fromBracket(text)],
@@ -73,42 +95,61 @@ function extractionStrategies(text: string): [ParsedExamples['strategy'], string
   ];
 }
 
-function fromJson(text: string): string[] {
+/** A JSON array item is either a bare sentence or a `{ sentence, translation }`. */
+function toCandidate(value: unknown): Candidate | null {
+  if (typeof value === 'string') return { text: value };
+  if (value && typeof value === 'object') {
+    const record = value as { sentence?: unknown; translation?: unknown };
+    if (typeof record.sentence === 'string') {
+      return {
+        text: record.sentence,
+        translation: typeof record.translation === 'string' ? record.translation : undefined,
+      };
+    }
+  }
+  return null;
+}
+
+function fromJson(text: string): Candidate[] {
   const trimmed = text.trim();
   if (!trimmed.startsWith('[')) return [];
   try {
     const parsed: unknown = JSON.parse(trimmed);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(toCandidate).filter((c): c is Candidate => c !== null);
   } catch {
     return [];
   }
 }
 
 /** Find the first `[...]` anywhere in the output, repairing a truncated tail. */
-function fromBracket(text: string): string[] {
+function fromBracket(text: string): Candidate[] {
   const start = text.indexOf('[');
   if (start === -1) return [];
   const end = text.indexOf(']', start);
   const slice = end === -1 ? `${text.slice(start)}"]` : text.slice(start, end + 1);
   try {
     const parsed: unknown = JSON.parse(slice);
-    if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === 'string');
+    if (Array.isArray(parsed)) {
+      return parsed.map(toCandidate).filter((c): c is Candidate => c !== null);
+    }
   } catch {
     // Fall through to a looser read of the same slice.
   }
   return fromQuoted(slice);
 }
 
-function fromQuoted(text: string): string[] {
+function fromQuoted(text: string): Candidate[] {
   const matches = text.match(/"([^"\n]{3,})"/g) ?? [];
-  return matches.map((m) => m.slice(1, -1));
+  return matches.map((m) => ({ text: m.slice(1, -1) }));
 }
 
-function fromLines(text: string): string[] {
+function fromLines(text: string): Candidate[] {
   return text
     .split('\n')
     .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((line) => ({ text: line }));
 }
 
 /** Remove markdown fences, chat-template markers and lead-in chatter. */
@@ -131,6 +172,18 @@ function tidy(candidate: string): string {
     .replace(/[\s"'`,[\]]+$/, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/** Trim a translation to a clean single line, or drop it if there is nothing left. */
+function tidyTranslation(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value
+    .replace(/\\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s"'`]+/, '')
+    .replace(/[\s"'`]+$/, '')
+    .trim();
+  return cleaned || undefined;
 }
 
 function rejectionReason(

@@ -58,6 +58,28 @@ describe('StudyScreen examples', () => {
     expect(screen.queryByText('Offline examples')).toBeNull();
   });
 
+  it('shows an English translation under each Bosnian example sentence', async () => {
+    const bsDeck = await repository.createDeck(TEST_USER.id, 'Bosnian', 'bs');
+    await repository.addCard(TEST_USER.id, bsDeck, 'knjiga', 'book');
+    mockSearchParams.current = { deckId: bsDeck.id };
+
+    const examples = serviceReturning(
+      Promise.resolve({
+        examples: ['Čitam zanimljivu knjigu.'],
+        translations: ['I am reading an interesting book.'],
+        source: 'model',
+        durationMs: 10,
+      }),
+    );
+    await renderScreen(<StudyScreen />, { repository, examples });
+
+    await screen.findByText('knjiga');
+    await reveal();
+
+    await screen.findByText('Čitam zanimljivu knjigu.');
+    expect(screen.getByText('I am reading an interesting book.')).toBeTruthy();
+  });
+
   it('labels fallback sentences as offline, rather than passing them off', async () => {
     const examples = serviceReturning(
       Promise.resolve({

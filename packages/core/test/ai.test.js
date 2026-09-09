@@ -42,6 +42,16 @@ test('the prompt is the bare instruction, with no chat template around it', () =
   assert.doesNotMatch(buildPrompt(input), /<\|/);
 });
 
+test('the Bosnian instruction asks for a sentence and an English translation per item', () => {
+  const bs = buildInstruction({ word: 'raditi', language: 'bs' });
+  assert.match(bs, /"sentence"/);
+  assert.match(bs, /"translation"/);
+  assert.match(bs, /English translation/);
+  // The object shape replaces the bare string array for Bosnian only.
+  assert.doesNotMatch(bs, /JSON array of strings/);
+  assert.match(buildInstruction({ word: 'hablar', language: 'es' }), /JSON array of strings/);
+});
+
 const es = { word: 'hablar', language: 'es' };
 
 test('clean JSON output parses directly', () => {
@@ -108,6 +118,52 @@ test('duplicate sentences are collapsed', () => {
   const result = parseExamples(raw, es);
 
   assert.deepEqual(result.examples, ['Ella habla espanol.', 'Hablamos hoy juntos.']);
+});
+
+const bs = { word: 'knjiga', language: 'bs' };
+
+test('Bosnian objects parse into sentences with aligned translations', () => {
+  const raw = JSON.stringify([
+    { sentence: 'Kupio sam novu knjigu.', translation: 'I bought a new book.' },
+    { sentence: 'Ona čita knjigu koju joj je preporučio profesor.', translation: 'She is reading the book her professor recommended to her.' },
+  ]);
+  const result = parseExamples(raw, bs);
+
+  assert.equal(result.strategy, 'json');
+  assert.deepEqual(result.examples, [
+    'Kupio sam novu knjigu.',
+    'Ona čita knjigu koju joj je preporučio profesor.',
+  ]);
+  assert.deepEqual(result.translations, [
+    'I bought a new book.',
+    'She is reading the book her professor recommended to her.',
+  ]);
+});
+
+test('a bare Bosnian string array still parses, with no translations', () => {
+  const result = parseExamples(JSON.stringify(['Kupio sam novu knjigu.']), bs);
+  assert.deepEqual(result.examples, ['Kupio sam novu knjigu.']);
+  assert.equal(result.translations, undefined);
+});
+
+test('a rejected Bosnian sentence takes its translation with it, keeping the rest aligned', () => {
+  const raw = JSON.stringify([
+    { sentence: 'Pas trči po parku.', translation: 'The dog runs in the park.' },
+    { sentence: 'Kupio sam novu knjigu.', translation: 'I bought a new book.' },
+  ]);
+  const result = parseExamples(raw, bs);
+  assert.deepEqual(result.examples, ['Kupio sam novu knjigu.']);
+  assert.deepEqual(result.translations, ['I bought a new book.']);
+});
+
+test('translations are all-or-nothing: one missing translation drops them all', () => {
+  const raw = JSON.stringify([
+    { sentence: 'Kupio sam novu knjigu.', translation: 'I bought a new book.' },
+    { sentence: 'Ona čita knjigu koju joj je preporučio profesor.' },
+  ]);
+  const result = parseExamples(raw, bs);
+  assert.equal(result.examples.length, 2);
+  assert.equal(result.translations, undefined);
 });
 
 test('output with no usable sentence yields nothing rather than junk', () => {

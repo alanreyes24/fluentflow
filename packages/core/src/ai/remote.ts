@@ -1,3 +1,4 @@
+import type { TargetLanguage } from '../types.js';
 import type { InferenceFn, InferenceRequest } from './generate.js';
 
 /**
@@ -44,6 +45,35 @@ export const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta
 
 /** Ask for a JSON array of strings — the shape {@link parseExamples} prefers. */
 export const EXAMPLES_SCHEMA = { type: 'ARRAY', items: { type: 'STRING' } } as const;
+
+/**
+ * Ask for a JSON array of `{ sentence, translation }` objects.
+ *
+ * Used for Bosnian, where each example carries an English translation shown
+ * beneath it in study. {@link parseExamples} accepts this shape as well as the
+ * bare-string one.
+ */
+export const EXAMPLES_WITH_TRANSLATION_SCHEMA = {
+  type: 'ARRAY',
+  items: {
+    type: 'OBJECT',
+    properties: {
+      sentence: { type: 'STRING' },
+      translation: { type: 'STRING' },
+    },
+    required: ['sentence', 'translation'],
+  },
+} as const;
+
+/**
+ * The response schema for a card's example generation, by target language.
+ *
+ * Bosnian sentences are generated with an English translation attached; Spanish
+ * is a bare string array as before.
+ */
+export function examplesSchemaFor(language: TargetLanguage): unknown {
+  return language === 'bs' ? EXAMPLES_WITH_TRANSLATION_SCHEMA : EXAMPLES_SCHEMA;
+}
 
 export interface RemoteInferenceOptions {
   apiKey: string;

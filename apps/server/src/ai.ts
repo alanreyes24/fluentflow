@@ -2,7 +2,7 @@ import {
   createRemoteInference,
   combineModelUsage,
   DEFAULT_REMOTE_MODEL,
-  EXAMPLES_SCHEMA,
+  examplesSchemaFor,
   generateExamples,
   isTargetLanguage,
   resolveMeanings,
@@ -42,6 +42,8 @@ const KEY_URL = 'https://aistudio.google.com/apikey';
 const EXAMPLE_BUDGET_MS = 10_000;
 const TRANSLATION_BUDGET_MS = 30_000;
 const EXAMPLE_MAX_TOKENS = 128;
+/** Bosnian items carry an English translation, so the answer needs more room. */
+const EXAMPLE_MAX_TOKENS_WITH_TRANSLATION = 320;
 
 export function aiStatus({ config }: AiRequest): AiStatus {
   const model = config.geminiModel || DEFAULT_REMOTE_MODEL;
@@ -83,17 +85,18 @@ export function examplesWithAi(
   input: { word: string; meaning?: string; language: string; count?: number },
 ): Promise<GenerateExamplesResult> {
   if (!isTargetLanguage(input.language)) throw new Error('Unsupported target language.');
+  const language = input.language as TargetLanguage;
   return generateExamples(
     {
       word: input.word,
       meaning: input.meaning,
-      language: input.language as TargetLanguage,
+      language,
       count: input.count,
     },
     {
-      infer: remoteInference(config, EXAMPLES_SCHEMA),
+      infer: remoteInference(config, examplesSchemaFor(language)),
       budgetMs: EXAMPLE_BUDGET_MS,
-      maxTokens: EXAMPLE_MAX_TOKENS,
+      maxTokens: language === 'bs' ? EXAMPLE_MAX_TOKENS_WITH_TRANSLATION : EXAMPLE_MAX_TOKENS,
       retryOnParseFailure: false,
     },
   );

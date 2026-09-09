@@ -853,8 +853,13 @@ function ExampleBlock({
         </Pressable>
       </Row>
 
-      {result.examples.map((example) => (
-        <SentenceWords key={example} sentence={example} onWordPress={onWordPress} />
+      {result.examples.map((example, index) => (
+        <SentenceWords
+          key={example}
+          sentence={example}
+          translation={result.translations?.[index]}
+          onWordPress={onWordPress}
+        />
       ))}
 
       {isFallback ? (
@@ -880,9 +885,12 @@ function ExampleBlock({
 
 function SentenceWords({
   sentence,
+  translation,
   onWordPress,
 }: {
   sentence: string;
+  /** English rendering shown beneath the sentence, for Bosnian cards. */
+  translation?: string;
   onWordPress: (word: string, sentence: string) => void;
 }) {
   const theme = useTheme();
@@ -933,6 +941,13 @@ function SentenceWords({
           );
         })}
       </View>
+      {translation ? (
+        // Smaller than the sentence so it reads as a gloss, not a second
+        // sentence; it wraps freely and the card scrolls if it has to.
+        <Label variant="caption" tone="muted" selectable style={styles.sentenceTranslation}>
+          {translation}
+        </Label>
+      ) : null}
     </View>
   );
 }
@@ -1029,6 +1044,7 @@ const styles = StyleSheet.create({
     userSelect: 'none',
   },
   sentenceText: { includeFontPadding: false },
+  sentenceTranslation: { marginTop: 2 },
   wordButton: {
     borderBottomWidth: 1,
     borderRadius: 3,

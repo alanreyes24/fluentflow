@@ -65,6 +65,11 @@ export interface GenerateExamplesDeps {
 
 export interface GenerateExamplesResult {
   examples: string[];
+  /**
+   * English translations aligned with `examples`, when the model returned them
+   * (the Bosnian path). Absent for Spanish and for the written fallback.
+   */
+  translations?: string[];
   source: ExampleSource;
   /** Wall-clock time spent on inference, in milliseconds. */
   durationMs: number;
@@ -114,6 +119,8 @@ export async function generateExamples(
   let lastError = 'no usable output';
   /** The best set of sentences any attempt has produced so far. */
   let best: string[] = [];
+  /** Translations for `best`, kept in step with it. Undefined for Spanish. */
+  let bestTranslations: string[] | undefined;
 
   // Aborting makes the inference promise reject on its own, and that rejection
   // usually wins the race against the deadline's. The flag keeps the reported
@@ -166,11 +173,15 @@ export async function generateExamples(
 
       // `parseExamples` drops duplicates, so this counts distinct sentences —
       // which is what was asked for. Two copies of one sentence is one example.
-      if (parsed.examples.length > best.length) best = parsed.examples;
+      if (parsed.examples.length > best.length) {
+        best = parsed.examples;
+        bestTranslations = parsed.translations;
+      }
 
       if (best.length >= count) {
         return {
           examples: best.slice(0, count),
+          ...(bestTranslations ? { translations: bestTranslations.slice(0, count) } : {}),
           source: 'model',
           durationMs: now() - started,
           attempts,
@@ -200,6 +211,7 @@ export async function generateExamples(
   if (best.length > 0) {
     return {
       examples: best,
+      ...(bestTranslations ? { translations: bestTranslations } : {}),
       source: 'model',
       durationMs: now() - started,
       attempts,

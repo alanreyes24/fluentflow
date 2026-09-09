@@ -131,6 +131,13 @@ const EXAMPLE_BUDGET_MS = 10000;
 const EXAMPLE_MAX_TOKENS = 128;
 
 /**
+ * Bosnian sentences come back paired with an English translation, so each item
+ * is roughly two sentences of text plus the object scaffolding. Give the answer
+ * room to close its JSON rather than be truncated mid-translation.
+ */
+const EXAMPLE_MAX_TOKENS_WITH_TRANSLATION = 320;
+
+/**
  * Write example sentences showing the word in use.
  *
  * A missing API key is not an error and does not throw: core answers with
@@ -150,9 +157,9 @@ async function examples(request, signal) {
   return core.generateExamples(
     { word, meaning, language, count },
     {
-      infer: remoteInference(core, core.EXAMPLES_SCHEMA),
+      infer: remoteInference(core, core.examplesSchemaFor(language)),
       budgetMs: EXAMPLE_BUDGET_MS,
-      maxTokens: EXAMPLE_MAX_TOKENS,
+      maxTokens: language === 'bs' ? EXAMPLE_MAX_TOKENS_WITH_TRANSLATION : EXAMPLE_MAX_TOKENS,
       signal,
       // Off on purpose: given a response schema the model returns usable
       // sentences on the first attempt nearly every time (6/6 when measured),

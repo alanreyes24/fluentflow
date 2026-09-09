@@ -35,10 +35,27 @@ import { generateExamplesOnWeb, webAiAvailable } from './web';
 
 export interface ExampleResult {
   examples: string[];
+  /**
+   * English translations aligned with `examples`. Present for Bosnian cards,
+   * where each sentence is shown with its translation beneath it; absent for
+   * Spanish and for offline fallback sentences.
+   */
+  translations?: string[];
   source: ExampleSource;
   durationMs: number;
   /** Present when the model was tried and did not produce usable output. */
   error?: string;
+}
+
+/**
+ * Languages whose examples are regenerated on every reveal instead of cached.
+ *
+ * Bosnian sentences come paired with an English translation and are meant to
+ * feel fresh each time the card comes round, so they are never written to the
+ * card or the `example_cache` and never served from either.
+ */
+function alwaysFresh(card: Card): boolean {
+  return card.language === 'bs';
 }
 
 /**
@@ -81,7 +98,11 @@ export class ExampleService {
    * @param force   ignore every cache and re-run the model
    */
   async forCard(card: Card, force = false): Promise<ExampleResult> {
-    if (!force && card.examples.length > 0) {
+    // Bosnian is regenerated every reveal, translation and all — the stored
+    // sentences and the word cache are both bypassed.
+    const fresh = force || alwaysFresh(card);
+
+    if (!fresh && card.examples.length > 0) {
       return { examples: card.examples, source: 'cache', durationMs: 0 };
     }
 
@@ -90,7 +111,7 @@ export class ExampleService {
     // A prefetch already working on this word *is* the request being made.
     // Joining it rather than starting a second one is the whole point of having
     // run it early, and it is why the reveal usually returns immediately.
-    if (existing && !force) {
+    if (existing && !fresh) {
       const result = await existing;
       // A speculative run deliberately leaves the card alone (see `generate`).
       // Now that the card is on screen and in the caller's hand, the examples
@@ -105,7 +126,7 @@ export class ExampleService {
     // at this card, and there is one set of threads to decode with.
     this.cancelSpeculation(key);
 
-    return this.track(key, this.generate(card, force));
+    return this.track(key, this.generate(card, fresh));
   }
 
   /**
@@ -132,6 +153,9 @@ export class ExampleService {
     const wanted: Card[] = [];
     for (const card of cards) {
       if (wanted.length >= PREFETCH_DEPTH) break;
+      // Bosnian is regenerated on reveal and never cached, so there is nothing
+      // for a speculative run to leave behind — it would just spend a call.
+      if (alwaysFresh(card)) continue;
       const key = cacheKey(card);
       if (card.examples.length > 0 || this.resolved.has(key)) continue;
       if (this.pending.has(key)) continue;
@@ -243,18 +267,23 @@ export class ExampleService {
       return { examples: [], source: 'fallback', durationMs: result.durationMs };
     }
 
-    // Including a fallback: with no model installed every card falls back, and
-    // re-deciding that on every advance is work for a foregone conclusion.
-    // `reset()` clears this, which is how a newly installed model takes effect.
-    this.resolved.add(key);
+    // Bosnian is deliberately ephemeral: fresh sentences and a fresh
+    // translation on every reveal, written to neither the card nor the cache.
+    if (!alwaysFresh(card)) {
+      // Including a fallback: with no model installed every card falls back, and
+      // re-deciding that on every advance is work for a foregone conclusion.
+      // `reset()` clears this, which is how a newly installed model takes effect.
+      this.resolved.add(key);
 
-    if (result.source === 'model' && result.examples.length > 0) {
-      await this.repository.cacheExamples(card.front, card.language, result.examples, 'model');
-      if (!speculation) await this.attachToCard(card, result.examples);
+      if (result.source === 'model' && result.examples.length > 0) {
+        await this.repository.cacheExamples(card.front, card.language, result.examples, 'model');
+        if (!speculation) await this.attachToCard(card, result.examples);
+      }
     }
 
     return {
       examples: result.examples,
+      ...(result.translations ? { translations: result.translations } : {}),
       source: result.source,
       durationMs: result.durationMs,
       error: result.error,

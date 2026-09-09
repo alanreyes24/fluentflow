@@ -116,4 +116,38 @@ describe('example generation through the desktop shell', () => {
     expect(result.source).toBe('fallback');
     expect(result.examples.length).toBeGreaterThan(0);
   });
+
+  it('regenerates Bosnian on every reveal, translation and all, and stores none of it', async () => {
+    const bsResult: GenerateExamplesResult = {
+      examples: ['Čitam zanimljivu knjigu.', 'Kupila je knjigu na sajmu jer je bila jeftina.'],
+      translations: [
+        'I am reading an interesting book.',
+        'She bought a book at the fair because it was cheap.',
+      ],
+      source: 'model',
+      durationMs: 12,
+      attempts: 1,
+    };
+    const examples = jest.fn().mockResolvedValue({ ok: true, result: bsResult });
+    installBridge(examples);
+
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Bosnian', 'bs');
+    const card = await repository.addCard('u1', deck, 'knjiga', 'book');
+    const service = new ExampleService(repository);
+
+    const first = await service.forCard(card);
+    expect(first.examples).toEqual(bsResult.examples);
+    expect(first.translations).toEqual(bsResult.translations);
+
+    // Never promoted onto the card and never written to the word cache — a
+    // Bosnian reveal is deliberately ephemeral.
+    const [stored] = await repository.listCards(card.deckId);
+    expect(stored!.examples).toEqual([]);
+    expect(await repository.getCachedExamples('knjiga', 'bs')).toBeNull();
+
+    // So the next reveal asks the model again rather than hitting a cache.
+    await service.forCard(stored!);
+    expect(examples).toHaveBeenCalledTimes(2);
+  });
 });

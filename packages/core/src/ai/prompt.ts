@@ -49,6 +49,27 @@ export function buildInstruction(input: ExamplePromptInput): string {
     ' Make each sentence specific and useful for learning, with a clear difference in difficulty between the first and second.' +
     ' Do not make the sentence obscure, artificial, or difficult to understand from context.' +
     ' Prefer a different sentence or construction if the requested phrase would sound unnatural in context.' +
+    outputFormat(input.language)
+  );
+}
+
+/**
+ * How the sentences come back.
+ *
+ * Bosnian carries an English translation of each sentence, shown beneath it in
+ * study so a learner who cannot yet parse the sentence still gets the context
+ * it is there to provide. Spanish stays a bare string array.
+ */
+function outputFormat(language: TargetLanguage): string {
+  if (language === 'bs') {
+    return (
+      ' Format the answer as a JSON array of objects, each with a "sentence" field' +
+      ' holding the Bosnian sentence and a "translation" field holding a natural,' +
+      ' faithful English translation of that exact sentence.' +
+      ' Example: [{"sentence": "...", "translation": "..."}, {"sentence": "...", "translation": "..."}]'
+    );
+  }
+  return (
     ' Format the answer as a JSON array of strings.' +
     ' Example: ["sentence 1", "sentence 2"]'
   );
