@@ -54,6 +54,7 @@ describe('StudyScreen', () => {
 
   afterEach(async () => {
     await context.close();
+    delete (globalThis as Record<string, unknown>).fluentflowDesktop;
   });
 
   it('shows the front alone, and only reveals the back when asked', async () => {
@@ -282,6 +283,46 @@ describe('StudyScreen', () => {
     const stored = await repository.getCard(card!.id);
     expect(stored?.back).toBe('to talk');
     expect(stored?.phase).toBe('new');
+  });
+
+  it('normalizes a conjugated word captured from an example', async () => {
+    const [card] = await seed([['hablar', 'to speak']]);
+    await repository.updateCard(card!, {
+      examples: ['Ellos comieron juntos.'],
+    });
+    (globalThis as Record<string, unknown>).fluentflowDesktop = {
+      platform: 'darwin',
+      ai: {
+        status: async () => ({
+          dictionary: { available: true, languages: { es: true } },
+        }),
+        resolve: async (words: string[]) => ({
+          ok: true,
+          meanings: words.map((word) => word === 'comieron'
+            ? {
+                word,
+                meaning: 'to eat',
+                source: 'dictionary',
+                correctedWord: 'comer',
+                needsReview: false,
+              }
+            : { word, meaning: '', source: 'none', needsReview: false }),
+        }),
+        onProgress: () => () => {},
+      },
+    };
+    await show();
+
+    await screen.findByText('hablar');
+    await reveal();
+    await screen.findByRole('button', { name: 'comieron' });
+    await fireEvent.press(screen.getByRole('button', { name: 'comieron' }));
+
+    await waitFor(async () => {
+      const cards = await repository.listCards(deck.id);
+      expect(cards.some((item) => item.front === 'comer')).toBe(true);
+      expect(cards.some((item) => item.front === 'comieron')).toBe(false);
+    });
   });
 
   it('offers nothing to review when the queue is empty', async () => {

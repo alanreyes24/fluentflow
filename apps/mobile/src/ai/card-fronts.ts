@@ -10,6 +10,11 @@ export interface CardNormalizationSummary {
   meaningsChanged: number;
 }
 
+export interface NormalizedCardsResult {
+  cards: Card[];
+  summary: CardNormalizationSummary;
+}
+
 /** Whether the free dictionary for this deck language is installed. */
 export function dictionaryAvailableFor(
   dictionary: DictionaryStatus,
@@ -39,6 +44,61 @@ export async function normalizeCardFront(
   return normalizedFrontFrom(lookup.meanings[0], trimmed, meaning);
 }
 
+/**
+ * Normalize a batch before it is written by an importer.
+ *
+ * This is deliberately separate from {@link normalizeExistingCards}: Anki and
+ * other importers already have the cards in memory, so they can normalize them
+ * before the first write instead of importing conjugated fronts and repairing
+ * them in a second pass.
+ */
+export async function normalizeCards(cards: Card[]): Promise<NormalizedCardsResult> {
+  const sources = await lookupSources();
+  const normalized = [...cards];
+  let frontsChanged = 0;
+  let meaningsChanged = 0;
+
+  for (const language of ['es', 'bs'] as const) {
+    if (!dictionaryAvailableFor(sources.dictionary, language)) continue;
+    const languageIndexes = cards
+      .map((card, index) => (card.language === language ? index : -1))
+      .filter((index) => index >= 0);
+
+    for (let offset = 0; offset < languageIndexes.length; offset += LOOKUP_BATCH_SIZE) {
+      const indexes = languageIndexes.slice(offset, offset + LOOKUP_BATCH_SIZE);
+      const lookup = await lookUpMeanings(
+        indexes.map((index) => cards[index]!.front),
+        language,
+        undefined,
+        { useModel: false },
+      );
+
+      for (let resultIndex = 0; resultIndex < indexes.length; resultIndex++) {
+        const cardIndex = indexes[resultIndex];
+        if (cardIndex === undefined) continue;
+        const card = cards[cardIndex];
+        const resolved = lookup.meanings[resultIndex];
+        if (!card || !resolved) continue;
+
+        const front = normalizedFrontFrom(resolved, card.front, card.back);
+        const back = shouldReplacePointerMeaning(card.back, resolved)
+          ? resolved.meaning.trim()
+          : card.back;
+        if (front === card.front && back === card.back) continue;
+
+        if (front !== card.front) frontsChanged++;
+        if (back !== card.back) meaningsChanged++;
+        normalized[cardIndex] = touch({ ...card, front, back });
+      }
+    }
+  }
+
+  return {
+    cards: normalized,
+    summary: { scanned: cards.length, frontsChanged, meaningsChanged },
+  };
+}
+
 /** Keep ambiguous noun/adjective forms when their supplied English side is not verbal. */
 export function normalizedFrontFrom(
   resolved: ResolvedMeaning | undefined,
@@ -64,44 +124,13 @@ export async function normalizeExistingCards(
   userId?: string,
 ): Promise<CardNormalizationSummary> {
   const cards = await repository.listAllCards(userId);
-  const sources = await lookupSources();
-  const updates: Card[] = [];
-  let frontsChanged = 0;
-  let meaningsChanged = 0;
-
-  for (const language of ['es', 'bs'] as const) {
-    if (!dictionaryAvailableFor(sources.dictionary, language)) continue;
-    const languageCards = cards.filter((card) => card.language === language);
-
-    for (let offset = 0; offset < languageCards.length; offset += LOOKUP_BATCH_SIZE) {
-      const batch = languageCards.slice(offset, offset + LOOKUP_BATCH_SIZE);
-      const lookup = await lookUpMeanings(
-        batch.map((card) => card.front),
-        language,
-        undefined,
-        { useModel: false },
-      );
-
-      for (let index = 0; index < batch.length; index++) {
-        const card = batch[index];
-        const resolved = lookup.meanings[index];
-        if (!card || !resolved) continue;
-
-        const front = normalizedFrontFrom(resolved, card.front, card.back);
-        const back = shouldReplacePointerMeaning(card.back, resolved)
-          ? resolved.meaning.trim()
-          : card.back;
-        if (front === card.front && back === card.back) continue;
-
-        if (front !== card.front) frontsChanged++;
-        if (back !== card.back) meaningsChanged++;
-        updates.push(touch({ ...card, front, back }));
-      }
-    }
-  }
-
+  const result = await normalizeCards(cards);
+  const updates = result.cards.filter((card, index) => {
+    const original = cards[index];
+    return original && (card.front !== original.front || card.back !== original.back);
+  });
   if (updates.length > 0) await repository.saveCards(updates);
-  return { scanned: cards.length, frontsChanged, meaningsChanged };
+  return result.summary;
 }
 
 function shouldReplacePointerMeaning(back: string, resolved: ResolvedMeaning): boolean {

@@ -165,6 +165,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       userId: user.id,
       cloudEnabled: isCloudEnabled && !user.anonymous,
       onStatus: setSync,
+      onRemoteCardsApplied: async () => {
+        try {
+          const normalized = await normalizeExistingCards(repository, user.id);
+          if (normalized.frontsChanged > 0 || normalized.meaningsChanged > 0) {
+            void engineRef.current?.sync();
+          }
+        } catch (cause) {
+          // A missing or temporarily unavailable dictionary must not break
+          // sync. The launch audit or the next remote change can retry it.
+          console.warn('[fluentflow] synced card-front normalization skipped:', cause);
+        }
+      },
     });
     engineRef.current = engine;
     void engine.start().then(refreshDecks);

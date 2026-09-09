@@ -35,6 +35,16 @@ describe('card-front normalization', () => {
                 needsReview: false,
               };
             }
+            if (language === 'bs' && word === 'molim') {
+              return {
+                word,
+                meaning: 'to pray, to ask',
+                source: 'dictionary',
+                lemma: 'moliti',
+                correctedWord: 'moliti',
+                needsReview: false,
+              };
+            }
             if (language === 'es' && word === 'tablas') {
               return {
                 word,
@@ -60,6 +70,7 @@ describe('card-front normalization', () => {
 
   it('normalizes manual input with the free dictionary', async () => {
     await expect(normalizeCardFront('comieron', 'es')).resolves.toBe('comer');
+    await expect(normalizeCardFront('molim', 'bs')).resolves.toBe('moliti');
     await expect(normalizeCardFront('tablas', 'es', 'boards')).resolves.toBe('tablas');
   });
 

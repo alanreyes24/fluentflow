@@ -13,7 +13,7 @@ import {
   type RatingName,
 } from '@fluentflow/core';
 import { useI18n } from '../../../src/i18n';
-import { normalizeCardFront } from '../../../src/ai/card-fronts';
+import { normalizeCardFront, normalizedFrontFrom } from '../../../src/ai/card-fronts';
 import { useApp } from '../../../src/state/app';
 import type { ExampleResult } from '../../../src/ai/service';
 import { lookUpMeanings, lookupSources } from '../../../src/ai/desktop';
@@ -345,20 +345,24 @@ export default function StudyScreen() {
             lookupSources(),
           ]);
           let meaning = lookup.meanings[0]?.meaning?.trim() ?? '';
+          let normalizedWord = normalizedFrontFrom(lookup.meanings[0], word, meaning);
           if (!meaning && sources.cloud?.available) {
-            meaning = (await lookUpMeanings([word], card.language)).meanings[0]?.meaning?.trim() ?? '';
+            const modelLookup = await lookUpMeanings([word], card.language);
+            const resolved = modelLookup.meanings[0];
+            meaning = resolved?.meaning?.trim() ?? '';
+            normalizedWord = normalizedFrontFrom(resolved, word, meaning);
           }
           if (!meaning) {
             showToast(t('wordMeaningUnavailable'));
             return;
           }
 
-          const existing = await repository.findCardByFront(deck.id, word);
+          const existing = await repository.findCardByFront(deck.id, normalizedWord);
           if (existing) {
             showToast(t('wordAlreadyInDeck'));
             return;
           }
-          await repository.addCard(user.id, deck, word, meaning, [sentence]);
+          await repository.addCard(user.id, deck, normalizedWord, meaning, [sentence]);
           showToast(t('wordAdded', { deck: deck.name }));
           await refreshDecks();
         } catch (cause) {

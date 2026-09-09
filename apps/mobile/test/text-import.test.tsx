@@ -32,6 +32,15 @@ function answer(word: string, useModel?: boolean) {
       needsReview: false,
     };
   }
+  if (word === 'molim') {
+    return {
+      word,
+      correctedWord: 'moliti',
+      meaning: 'I pray',
+      source: 'dictionary',
+      needsReview: false,
+    };
+  }
   if (DICTIONARY[word]) {
     return { word, meaning: DICTIONARY[word], source: 'dictionary', needsReview: false };
   }
@@ -187,6 +196,20 @@ describe('TextImportScreen', () => {
       const [deck] = await repository.listDecks(TEST_USER.id);
       const cards = deck ? await repository.listCards(deck.id) : [];
       expect(cards.map((card) => `${card.front}=${card.back}`)).toEqual(['comer=they ate']);
+    });
+  });
+
+  it('normalizes Bosnian conjugated fronts when the paste already includes meanings', async () => {
+    installBridge();
+    await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
+
+    await paste('molim - I pray');
+    await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));
+
+    await waitFor(async () => {
+      const [deck] = await repository.listDecks(TEST_USER.id);
+      const cards = deck ? await repository.listCards(deck.id) : [];
+      expect(cards.map((card) => `${card.front}=${card.back}`)).toEqual(['moliti=I pray']);
     });
   });
 

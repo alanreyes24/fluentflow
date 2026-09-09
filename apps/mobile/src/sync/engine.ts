@@ -44,6 +44,8 @@ export interface SyncEngineOptions {
   /** False when Firebase is unconfigured or the user is not signed in. */
   cloudEnabled: boolean;
   onStatus: (status: SyncStatus) => void;
+  /** Called after remote cards have been written locally. */
+  onRemoteCardsApplied?: () => Promise<void> | void;
 }
 
 export class SyncEngine {
@@ -51,6 +53,7 @@ export class SyncEngine {
   private readonly userId: string;
   private readonly cloudEnabled: boolean;
   private readonly onStatus: (status: SyncStatus) => void;
+  private readonly onRemoteCardsApplied?: () => Promise<void> | void;
 
   private status: SyncStatus = { state: 'idle', pending: 0, lastSyncedAt: null, error: null };
   private running = false;
@@ -66,6 +69,7 @@ export class SyncEngine {
     this.userId = options.userId;
     this.cloudEnabled = options.cloudEnabled;
     this.onStatus = options.onStatus;
+    this.onRemoteCardsApplied = options.onRemoteCardsApplied;
   }
 
   async start(): Promise<void> {
@@ -174,13 +178,15 @@ export class SyncEngine {
     // skipping a window.
     const meta = await this.repository.getSyncMeta(this.userId);
     const remote = await fetchRemote(this.userId, meta.lastPulledAt);
-    await this.merge(remote);
+    const cardsApplied = await this.merge(remote);
+    if (cardsApplied) await this.onRemoteCardsApplied?.();
   }
 
   private async applyRemoteSnapshot(snapshot: RemoteSnapshot): Promise<void> {
     if (this.disposed) return;
     try {
-      await this.merge(snapshot);
+      const cardsApplied = await this.merge(snapshot);
+      if (cardsApplied) await this.onRemoteCardsApplied?.();
       await this.refreshPendingCount();
       // A snapshot can reveal local records the server has never seen, so nudge
       // a cycle rather than assuming the listener is the whole story.
@@ -194,12 +200,12 @@ export class SyncEngine {
   }
 
   /** Reconcile a remote snapshot against local state and write the winners. */
-  private async merge(remote: RemoteSnapshot): Promise<void> {
+  private async merge(remote: RemoteSnapshot): Promise<boolean> {
     if (
       remote.decks.length === 0 &&
       remote.cards.length === 0 &&
       remote.reviewEvents.length === 0
-    ) return;
+    ) return false;
 
     const [localDecks, localCards, localReviewEvents] = await Promise.all([
       this.repository.listDecks(this.userId),
@@ -219,9 +225,10 @@ export class SyncEngine {
       (event) => !localReviewEventIdsOnRemote.has(event.eventId),
     );
 
+    const cardsApplied = cardPlan.applyLocally.length > 0;
     if (
       deckPlan.applyLocally.length > 0 ||
-      cardPlan.applyLocally.length > 0 ||
+      cardsApplied ||
       reviewEventsToApply.length > 0
     ) {
       await this.repository.applyRemote(
@@ -241,6 +248,7 @@ export class SyncEngine {
     ) {
       this.rerunRequested = true;
     }
+    return cardsApplied;
   }
 
   private async refreshPendingCount(): Promise<void> {

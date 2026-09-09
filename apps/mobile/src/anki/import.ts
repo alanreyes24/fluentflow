@@ -16,6 +16,7 @@ import {
   type TargetLanguage,
 } from '@fluentflow/core';
 import type { Repository } from '../db/repository';
+import { normalizeCards } from '../ai/card-fronts';
 import { desktopBridge } from '../desktop';
 import { authApi } from '../firebase/client';
 import { appConfig } from '../firebase/config';
@@ -103,8 +104,18 @@ export async function importApkg(
   options: ImportOptions,
 ): Promise<ApkgImportResult> {
   const result = await parse(file, options);
-  await repository.importDecks(result.decks, result.cards);
-  return result;
+  let cards = result.cards;
+  try {
+    // Normalize before the import is written so an Anki package cannot seed
+    // the collection with conjugated Spanish or Bosnian verb fronts.
+    cards = (await normalizeCards(result.cards)).cards;
+  } catch (cause) {
+    // Dictionary availability is optional. A lookup outage must not make a
+    // perfectly readable Anki package unusable.
+    console.warn('[fluentflow] Anki card-front normalization skipped:', cause);
+  }
+  await repository.importDecks(result.decks, cards);
+  return { ...result, cards };
 }
 
 /** Whichever of the three hosts can read this collection. */
