@@ -64,11 +64,12 @@ export async function resolveWithAi(
   words: string[],
   language: string,
   useModel: boolean,
+  modelOnly = false,
 ): Promise<{ meanings: ResolvedMeaning[]; usage?: ModelUsage }> {
   if (!isTargetLanguage(language)) throw new Error('Unsupported target language.');
   const usages: ModelUsage[] = [];
   const infer = useModel ? remoteInference(config, undefined, (usage) => usages.push(usage)) : null;
-  const dictionary = dictionaryLookup(language as TargetLanguage);
+  const dictionary = modelOnly ? null : dictionaryLookup(language as TargetLanguage);
   const meanings = await resolveMeanings(words, language as TargetLanguage, {
     dictionary,
     infer,

@@ -1,5 +1,6 @@
 import { createTestRepository } from './fakes/database';
 import { collectionDayKey } from '@fluentflow/core';
+import { Repository } from '../src/db/repository';
 
 /**
  * The repository against a real SQLite database.
@@ -77,6 +78,44 @@ describe('Repository', () => {
     expect(updated.newCardsPerDay).toBe(40);
     expect((await repository.getDeck(deck.id))?.newCardsPerDay).toBe(40);
     expect((await repository.pendingDecks('u1'))[0]?.newCardsPerDay).toBe(40);
+  });
+
+  it('keeps a finished daily queue finished when examples save from an old snapshot', async () => {
+    const { repository, database } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const card = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    await repository.addCard('u1', deck, 'comer', 'to eat');
+    const now = new Date();
+    const learning = await repository.rateCard(card, 'good', now);
+    const graduated = await repository.rateCard(learning, 'good', now);
+    expect(await repository.dueCards(deck.id, now, 200, 1)).toHaveLength(0);
+
+    await repository.updateCard(card, { examples: ['Ella habla español.'] });
+
+    const reloaded = new Repository(database);
+    expect(await reloaded.getCard(card.id)).toMatchObject({
+      phase: graduated.phase,
+      nextReview: graduated.nextReview,
+      dueDay: graduated.dueDay,
+      repetitions: graduated.repetitions,
+      introducedAt: graduated.introducedAt,
+      examples: ['Ella habla español.'],
+    });
+    expect(await reloaded.newCardsIntroducedToday(deck.id, now)).toBe(1);
+    expect(await reloaded.dueCards(deck.id, now, 200, 1)).toHaveLength(0);
+  });
+
+  it('does not undo a review or resurrect a deleted card when a stale edit completes', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const card = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    const reviewed = await repository.rateCard(card, 'easy');
+    await repository.deleteCard(reviewed);
+    await repository.updateCard(card, { back: 'to talk' });
+    const [stored] = await context.database.getAllAsync<{ deleted: number; repetitions: number; back: string }>(
+      'SELECT deleted, repetitions, back FROM cards WHERE id = ?', card.id,
+    );
+    expect(stored).toMatchObject({ deleted: 1, repetitions: 1, back: 'to talk' });
   });
 
   it('persists study presentation settings and card context', async () => {

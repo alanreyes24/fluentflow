@@ -151,6 +151,28 @@ describe('prefetching examples for upcoming cards', () => {
     expect(peakInFlight).toBe(1);
   });
 
+  it('preserves completed reviews when a revealed card finishes generating later', async () => {
+    const [card] = await queueOf('hablar');
+    held.set('hablar', deferred());
+    const generating = service.forCard(card!);
+    await until(() => asked.includes('hablar'), 'generation to start');
+    const learning = await context.repository.rateCard(card!, 'good');
+    const graduated = await context.repository.rateCard(learning, 'good');
+
+    held.get('hablar')!.resolve();
+    await generating;
+
+    expect(await context.repository.getCard(card!.id)).toMatchObject({
+      phase: 'review',
+      nextReview: graduated.nextReview,
+      dueDay: graduated.dueDay,
+      introducedAt: graduated.introducedAt,
+      repetitions: 2,
+      examples: sentencesFor('hablar').examples,
+    });
+    expect(await context.repository.dueCards(card!.deckId)).toHaveLength(0);
+  });
+
   it('stops at three cards ahead rather than generating the whole queue', async () => {
     const queue = await queueOf('uno', 'dos', 'tres', 'cuatro', 'cinco');
     service.prefetch(queue);

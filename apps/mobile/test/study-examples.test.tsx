@@ -142,9 +142,47 @@ describe('StudyScreen examples', () => {
     await screen.findByText('hablar');
     await reveal();
     await screen.findByText('Yo hablo español.');
-    await fireEvent.press(screen.getByRole('button', { name: 'Regenerate' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Regenerate examples' }));
 
     await screen.findByText('Yo estudio español.');
     expect(generate.mock.calls[1]?.[1]).toBe(true);
+  });
+
+  it('regenerates and saves a definition when pressed', async () => {
+    const resolve = jest.fn(async () => ({
+      ok: true as const,
+      meanings: [{
+        word: 'prudente',
+        meaning: 'prudent, sensible',
+        source: 'model' as const,
+        needsReview: true,
+      }],
+    }));
+    (globalThis as Record<string, unknown>).fluentflowDesktop = {
+      ai: {
+        status: jest.fn(async () => ({
+          dictionary: { available: false },
+          cloud: { available: true, configured: true },
+        })),
+        resolve,
+        onProgress: () => () => {},
+      },
+    };
+    await repository.updateCard(card, { front: 'prudente', back: 'wise, discreet, judicious' });
+
+    await renderScreen(<StudyScreen />, { repository });
+    await screen.findByText('prudente');
+    await reveal();
+
+    await screen.findByText('wise, discreet, judicious');
+    await fireEvent.press(screen.getByRole('button', { name: 'Regenerate definition' }));
+
+    await screen.findByText('prudent, sensible');
+    expect(resolve).toHaveBeenCalledWith(
+      ['prudente'],
+      'es',
+      { useModel: true, modelOnly: true },
+    );
+    expect((await repository.getCard(card.id))?.back).toBe('prudent, sensible');
   });
 });

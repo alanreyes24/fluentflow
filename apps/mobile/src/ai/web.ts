@@ -31,7 +31,12 @@ export async function resolveMeaningsOnWeb(
 ): Promise<MeaningLookupResult> {
   const body = await request('/api/ai/resolve', {
     method: 'POST',
-    body: JSON.stringify({ words, language, useModel: options?.useModel !== false }),
+    body: JSON.stringify({
+      words,
+      language,
+      useModel: options?.useModel !== false,
+      modelOnly: options?.modelOnly === true,
+    }),
   });
   return { meanings: body.meanings, usage: body.usage };
 }

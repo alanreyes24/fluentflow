@@ -80,6 +80,8 @@ export interface LookupOptions {
    * press rather than a side effect of asking for meanings at all.
    */
   useModel?: boolean;
+  /** Skip the dictionary and ask the hosted model for a fresh answer. */
+  modelOnly?: boolean;
 }
 
 export interface TranslationProgress {

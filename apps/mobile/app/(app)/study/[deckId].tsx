@@ -72,6 +72,7 @@ export default function StudyScreen() {
   const [revealed, setRevealed] = useState(false);
   const [examples, setExamples] = useState<ExampleResult | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [regeneratingDefinition, setRegeneratingDefinition] = useState(false);
   const [reviewed, setReviewed] = useState(0);
   const [lapses, setLapses] = useState(0);
   const [undoState, setUndoState] = useState<UndoState | null>(null);
@@ -329,6 +330,38 @@ export default function StudyScreen() {
       .finally(() => setGenerating(false));
   }, [card, exampleService, examples, generating, showToast, t]);
 
+  const regenerateDefinition = useCallback(async () => {
+    if (!repository || !card || regeneratingDefinition) return;
+    setRegeneratingDefinition(true);
+    try {
+      // Deliberately skip the dictionary: this action exists for a learner who
+      // thinks the stored gloss is wrong and wants a fresh model answer.
+      const lookup = await lookUpMeanings(
+        [card.front],
+        card.language,
+        undefined,
+        { useModel: true, modelOnly: true },
+      );
+      const resolved = lookup.meanings[0];
+      if (!resolved || resolved.source !== 'model' || !resolved.meaning.trim()) {
+        throw new Error('The model returned no definition.');
+      }
+      const meaning = resolved.meaning.trim();
+
+      // The learner can rate the card while this request is running. Reload it
+      // before writing so a definition update cannot restore an old schedule.
+      const latest = await repository.getCard(card.id);
+      if (!latest) throw new Error('The card is no longer available.');
+      const updated = await repository.updateCard(latest, { back: meaning });
+      setQueue((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      await refreshDecks();
+    } catch {
+      showToast(t('regenerateDefinitionFailed'));
+    } finally {
+      setRegeneratingDefinition(false);
+    }
+  }, [card, regeneratingDefinition, refreshDecks, repository, showToast, t]);
+
   const captureWord = useCallback(
     (word: string, sentence: string) => {
       if (!card || !deck || !repository || !user) return;
@@ -394,22 +427,22 @@ export default function StudyScreen() {
   }
 
   return (
-    <Screen>
+    <Screen style={styles.studyScreen}>
+      {revealed && !editing ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('studyOptions')}
+          accessibilityState={{ expanded: toolsOpen }}
+          onPress={() => setToolsOpen((open) => !open)}
+          style={[styles.gearButton, styles.screenGear]}
+        >
+          <Label variant="body" align="center" style={styles.gearIcon}>
+            ⚙
+          </Label>
+        </Pressable>
+      ) : null}
       <View style={[styles.stage, wide ? styles.stageWide : null]}>
         <View style={styles.studyHeader}>
-          {revealed && !editing ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('studyOptions')}
-              accessibilityState={{ expanded: toolsOpen }}
-              onPress={() => setToolsOpen((open) => !open)}
-              style={[styles.gearButton, styles.headerGear]}
-            >
-              <Label variant="body" align="center" style={styles.gearIcon}>
-                ⚙
-              </Label>
-            </Pressable>
-          ) : null}
           <StudyQueueCounts
             compact
             counts={remainingCounts}
@@ -470,17 +503,35 @@ export default function StudyScreen() {
               label={revealed ? (deck?.reverseCards ? card.front : card.back) : t('showAnswer')}
             >
               <Surface raised elevation="lg" style={[styles.card, { borderRadius: theme.radius.lg }]}>
-                <ScrollView contentContainerStyle={styles.cardContent}>
-                  <Label variant="cardFront" align="center" selectable>
-                    {deck?.reverseCards ? card.back : card.front}
-                  </Label>
+                <View style={styles.cardContent}>
+                  {deck?.reverseCards ? (
+                    <DefinitionBlock
+                      value={card.back}
+                      showAction={revealed}
+                      generating={regeneratingDefinition}
+                      onRegenerate={regenerateDefinition}
+                    />
+                  ) : (
+                    <Label variant="cardFront" align="center" selectable>
+                      {card.front}
+                    </Label>
+                  )}
 
                   {revealed ? (
                     <>
                       <Divider style={styles.divider} />
-                      <Label variant="cardBack" align="center" tone="muted" selectable>
-                        {deck?.reverseCards ? card.front : card.back}
-                      </Label>
+                      {deck?.reverseCards ? (
+                        <Label variant="cardBack" align="center" tone="muted" selectable>
+                          {card.front}
+                        </Label>
+                      ) : (
+                        <DefinitionBlock
+                          value={card.back}
+                          showAction
+                          generating={regeneratingDefinition}
+                          onRegenerate={regenerateDefinition}
+                        />
+                      )}
 
                       <Spacer size={theme.spacing.lg} />
                       {deck?.showExamples !== false ? (
@@ -506,7 +557,7 @@ export default function StudyScreen() {
                       </Label>
                     </>
                   )}
-                </ScrollView>
+                </View>
               </Surface>
             </CardShell>
           </Animated.View>
@@ -669,6 +720,42 @@ function ContextList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
+function DefinitionBlock({
+  value,
+  showAction,
+  generating,
+  onRegenerate,
+}: {
+  value: string;
+  showAction: boolean;
+  generating: boolean;
+  onRegenerate: () => void;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <View style={styles.definitionBlock}>
+      <Label variant="cardBack" align="center" tone="muted" selectable>
+        {value}
+      </Label>
+      {showAction ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('regenerateDefinition')}
+          accessibilityState={{ disabled: generating, busy: generating }}
+          disabled={generating}
+          onPress={onRegenerate}
+          hitSlop={8}
+        >
+          <Label variant="caption" tone="accent">
+            {generating ? t('generatingDefinition') : t('regenerate')}
+          </Label>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 /**
  * The generated examples.
  *
@@ -706,7 +793,7 @@ function ExampleBlock({
         </Label>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t('regenerate')}
+          accessibilityLabel={t('regenerateExamples')}
           onPress={onRegenerate}
           hitSlop={8}
         >
@@ -825,6 +912,7 @@ interface UndoState {
 const styles = StyleSheet.create({
   ratingInterval: { marginTop: 4 },
   flex: { flex: 1 },
+  studyScreen: { position: 'relative' },
   stage: { flex: 1 },
   stageWide: {
     width: '100%',
@@ -832,17 +920,12 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingVertical: 8,
   },
-  studyHeader: {
-    position: 'relative',
-    paddingLeft: 16,
-    paddingRight: 72,
-    paddingTop: 8,
-  },
-  headerGear: { position: 'absolute', top: 8, right: 16, zIndex: 1 },
+  studyHeader: { paddingHorizontal: 16, paddingTop: 8 },
   progressRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginTop: 8,
     paddingVertical: 8,
   },
   cardWrap: { flex: 1, paddingHorizontal: 16 },
@@ -853,6 +936,7 @@ const styles = StyleSheet.create({
   card: { flex: 1, justifyContent: 'center', padding: 24 },
   cardContent: { flexGrow: 1, justifyContent: 'center' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 24 },
+  definitionBlock: { alignItems: 'center', gap: 8 },
   examples: { gap: 8 },
   contextBlock: { gap: 4, marginTop: 12 },
   contextLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
@@ -860,7 +944,14 @@ const styles = StyleSheet.create({
   example: {},
   sentenceWrap: { position: 'relative' },
   sentenceFullText: { position: 'absolute', opacity: 0, height: 0, width: 0 },
-  sentence: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center' },
+  // The visible token layer is for word actions, not text selection. The
+  // hidden full sentence above remains the copyable/accessibility surface.
+  sentence: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    userSelect: 'none',
+  },
   sentenceText: { includeFontPadding: false },
   wordButton: {
     borderBottomWidth: 1,
@@ -878,6 +969,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  screenGear: { position: 'absolute', top: 0, right: 0, zIndex: 1 },
   gearIcon: { fontSize: 22 },
   toastBubble: {
     borderRadius: 999,

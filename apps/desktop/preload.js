@@ -60,7 +60,12 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
      * @returns `{ ok: true, meanings, usage? }` or `{ ok: false, error }`
      */
     resolve: (words, language, options) =>
-      ipcRenderer.invoke('ai:resolve', { words, language, useModel: options?.useModel }),
+      ipcRenderer.invoke('ai:resolve', {
+        words,
+        language,
+        useModel: options?.useModel,
+        modelOnly: options?.modelOnly,
+      }),
 
     /**
      * Write example sentences showing a word in use, for a card reveal.

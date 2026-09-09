@@ -275,8 +275,29 @@ export class Repository {
   }
 
   async updateCard(card: Card, changes: Partial<Card>): Promise<Card> {
-    const updated = touch({ ...card, ...changes });
-    await this.saveCards([updated]);
+    // Async example generation and editors can hold a pre-review snapshot.
+    // Patch only the requested columns in one statement: writing that snapshot
+    // back would reset the schedule and the day's new-card allowance.
+    const patch = touch({ ...card, ...changes });
+    const columns = CARD_UPDATE_COLUMNS.filter((key) =>
+      key === 'lastModified' || key === 'syncStatus' || Object.prototype.hasOwnProperty.call(changes, key),
+    );
+    await this.db.runAsync(
+      `UPDATE cards SET ${columns.map((key) => `${key} = ?`).join(', ')} WHERE id = ?`,
+      ...columns.map((key) => {
+        const value = patch[key];
+        if (key === 'examples' || key === 'grammarNotes' || key === 'relatedWords') {
+          return JSON.stringify(value ?? []);
+        }
+        if (key === 'leech' || key === 'suspended' || key === 'deleted') return value ? 1 : 0;
+        if (Array.isArray(value)) return JSON.stringify(value);
+        if (typeof value === 'boolean') return value ? 1 : 0;
+        return value ?? null;
+      }),
+      card.id,
+    );
+    const updated = await this.getCard(card.id);
+    if (!updated) throw new Error(`Card ${card.id} no longer exists`);
     return updated;
   }
 
@@ -868,6 +889,14 @@ export class Repository {
 }
 
 // --- row mapping -----------------------------------------------------------
+
+/** Fixed SQL identifiers; callers can only patch known card columns. */
+const CARD_UPDATE_COLUMNS = [
+  'deckId', 'userId', 'front', 'back', 'language', 'examples', 'grammarNotes',
+  'relatedWords', 'interval', 'easeFactor', 'repetitions', 'phase', 'lapses',
+  'learningStep', 'leech', 'introducedAt', 'dueDay', 'buriedUntil', 'suspended',
+  'nextReview', 'status', 'lastModified', 'syncStatus', 'deleted',
+] as const satisfies readonly (keyof Card)[];
 
 interface DeckRow {
   id: string;

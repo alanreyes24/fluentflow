@@ -91,13 +91,14 @@ function remoteInference(core, responseSchema, onUsage) {
  * @param language  'es' or 'bs'
  * @param onProgress called as words are resolved, for the progress bar
  * @param useModel  false to answer from the dictionary alone and bill nothing
+ * @param modelOnly skip the dictionary and ask the hosted model for a fresh answer
  * @returns meanings plus measured Gemini usage when the model was called
  */
-async function resolve(words, language, onProgress, useModel = true) {
+async function resolve(words, language, onProgress, useModel = true, modelOnly = false) {
   const core = await import('@fluentflow/core');
   const usages = [];
 
-  const lookup = dictionary.status().languages[language]
+  const lookup = !modelOnly && dictionary.status().languages[language]
     ? (word) => dictionary.lookup(language, word)
     : null;
 

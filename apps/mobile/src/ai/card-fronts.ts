@@ -129,7 +129,9 @@ export async function normalizeExistingCards(
     const original = cards[index];
     return original && (card.front !== original.front || card.back !== original.back);
   });
-  if (updates.length > 0) await repository.saveCards(updates);
+  for (const card of updates) {
+    await repository.updateCard(card, { front: card.front, back: card.back });
+  }
   return result.summary;
 }
 

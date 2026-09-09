@@ -57,7 +57,12 @@ export function createApp({ config, store }: AppDeps): express.Express {
 
   app.post('/api/ai/resolve', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
-      const body = req.body as { words?: unknown; language?: unknown; useModel?: unknown };
+      const body = req.body as {
+        words?: unknown;
+        language?: unknown;
+        useModel?: unknown;
+        modelOnly?: unknown;
+      };
       if (!Array.isArray(body.words) || body.words.some((word) => typeof word !== 'string')) {
         res.status(400).json({ error: 'invalid_request', message: 'words must be an array of strings.' });
         return;
@@ -71,6 +76,7 @@ export function createApp({ config, store }: AppDeps): express.Express {
         body.words as string[],
         body.language,
         body.useModel !== false,
+        body.modelOnly === true,
       );
       res.json(result);
     } catch (error) {
