@@ -121,6 +121,19 @@ test('word matching tolerates inflection in Spanish and Bosnian', () => {
   assert.ok(!containsWord('El perro corre.', 'hablar'));
 });
 
+test('phrase matching tolerates inflection and the natural Spanish preposition variant', () => {
+  assert.ok(
+    containsWord('Entró por la fuerza en la casa cuando nadie miraba.', 'entrar a la fuerza en'),
+  );
+  assert.ok(
+    parseExamples(
+      JSON.stringify(['Entró por la fuerza en la casa cuando nadie miraba.']),
+      { word: 'entrar a la fuerza en', language: 'es' },
+    ).examples.length > 0,
+  );
+  assert.ok(!containsWord('La fuerza de la ley prevaleció.', 'entrar a la fuerza en'));
+});
+
 test('the fallback produces grammatical carrier sentences in the target language', () => {
   const spanish = fallbackExamples({ word: 'hablar', meaning: 'to speak', language: 'es' });
   assert.equal(spanish.length, 2);

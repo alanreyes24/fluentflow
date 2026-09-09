@@ -164,9 +164,42 @@ export function containsWord(sentence: string, word: string): boolean {
   if (!needle) return false;
   if (haystack.includes(needle)) return true;
 
-  const stem = stemOf(needle);
-  if (stem.length < 3) return false;
-  return haystack.split(/[^a-z0-9]+/).some((token) => token.startsWith(stem));
+  const sentenceTokens = haystack.split(/[^a-z0-9]+/).filter(Boolean);
+  const targetTokens = needle.split(/[^a-z0-9]+/).filter(Boolean);
+
+  // A phrase needs phrase matching, not a stem of the entire string. The old
+  // code turned `entrar a la fuerza en` into `entrar a la fue`, which can never
+  // match a sentence token. This also handles the natural Spanish variant
+  // `entró por la fuerza en ...` that the prompt explicitly asks Gemini to use.
+  if (targetTokens.length > 1) {
+    return sentenceTokens.some((_, start) => matchesPhraseAt(sentenceTokens, targetTokens, start));
+  }
+
+  return sentenceTokens.some((token) => tokenMatches(token, targetTokens[0] ?? ''));
+}
+
+function matchesPhraseAt(sentenceTokens: string[], targetTokens: string[], start: number): boolean {
+  if (start + targetTokens.length > sentenceTokens.length) return false;
+
+  return targetTokens.every((target, offset) => {
+    const actual = sentenceTokens[start + offset];
+    return actual !== undefined && (tokenMatches(actual, target) || connectorVariant(actual, target));
+  });
+}
+
+function tokenMatches(actual: string, target: string): boolean {
+  if (actual === target) return true;
+
+  // Spanish infinitives often surface as a conjugated form: `entrar` ->
+  // `entró`, `hablar` -> `hablamos`. Keep this deliberately conservative for
+  // ordinary single-word matching while allowing the phrase case to use it.
+  const stem = /(?:ar|er|ir)$/.test(target) ? target.slice(0, -2) : stemOf(target);
+  return stem.length >= 3 && actual.startsWith(stem);
+}
+
+/** Common Spanish collocation alternation: `entrar a la fuerza` / `entrar por la fuerza`. */
+function connectorVariant(actual: string, target: string): boolean {
+  return (target === 'a' && actual === 'por') || (target === 'por' && actual === 'a');
 }
 
 function stemOf(word: string): string {
