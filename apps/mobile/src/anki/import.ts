@@ -13,6 +13,7 @@ import {
   type AnkiDatabase,
   type AnkiRow,
   type ApkgImportResult,
+  type Card,
   type TargetLanguage,
 } from '@fluentflow/core';
 import type { Repository } from '../db/repository';
@@ -114,8 +115,86 @@ export async function importApkg(
     // perfectly readable Anki package unusable.
     console.warn('[fluentflow] Anki card-front normalization skipped:', cause);
   }
+
+  const existingCards = await repository.listAllCards(options.userId);
+  const deduplicated = deduplicateImportedCards(result.cards, cards, existingCards);
+  cards = deduplicated.cards;
+
+  const warnings = [...result.summary.warnings];
+  if (deduplicated.duplicates > 0) {
+    warnings.push(
+      `${deduplicated.duplicates} card(s) skipped because their normalized front duplicates another imported or existing card.`,
+    );
+  }
   await repository.importDecks(result.decks, cards);
-  return { ...result, cards };
+  // `importDecks` derives counts from the imported slice. Recalculate from
+  // SQLite after dropping collisions so re-importing into an existing deck
+  // does not make its count reflect only the newly accepted cards.
+  await Promise.all(result.decks.map((deck) => repository.refreshDeckCount(deck.id)));
+  return {
+    ...result,
+    cards,
+    summary: {
+      ...result.summary,
+      cardsImported: cards.length,
+      cardsSkipped: result.summary.cardsSkipped + deduplicated.duplicates,
+      warnings,
+    },
+  };
+}
+
+/**
+ * Keep one live card per deck/front during an Anki import. An import can carry
+ * both an infinitive and one of its conjugations, and an existing collection
+ * may already contain the infinitive under a different card id. SQLite only
+ * upserts by id, so front collisions have to be resolved before the write.
+ */
+function deduplicateImportedCards(
+  originalCards: Card[],
+  normalizedCards: Card[],
+  existingCards: Card[],
+): { cards: Card[]; duplicates: number } {
+  const existingByFront = new Map<string, string>();
+  for (const card of existingCards) {
+    existingByFront.set(frontKey(card.deckId, card.front), card.id);
+  }
+
+  const winners = new Map<string, { card: Card; originalFront: string }>();
+  let duplicates = 0;
+
+  for (const [index, card] of normalizedCards.entries()) {
+    const original = originalCards[index];
+    if (!original) continue;
+
+    const key = frontKey(card.deckId, card.front);
+    const existingId = existingByFront.get(key);
+    if (existingId && existingId !== card.id) {
+      duplicates++;
+      continue;
+    }
+
+    const current = winners.get(key);
+    if (!current) {
+      winners.set(key, { card, originalFront: original.front });
+      continue;
+    }
+
+    // If a corrected conjugation collides with an unchanged infinitive, keep
+    // the source spelling. This mirrors the text-import correction policy.
+    const currentWasCorrected = frontKey(card.deckId, current.card.front)
+      !== frontKey(card.deckId, current.originalFront);
+    const candidateWasCorrected = key !== frontKey(card.deckId, original.front);
+    if (currentWasCorrected && !candidateWasCorrected) {
+      winners.set(key, { card, originalFront: original.front });
+    }
+    duplicates++;
+  }
+
+  return { cards: [...winners.values()].map(({ card }) => card), duplicates };
+}
+
+function frontKey(deckId: string, front: string): string {
+  return `${deckId}\u001f${front.trim().toLowerCase()}`;
 }
 
 /** Whichever of the three hosts can read this collection. */
@@ -222,7 +301,10 @@ async function importViaServer(
     );
   }
 
-  const params = new URLSearchParams({ filename });
+  // The client normalizes and deduplicates before writing its local source of
+  // truth. A dry run prevents the server from storing the raw package first;
+  // otherwise a skipped duplicate could arrive back through sync later.
+  const params = new URLSearchParams({ filename, dryRun: 'true' });
   if (options.language) params.set('language', options.language);
   if (options.flatten) params.set('flatten', 'true');
 

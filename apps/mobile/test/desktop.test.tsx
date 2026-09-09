@@ -147,6 +147,113 @@ describe('importing through the shell', () => {
     expect(await repository.listCards(stored[0]!.id)).toHaveLength(2);
   });
 
+  it('deduplicates cards whose fronts converge during normalization', async () => {
+    const conjugated = createCard({
+      userId: TEST_USER.id,
+      deckId: decks[0]!.id,
+      front: 'comieron',
+      back: 'they ate',
+      language: 'es',
+    });
+    const bridge = fakeBridge({
+      importApkg: jest.fn(async () => ({
+        ok: true as const,
+        decks,
+        cards: [cards[1]!, conjugated],
+        summary: summaryFor(2),
+      })),
+    });
+    installBridge(bridge);
+    (globalThis as Record<string, unknown>).fluentflowDesktop = {
+      ...bridge,
+      ai: {
+        status: jest.fn(async () => ({
+          dictionary: { available: true, languages: { es: true } },
+        })),
+        resolve: jest.fn(async (words: string[]) => ({
+          ok: true,
+          meanings: words.map((word) => word === 'comieron'
+            ? {
+                word,
+                meaning: 'they ate',
+                source: 'dictionary',
+                correctedWord: 'comer',
+                needsReview: false,
+              }
+            : { word, meaning: 'to eat', source: 'dictionary', needsReview: false }),
+        })),
+        onProgress: () => () => {},
+      },
+    };
+
+    const result = await importApkg(
+      { name: 'Spanish.apkg', uri: 'C:\\decks\\Spanish.apkg' },
+      repository,
+      { userId: TEST_USER.id, language: 'es' },
+    );
+
+    const stored = await repository.listCards(decks[0]!.id);
+    expect(stored.map((card) => card.front)).toEqual(['comer']);
+    expect(result.summary.cardsImported).toBe(1);
+    expect(result.summary.cardsSkipped).toBe(1);
+    expect(result.summary.warnings).toContain(
+      '1 card(s) skipped because their normalized front duplicates another imported or existing card.',
+    );
+  });
+
+  it('keeps an existing card when an imported normalized front collides with it', async () => {
+    await repository.importDecks(
+      [{ ...decks[0]!, cardCount: 1 }],
+      [cards[1]!],
+    );
+    const conjugated = createCard({
+      userId: TEST_USER.id,
+      deckId: decks[0]!.id,
+      front: 'comieron',
+      back: 'they ate',
+      language: 'es',
+    });
+    const bridge = fakeBridge({
+      importApkg: jest.fn(async () => ({
+        ok: true as const,
+        decks,
+        cards: [conjugated],
+        summary: summaryFor(1),
+      })),
+    });
+    installBridge(bridge);
+    (globalThis as Record<string, unknown>).fluentflowDesktop = {
+      ...bridge,
+      ai: {
+        status: jest.fn(async () => ({
+          dictionary: { available: true, languages: { es: true } },
+        })),
+        resolve: jest.fn(async () => ({
+          ok: true,
+          meanings: [{
+            word: 'comieron',
+            meaning: 'they ate',
+            source: 'dictionary',
+            correctedWord: 'comer',
+            needsReview: false,
+          }],
+        })),
+        onProgress: () => () => {},
+      },
+    };
+
+    const result = await importApkg(
+      { name: 'Spanish.apkg', uri: 'C:\\decks\\Spanish.apkg' },
+      repository,
+      { userId: TEST_USER.id, language: 'es' },
+    );
+
+    expect(await repository.listCards(decks[0]!.id)).toEqual([cards[1]]);
+    expect((await repository.getDeck(decks[0]!.id))?.cardCount).toBe(1);
+    expect(result.summary.cardsImported).toBe(0);
+    expect(result.summary.cardsSkipped).toBe(1);
+  });
+
   it('surfaces the shell message rather than an IPC wrapper', async () => {
     installBridge(
       fakeBridge({
