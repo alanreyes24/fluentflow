@@ -4,7 +4,7 @@
  * Where the window was, and what it looked like, last time.
  *
  * A desktop app that reopens at 1100×800 in the middle of the screen every
- * launch is the clearest tell that something is a wrapped web page. Four things
+ * launch is the clearest tell that something is a wrapped web page. Five things
  * are remembered here, and each has a failure mode worth naming:
  *
  *  - **Bounds.** Restored only if they still land on a display that exists. A
@@ -12,6 +12,10 @@
  *    x=2400, off every screen, with no way to drag it back.
  *  - **Maximised.** Stored separately from the bounds, so un-maximising returns
  *    the window to the size it had before rather than to the screen's.
+ *  - **Full-screen.** Restored on Windows/Linux, but deliberately not on macOS.
+ *    macOS Split View is implemented as a native full-screen space and Electron
+ *    reports it through the same `isFullScreen()` flag. Replaying that transient
+ *    flag while the window is hidden can crash during the Split View handoff.
  *  - **Zoom.** Applied as a `zoomFactor` before the first paint rather than set
  *    after load, so the app does not visibly re-lay-out on every launch.
  *  - **Theme.** Not the app's setting — a copy of what the app last rendered, so
@@ -151,7 +155,9 @@ function restore() {
   return {
     bounds: usable,
     maximized: stored.maximized === true,
-    fullScreen: stored.fullScreen === true,
+    // Split View uses macOS's full-screen machinery. It is owned by the
+    // window manager for the current session, so never replay it at launch.
+    fullScreen: process.platform !== 'darwin' && stored.fullScreen === true,
     // Chromium's own conversion between the two scales: `BrowserWindow` takes a
     // factor, `webContents` reports a level.
     zoomFactor: Math.pow(ZOOM_STEP, zoomLevel),
@@ -169,7 +175,9 @@ function track(window) {
     const patch = {
       bounds: window.getNormalBounds(),
       maximized: window.isMaximized(),
-      fullScreen: window.isFullScreen(),
+      // On macOS, `isFullScreen()` also becomes true for Split View. Do not
+      // persist that transient window-manager state for the next launch.
+      fullScreen: process.platform !== 'darwin' && window.isFullScreen(),
     };
     // The menu's zoom roles change the level without emitting `zoom-changed`,
     // which only covers the mouse wheel — so read it here too.

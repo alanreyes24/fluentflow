@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { collectionDayKey, type Card, type Deck } from '@fluentflow/core';
 import StudyScreen from '../app/(app)/study/[deckId]';
 import { ExampleService } from '../src/ai/service';
@@ -54,6 +55,7 @@ describe('StudyScreen', () => {
 
   afterEach(async () => {
     await context.close();
+    await AsyncStorage.removeItem('fluentflow.studySession');
     delete (globalThis as Record<string, unknown>).fluentflowDesktop;
   });
 
@@ -87,6 +89,10 @@ describe('StudyScreen', () => {
     expect(screen.getByRole('button', { name: 'Star card' })).toBeTruthy();
     expect((await repository.getCard(first!.id))?.starred).toBe(true);
     await view.unmount();
+    // This assertion starts a deliberately new session. Resume behavior is
+    // covered below; ordinary entry from a deck should still be able to start
+    // from the current queue rather than a session the user explicitly left.
+    await AsyncStorage.removeItem('fluentflow.studySession');
     // Make the reviewed card due so reopening selects it again.
     await repository.updateCard(first!, { nextReview: new Date(Date.now() - 1000).toISOString() });
     await show();
@@ -94,6 +100,19 @@ describe('StudyScreen', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Unstar card' }));
     await screen.findByRole('button', { name: 'Star card' });
     expect((await repository.getCard(first!.id))?.starred).toBe(false);
+  });
+
+  it('resumes the current card after the study screen is reopened', async () => {
+    await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
+    const view = await show();
+    await screen.findByText('hablar');
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+    await screen.findByText('comer');
+    await view.unmount();
+
+    await show();
+    await screen.findByText('comer');
   });
 
   it('starts no more than the deck limit of untouched new cards', async () => {

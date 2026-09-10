@@ -333,7 +333,7 @@ export default function DeckScreen() {
                   setDuplicateCardId(null);
                 }}
                 error={duplicateCardId === 'new' ? t('duplicateCardHint') : undefined}
-                onCreate={async (front, back, grammarNotes, relatedWords) => {
+                onCreate={async (front, back, grammarNotes, relatedWords, tags) => {
                   if (!repository || !user) return false;
                   const normalizedFront = await normalizeCardFront(front, deck.language, back);
                   if (await repository.findCardByFront(deck.id, normalizedFront)) {
@@ -348,6 +348,7 @@ export default function DeckScreen() {
                     [],
                     grammarNotes,
                     relatedWords,
+                    tags,
                   );
                   await load();
                   await refreshDecks();
@@ -411,9 +412,10 @@ export default function DeckScreen() {
               initialBack={item.back}
               initialGrammarNotes={item.grammarNotes ?? []}
               initialRelatedWords={item.relatedWords ?? []}
+              initialTags={item.tags ?? []}
               onCancel={() => setEditingCardId(null)}
               error={duplicateCardId === item.id ? t('duplicateCardHint') : undefined}
-              onCreate={async (front, back, grammarNotes, relatedWords) => {
+              onCreate={async (front, back, grammarNotes, relatedWords, tags) => {
                 if (!repository) return false;
                 const normalizedFront = await normalizeCardFront(front, deck.language, back);
                 const duplicate = await repository.findCardByFront(deck.id, normalizedFront);
@@ -426,6 +428,7 @@ export default function DeckScreen() {
                   back,
                   grammarNotes,
                   relatedWords,
+                  tags,
                 });
                 setDuplicateCardId(null);
                 setEditingCardId(null);

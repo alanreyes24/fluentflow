@@ -196,6 +196,11 @@ const migrations: Migration[] = [
   async (db) => {
     await db.execAsync("ALTER TABLE cards ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;");
   },
+  // 13 — learner-managed labels for search and bulk organization.
+  async (db) => {
+    await db.execAsync("ALTER TABLE cards ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';");
+    await db.execAsync('CREATE INDEX idx_cards_user_live ON cards (userId, deleted);');
+  },
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

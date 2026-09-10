@@ -19,14 +19,22 @@ export function CardForm({
   initialBack = '',
   initialGrammarNotes = [],
   initialRelatedWords = [],
+  initialTags = [],
   error,
 }: {
-  onCreate: (front: string, back: string, grammarNotes: string[], relatedWords: string[]) => Promise<boolean>;
+  onCreate: (
+    front: string,
+    back: string,
+    grammarNotes: string[],
+    relatedWords: string[],
+    tags: string[],
+  ) => Promise<boolean>;
   onCancel: () => void;
   initialFront?: string;
   initialBack?: string;
   initialGrammarNotes?: string[];
   initialRelatedWords?: string[];
+  initialTags?: string[];
   error?: string;
 }) {
   const { t } = useI18n();
@@ -35,6 +43,7 @@ export function CardForm({
   const [back, setBack] = useState(initialBack);
   const [grammarNotes, setGrammarNotes] = useState(initialGrammarNotes.join(', '));
   const [relatedWords, setRelatedWords] = useState(initialRelatedWords.join(', '));
+  const [tags, setTags] = useState(initialTags.join(', '));
   const [busy, setBusy] = useState(false);
 
   const editing = Boolean(initialFront || initialBack);
@@ -43,13 +52,20 @@ export function CardForm({
     if (!front.trim() || !back.trim() || busy) return;
     setBusy(true);
     try {
-      const saved = await onCreate(front.trim(), back.trim(), splitList(grammarNotes), splitList(relatedWords));
+      const saved = await onCreate(
+        front.trim(),
+        back.trim(),
+        splitList(grammarNotes),
+        splitList(relatedWords),
+        normalizeTags(splitList(tags)),
+      );
       if (saved && !editing) {
         // Stay open and clear: adding ten cards in a row is the common case.
         setFront('');
         setBack('');
         setGrammarNotes('');
         setRelatedWords('');
+        setTags('');
       }
     } finally {
       setBusy(false);
@@ -80,6 +96,12 @@ export function CardForm({
         value={relatedWords}
         onChangeText={setRelatedWords}
       />
+      <Field
+        label={t('tags')}
+        hint={t('tagsHint')}
+        value={tags}
+        onChangeText={setTags}
+      />
       <Row gap={theme.spacing.sm}>
         <Button label={t('cancel')} variant="ghost" onPress={onCancel} style={styles.grow} />
         <Button
@@ -100,6 +122,17 @@ export function splitList(value: string): string[] {
     .split(/[,\n]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+/** Tags are case-insensitive labels; store a stable, duplicate-free spelling. */
+export function normalizeTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  return tags.filter((tag) => {
+    const key = tag.toLocaleLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 const styles = StyleSheet.create({

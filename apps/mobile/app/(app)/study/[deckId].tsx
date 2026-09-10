@@ -1,4 +1,5 @@
 import { StudyChat } from '../../../src/ui/StudyChat';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -15,6 +16,7 @@ import {
 import { useI18n } from '../../../src/i18n';
 import { normalizeCardFront, normalizedFrontFrom } from '../../../src/ai/card-fronts';
 import { useApp } from '../../../src/state/app';
+import type { Repository } from '../../../src/db/repository';
 import type { ExampleResult } from '../../../src/ai/service';
 import { lookUpMeanings, lookupSources } from '../../../src/ai/desktop';
 import {
@@ -31,10 +33,23 @@ import {
 } from '../../../src/ui/components';
 import { CardForm } from '../../../src/ui/CardForm';
 import { formatInterval } from '../../../src/ui/format';
+import { pronounce, pronunciationAvailable, stopPronunciation } from '../../../src/ui/pronunciation';
 
 import { useCardGestures } from '../../../src/ui/useCardGestures';
 import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 import { useLayout, useTheme } from '../../../src/ui/theme';
+
+const STUDY_SESSION_KEY = 'fluentflow.studySession';
+
+interface SavedStudySession {
+  deckId: string;
+  studyAhead: boolean;
+  cardIds: string[];
+  index: number;
+  reviewed: number;
+  lapses: number;
+  revealed: boolean;
+}
 
 /**
  * The study session.
@@ -93,13 +108,16 @@ export default function StudyScreen() {
   const studyAhead = ahead === '1';
   const remainingCounts = useMemo(() => countQueue(queue.slice(index)), [queue, index]);
 
+  useEffect(() => () => stopPronunciation(), []);
+
   useEffect(() => {
     if (!repository || !deckId) return;
     let cancelled = false;
 
     (async () => {
       const loadedDeck = await repository.getDeck(deckId);
-      const due = studyAhead
+      const saved = await restoreStudySession(repository, deckId, studyAhead);
+      const due = saved?.queue ?? (studyAhead
         ? await repository.upcomingCards(deckId)
         : await repository.dueCards(
             deckId,
@@ -107,10 +125,14 @@ export default function StudyScreen() {
             200,
             loadedDeck?.newCardsPerDay ?? 20,
             loadedDeck?.maxReviewsPerDay ?? 50,
-          );
+          ));
       if (cancelled) return;
       setDeck(loadedDeck);
       setQueue(due);
+      setIndex(saved?.index ?? 0);
+      setReviewed(saved?.reviewed ?? 0);
+      setLapses(saved?.lapses ?? 0);
+      setRevealed(saved?.revealed ?? false);
       setLoading(false);
     })();
 
@@ -118,6 +140,28 @@ export default function StudyScreen() {
       cancelled = true;
     };
   }, [repository, deckId, studyAhead]);
+
+  // A route change, browser refresh, or Electron restart should not make the
+  // learner hunt for their place. Store only ids and reload current rows when
+  // resuming, so an answer synced from another device is never overwritten by
+  // an old in-memory card snapshot.
+  useEffect(() => {
+    if (loading || !deckId) return;
+    if (!card) {
+      void AsyncStorage.removeItem(STUDY_SESSION_KEY);
+      return;
+    }
+    const snapshot: SavedStudySession = {
+      deckId,
+      studyAhead,
+      cardIds: queue.map((item) => item.id),
+      index,
+      reviewed,
+      lapses,
+      revealed,
+    };
+    void AsyncStorage.setItem(STUDY_SESSION_KEY, JSON.stringify(snapshot));
+  }, [loading, deckId, studyAhead, queue, index, reviewed, lapses, revealed, card]);
 
   // Keep the model working a few cards ahead of the user. The window is
   // re-primed on every advance rather than set up once, so it follows a queue
@@ -256,7 +300,7 @@ export default function StudyScreen() {
    * copy of this card already re-queued behind a lapse — keeps its due date.
    */
   const saveCardEdit = useCallback(
-    async (front: string, back: string, grammarNotes: string[], relatedWords: string[]) => {
+    async (front: string, back: string, grammarNotes: string[], relatedWords: string[], tags: string[]) => {
       if (!repository || !card) return false;
       const normalizedFront = await normalizeCardFront(front, card.language, back);
       const duplicate = await repository.findCardByFront(card.deckId, normalizedFront);
@@ -269,6 +313,7 @@ export default function StudyScreen() {
         back,
         grammarNotes,
         relatedWords,
+        tags,
       });
       setQueue((current) =>
         current.map((item) =>
@@ -279,6 +324,7 @@ export default function StudyScreen() {
                 back: updated.back,
                 grammarNotes: updated.grammarNotes,
                 relatedWords: updated.relatedWords,
+                tags: updated.tags,
               }
             : item,
         ),
@@ -524,6 +570,7 @@ export default function StudyScreen() {
               initialBack={card.back}
               initialGrammarNotes={card.grammarNotes ?? []}
               initialRelatedWords={card.relatedWords ?? []}
+              initialTags={card.tags ?? []}
               error={editError ?? undefined}
               onCancel={() => {
                 setEditing(false);
@@ -559,9 +606,22 @@ export default function StudyScreen() {
                       onRegenerate={regenerateDefinition}
                     />
                   ) : (
-                    <Label variant="cardFront" align="center" selectable>
-                      {card.front}
-                    </Label>
+                    <>
+                      <Label variant="cardFront" align="center" selectable>
+                        {card.front}
+                      </Label>
+                      {pronunciationAvailable() ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={t('pronunciation', { word: card.front })}
+                          onPress={() => pronounce(card.front, card.language)}
+                          hitSlop={10}
+                          style={styles.pronunciationButton}
+                        >
+                          <Label variant="body" tone="accent">🔊</Label>
+                        </Pressable>
+                      ) : null}
+                    </>
                   )}
 
                   {revealed ? (
@@ -654,9 +714,6 @@ export default function StudyScreen() {
                         onPress={() => void removeFromSession('suspend')}
                         style={styles.flex}
                       />
-                      {undoState ? (
-                        <Button label={t('undo')} variant="ghost" onPress={() => void undo()} style={styles.flex} />
-                      ) : null}
                     </Row>
                   </>
                 ) : null}
@@ -664,6 +721,12 @@ export default function StudyScreen() {
             ) : (
               <Button label={t('showAnswer')} onPress={reveal} />
             )}
+            {undoState ? (
+              <>
+                <Spacer size={theme.spacing.xs} />
+                <Button label={t('undo')} variant="ghost" onPress={() => void undo()} />
+              </>
+            ) : null}
             <Toast message={toast} />
           </View>
           </>
@@ -1003,6 +1066,42 @@ interface UndoState {
   lapses: number;
 }
 
+async function restoreStudySession(
+  repository: Repository,
+  deckId: string,
+  studyAhead: boolean,
+): Promise<{ queue: Card[]; index: number; reviewed: number; lapses: number; revealed: boolean } | null> {
+  try {
+    const raw = await AsyncStorage.getItem(STUDY_SESSION_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Partial<SavedStudySession>;
+    const savedIndex = saved.index;
+    if (
+      saved.deckId !== deckId ||
+      saved.studyAhead !== studyAhead ||
+      !Array.isArray(saved.cardIds) ||
+      typeof savedIndex !== 'number' ||
+      !Number.isInteger(savedIndex) ||
+      savedIndex < 0
+    ) return null;
+
+    const rows = await Promise.all(saved.cardIds.map((id) => repository.getCard(id)));
+    const queue = rows.filter((card): card is Card => Boolean(card && !card.deleted && !card.suspended));
+    if (queue.length === 0 || savedIndex >= queue.length) return null;
+    return {
+      queue,
+      index: savedIndex,
+      reviewed: Math.max(0, Number(saved.reviewed) || 0),
+      lapses: Math.max(0, Number(saved.lapses) || 0),
+      revealed: saved.revealed === true,
+    };
+  } catch {
+    // A malformed or interrupted storage write is never a reason to block a
+    // normal study queue. The next state update replaces it with a clean one.
+    return null;
+  }
+}
+
 const styles = StyleSheet.create({
   ratingInterval: { marginTop: 4 },
   flex: { flex: 1 },
@@ -1070,6 +1169,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   gearIcon: { fontSize: 22 },
+  pronunciationButton: { alignSelf: 'center', padding: 8 },
   toastBubble: {
     borderRadius: 999,
     paddingHorizontal: 16,

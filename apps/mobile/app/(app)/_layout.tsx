@@ -67,6 +67,7 @@ export default function AppLayout() {
           <Stack.Screen name="decks" />
           <Stack.Screen name="new-deck" />
           <Stack.Screen name="deck/[id]" />
+          <Stack.Screen name="cards" />
           <Stack.Screen name="study/[deckId]" />
           <Stack.Screen name="import" />
           <Stack.Screen name="text-import" />

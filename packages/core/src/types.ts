@@ -40,6 +40,8 @@ export interface Card {
   grammarNotes: string[];
   /** Optional related words or phrases, in the target language. */
   relatedWords: string[];
+  /** Learner-defined labels used to organize and find cards. */
+  tags?: string[];
   /** Day-level interval. Zero while a new card is still on its learning steps. */
   interval: number;
   /** Anki ease factor, clamped to >= 1.3. */

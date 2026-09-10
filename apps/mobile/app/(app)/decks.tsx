@@ -42,7 +42,12 @@ import { useLayout, useTheme } from '../../src/ui/theme';
 export default function DecksScreen() {
   const { t } = useI18n();
   const theme = useTheme();
-  const { wide } = useLayout();
+  const { width, wide } = useLayout();
+  // A macOS half-screen window is usually around 700–800pt wide. Keep the
+  // calendar in a compact side rail there instead of stacking a full calendar
+  // above the deck list, which makes the list feel slow to reach while the
+  // Split View divider is moving.
+  const calendarSideRail = width >= 680;
   const content = useContentStyle({ full: wide });
   const { decks, repository, user, refreshDecks } = useApp();
 
@@ -129,9 +134,15 @@ export default function DecksScreen() {
 
   return (
     <Screen>
-      <View style={[styles.split, wide ? styles.splitWide : null]}>
+      <View style={[styles.split, calendarSideRail ? styles.splitSideRail : null, wide ? styles.splitWide : null]}>
         {streakData ? (
-          <View style={[styles.calendarPane, wide ? styles.calendarPaneWide : null]}>
+          <View
+            style={[
+              styles.calendarPane,
+              calendarSideRail ? styles.calendarPaneSideRail : null,
+              wide ? styles.calendarPaneWide : null,
+            ]}
+          >
             <Surface raised elevation="md">
               <StreakCard
                 streak={streakData.streak}
@@ -145,6 +156,10 @@ export default function DecksScreen() {
         <View style={styles.decksPane}>
           <FlatList
             data={decks}
+            // FlatList does not support changing numColumns on an existing
+            // instance. Split View can cross this breakpoint while the deck
+            // screen stays mounted, so force a fresh list for each layout.
+            key={wide ? 'two-columns' : 'one-column'}
             keyExtractor={(deck) => deck.id}
             numColumns={wide ? 2 : 1}
             columnWrapperStyle={wide ? styles.deckRow : undefined}
@@ -388,6 +403,13 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress 
 
 const styles = StyleSheet.create({
   split: { flex: 1, width: '100%' },
+  splitSideRail: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    width: '100%',
+    gap: 16,
+    paddingHorizontal: 16,
+  },
   splitWide: {
     flexDirection: 'row',
     alignSelf: 'center',
@@ -397,6 +419,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   calendarPane: { padding: 16 },
+  calendarPaneSideRail: { width: 220, paddingHorizontal: 0, paddingTop: 16 },
   calendarPaneWide: { width: 326, paddingHorizontal: 0, paddingTop: 24 },
   decksPane: { flex: 1, minWidth: 0 },
   summaryWrap: { marginBottom: 0 },

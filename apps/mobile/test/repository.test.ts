@@ -1,6 +1,7 @@
 import { createTestRepository } from './fakes/database';
 import { collectionDayKey } from '@fluentflow/core';
 import { Repository } from '../src/db/repository';
+import { SCHEMA_VERSION } from '../src/db/schema';
 
 /**
  * The repository against a real SQLite database.
@@ -24,7 +25,7 @@ describe('Repository', () => {
     const row = await context.database.getFirstAsync<{ user_version: number }>(
       'PRAGMA user_version',
     );
-    expect(row?.user_version).toBe(12);
+    expect(row?.user_version).toBe(SCHEMA_VERSION);
   });
 
   it('round-trips a deck and its cards', async () => {
@@ -41,6 +42,19 @@ describe('Repository', () => {
 
     const cards = await repository.listCards(deck.id);
     expect(cards.map((card) => card.front)).toEqual(['hablar', 'comer']);
+  });
+
+  it('searches tags and persists bulk card changes', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish Verbs', 'es');
+    const hablar = await repository.addCard('u1', deck, 'hablar', 'to speak', [], [], [], ['travel', 'verbs']);
+    const comer = await repository.addCard('u1', deck, 'comer', 'to eat');
+
+    expect((await repository.searchCards('u1', 'travel')).map((card) => card.id)).toEqual([hablar.id]);
+    await repository.updateCards([hablar, comer], { suspended: true, tags: ['practice'] });
+    const cards = await repository.listCards(deck.id);
+    expect(cards.every((card) => card.suspended)).toBe(true);
+    expect(cards.every((card) => card.tags?.includes('practice'))).toBe(true);
   });
 
   it('schedules a review through the real scheduler and logs it', async () => {

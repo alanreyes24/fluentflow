@@ -40,6 +40,7 @@ export interface CreateCardInput {
   examples?: string[];
   grammarNotes?: string[];
   relatedWords?: string[];
+  tags?: string[];
   id?: string;
   now?: Date;
 }
@@ -57,6 +58,8 @@ export function createCard(input: CreateCardInput): Card {
     examples: input.examples ?? [],
     grammarNotes: input.grammarNotes ?? [],
     relatedWords: input.relatedWords ?? [],
+    tags: input.tags ?? [],
+    starred: false,
     interval: state.interval,
     easeFactor: state.easeFactor,
     repetitions: state.repetitions,

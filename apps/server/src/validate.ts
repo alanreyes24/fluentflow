@@ -78,6 +78,7 @@ function parseCard(value: unknown, userId: string, path: string): Card {
     examples: examples(raw.examples, `${path}.examples`),
     grammarNotes: stringList(raw.grammarNotes, `${path}.grammarNotes`, 20, 300),
     relatedWords: stringList(raw.relatedWords, `${path}.relatedWords`, 20, 120),
+    tags: stringList(raw.tags, `${path}.tags`, 20, 80),
     interval: number(raw.interval, `${path}.interval`, 0, 36500),
     easeFactor: number(raw.easeFactor, `${path}.easeFactor`, 1.3, 10),
     repetitions: integer(raw.repetitions ?? 0, `${path}.repetitions`, 0),

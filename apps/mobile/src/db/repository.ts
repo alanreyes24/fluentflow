@@ -151,6 +151,28 @@ export class Repository {
     return rows.map(toCard);
   }
 
+  /**
+   * Find cards by their content or learner-defined tags, without pulling
+   * deleted records into the library view. SQLite's case-insensitive LIKE is
+   * deliberately used here: users expect `hablar` and `Hablar` to match.
+   */
+  async searchCards(userId: string, query: string): Promise<Card[]> {
+    const term = query.trim();
+    if (!term) return this.listAllCards(userId);
+    const like = `%${term}%`;
+    const rows = await this.db.getAllAsync<CardRow>(
+      `SELECT * FROM cards
+       WHERE userId = ? AND deleted = 0
+         AND (front LIKE ? COLLATE NOCASE OR back LIKE ? COLLATE NOCASE OR tags LIKE ? COLLATE NOCASE)
+       ORDER BY front COLLATE NOCASE, rowid`,
+      userId,
+      like,
+      like,
+      like,
+    );
+    return rows.map(toCard);
+  }
+
   async getCard(id: string): Promise<Card | null> {
     const row = await this.db.getFirstAsync<CardRow>('SELECT * FROM cards WHERE id = ?', id);
     return row ? toCard(row) : null;
@@ -258,6 +280,7 @@ export class Repository {
     examples: string[] = [],
     grammarNotes: string[] = [],
     relatedWords: string[] = [],
+    tags: string[] = [],
   ): Promise<Card> {
     const card = createCard({
       userId,
@@ -268,6 +291,7 @@ export class Repository {
       examples,
       grammarNotes,
       relatedWords,
+      tags,
     });
     await this.saveCards([card]);
     await this.refreshDeckCount(deck.id);
@@ -391,6 +415,14 @@ export class Repository {
   async unsuspendCard(card: Card): Promise<Card> {
     const updated = touch({ ...card, suspended: false });
     await this.saveCards([updated]);
+    return updated;
+  }
+
+  /** Apply one safe content/status patch to several selected cards. */
+  async updateCards(cards: Card[], changes: Partial<Card>): Promise<Card[]> {
+    if (cards.length === 0) return [];
+    const updated: Card[] = [];
+    for (const card of cards) updated.push(await this.updateCard(card, changes));
     return updated;
   }
 
@@ -832,8 +864,8 @@ export class Repository {
       await this.db.runAsync(
         `INSERT INTO cards (id, deckId, userId, front, back, language, examples, grammarNotes, relatedWords, interval,
                             easeFactor, repetitions, phase, lapses, learningStep, leech,
-                            introducedAt, dueDay, buriedUntil, suspended, nextReview, status, lastModified, syncStatus, deleted, starred)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            introducedAt, dueDay, buriedUntil, suspended, nextReview, status, lastModified, syncStatus, deleted, starred, tags)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            deckId = excluded.deckId,
            userId = excluded.userId,
@@ -859,7 +891,8 @@ export class Repository {
            lastModified = excluded.lastModified,
            syncStatus = excluded.syncStatus,
            deleted = excluded.deleted,
-           starred = excluded.starred`,
+           starred = excluded.starred,
+           tags = excluded.tags`,
         card.id,
         card.deckId,
         card.userId,
@@ -886,6 +919,7 @@ export class Repository {
         card.syncStatus,
         card.deleted ? 1 : 0,
         card.starred ? 1 : 0,
+        JSON.stringify(card.tags ?? []),
       );
     }
   }
@@ -898,7 +932,7 @@ const CARD_UPDATE_COLUMNS = [
   'deckId', 'userId', 'front', 'back', 'language', 'examples', 'grammarNotes',
   'relatedWords', 'interval', 'easeFactor', 'repetitions', 'phase', 'lapses',
   'learningStep', 'leech', 'introducedAt', 'dueDay', 'buriedUntil', 'suspended',
-  'nextReview', 'status', 'lastModified', 'syncStatus', 'deleted', 'starred',
+  'nextReview', 'status', 'lastModified', 'syncStatus', 'deleted', 'starred', 'tags',
 ] as const satisfies readonly (keyof Card)[];
 
 interface DeckRow {
@@ -941,6 +975,7 @@ interface CardRow {
   buriedUntil: string | null;
   suspended: number;
   starred: number;
+  tags: string;
   nextReview: string;
   status: string;
   lastModified: string;
@@ -1002,6 +1037,7 @@ function toCard(row: CardRow): Card {
     examples: parseJsonArray(row.examples),
     grammarNotes: parseJsonArray(row.grammarNotes),
     relatedWords: parseJsonArray(row.relatedWords),
+    tags: parseJsonArray(row.tags),
     interval: row.interval,
     easeFactor: row.easeFactor,
     repetitions: row.repetitions,

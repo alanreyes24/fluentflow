@@ -571,7 +571,8 @@ export function normalizeCard(card: Card): Card {
     card.learningStep !== undefined &&
     card.dueDay &&
     card.grammarNotes !== undefined &&
-    card.relatedWords !== undefined
+    card.relatedWords !== undefined &&
+    card.tags !== undefined
   ) {
     return card;
   }
@@ -579,6 +580,7 @@ export function normalizeCard(card: Card): Card {
     ...card,
     grammarNotes: card.grammarNotes ?? [],
     relatedWords: card.relatedWords ?? [],
+    tags: card.tags ?? [],
     phase,
     lapses: card.lapses ?? 0,
     learningStep: card.learningStep ?? 0,

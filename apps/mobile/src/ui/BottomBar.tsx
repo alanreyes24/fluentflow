@@ -59,6 +59,11 @@ export function BottomBar() {
         label={t('newDeck')}
         onPress={() => router.push('/(app)/new-deck')}
       />
+      <BarAction
+        label={t('cardLibrary')}
+        selected={pathname === '/cards'}
+        onPress={() => router.push('/(app)/cards')}
+      />
       <BarAction label={t('pasteShort')} onPress={() => router.push('/(app)/text-import')} />
       <BarAction
         label={t('settings')}
