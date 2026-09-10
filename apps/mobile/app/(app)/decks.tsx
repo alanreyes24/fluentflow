@@ -47,7 +47,10 @@ export default function DecksScreen() {
   // calendar in a compact side rail there instead of stacking a full calendar
   // above the deck list, which makes the list feel slow to reach while the
   // Split View divider is moving.
-  const calendarSideRail = width >= 680;
+  // A 700–800px split window is wide enough for two columns in theory, but
+  // not wide enough for a useful 220px calendar rail plus deck content. Stack
+  // the calendar until the rail has room for its status copy to stay readable.
+  const calendarSideRail = width >= 840;
   const content = useContentStyle({ full: wide });
   const { decks, repository, user, refreshDecks } = useApp();
 
@@ -419,7 +422,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   calendarPane: { padding: 16 },
-  calendarPaneSideRail: { width: 220, paddingHorizontal: 0, paddingTop: 16 },
+  calendarPaneSideRail: { width: 280, paddingHorizontal: 0, paddingTop: 16 },
   calendarPaneWide: { width: 326, paddingHorizontal: 0, paddingTop: 24 },
   decksPane: { flex: 1, minWidth: 0 },
   summaryWrap: { marginBottom: 0 },

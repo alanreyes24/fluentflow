@@ -5,7 +5,7 @@ import { useI18n } from '../i18n';
 import { Label } from './components';
 import { SyncIndicator } from './SyncIndicator';
 import { onMacDesktop } from './shell';
-import { useTheme } from './theme';
+import { useLayout, useTheme } from './theme';
 
 /**
  * The app's toolbar, along the bottom of the window.
@@ -34,6 +34,7 @@ export function BottomBar() {
   const { t } = useI18n();
   const theme = useTheme();
   const pathname = usePathname();
+  const { compact } = useLayout();
 
   return (
     <View
@@ -74,7 +75,7 @@ export function BottomBar() {
       {/* Pushes status to the trailing edge, and is the first thing to give up
           width when the window is narrow. */}
       <View style={styles.spacer} />
-      <SyncIndicator />
+      <SyncIndicator compact={compact} />
     </View>
   );
 }
@@ -137,7 +138,10 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  action: { justifyContent: 'center', minHeight: 32, paddingHorizontal: 12 },
+  // Let each action absorb an equal share of a split-screen window. Without
+  // `minWidth: 0`, a translated label can widen the whole toolbar instead of
+  // yielding space to its neighbours.
+  action: { flex: 1, minWidth: 0, justifyContent: 'center', minHeight: 32, paddingHorizontal: 8 },
   selectedLabel: { fontWeight: '700' },
   spacer: { flex: 1, minWidth: 8 },
 });

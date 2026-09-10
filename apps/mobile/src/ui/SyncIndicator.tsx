@@ -12,7 +12,7 @@ import { useTheme } from './theme';
  * "Synced" with three unsent reviews behind it is the failure mode worth
  * designing against.
  */
-export function SyncIndicator() {
+export function SyncIndicator({ compact = false }: { compact?: boolean }) {
   const theme = useTheme();
   const { t } = useI18n();
   const { sync, syncNow, user, cloudAvailable } = useApp();
@@ -25,9 +25,7 @@ export function SyncIndicator() {
     return (
       <View style={styles.container}>
         <Dot color={theme.colors.offline} />
-        <Label variant="caption" tone="faint">
-          {t('offline')}
-        </Label>
+        {!compact ? <Label variant="caption" tone="faint">{t('offline')}</Label> : null}
       </View>
     );
   }
@@ -58,9 +56,7 @@ export function SyncIndicator() {
       style={({ pressed }) => [styles.container, { opacity: pressed ? 0.6 : 1 }]}
     >
       <Dot color={color} />
-      <Label variant="caption" tone="muted">
-        {text}
-      </Label>
+      {!compact ? <Label variant="caption" tone="muted">{text}</Label> : null}
     </Pressable>
   );
 }
@@ -82,6 +78,6 @@ function withAlpha(color: string, alpha: string): string {
 }
 
 const styles = StyleSheet.create({
-  container: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8 },
+  container: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, minWidth: 24 },
   dot: { width: 7, height: 7, borderRadius: 3.5 },
 });

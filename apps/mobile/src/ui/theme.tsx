@@ -294,9 +294,11 @@ export interface LayoutInfo {
   height: number;
   /** Is this a desktop-sized window rather than a narrow one? */
   wide: boolean;
+  /** Is there enough room for a full desktop control row? */
+  compact: boolean;
 }
 
 export function useLayout(): LayoutInfo {
   const { width, height } = useWindowDimensions();
-  return { width, height, wide: width >= layout.wide };
+  return { width, height, wide: width >= layout.wide, compact: width < 560 };
 }

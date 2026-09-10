@@ -163,7 +163,9 @@ const FLAME = '\u{1F525}';
 const SEED = '\u{1F331}';
 
 const styles = StyleSheet.create({
-  grow: { flex: 1 },
+  // The streak status is allowed to shrink inside the side rail instead of
+  // becoming the flex row's implicit minimum width.
+  grow: { flex: 1, minWidth: 0 },
   flame: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
   flameGlyph: { fontSize: 26 },
   calendar: { marginTop: 16, gap: 8 },

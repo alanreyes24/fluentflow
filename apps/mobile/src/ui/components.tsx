@@ -844,7 +844,9 @@ const styles = StyleSheet.create({
   grow: { flex: 1 },
   chip: { paddingHorizontal: 10, paddingVertical: 4 },
   meterTrack: { width: '100%', overflow: 'hidden' },
-  statTile: { flex: 1, minWidth: 92, gap: 2 },
+  // Four tiles should wrap cleanly in a narrow split pane instead of forcing
+  // the surface wider than the viewport.
+  statTile: { flex: 1, minWidth: 88, gap: 2 },
   screen: { flex: 1 },
   page: { flex: 1 },
   sectionLabel: { textTransform: 'uppercase', letterSpacing: 0.8 },

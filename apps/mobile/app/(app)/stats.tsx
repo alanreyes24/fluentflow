@@ -133,7 +133,7 @@ export default function StatsScreen() {
         <Spacer size={theme.spacing.md} />
 
         <Surface elevation="sm">
-          <Row gap={theme.spacing.md} justify="space-between" align="flex-start">
+          <Row gap={theme.spacing.md} justify="space-between" align="flex-start" wrap>
             <StatTile value={String(summary.reviews)} label={t('reviews')} />
             <StatTile
               value={`${Math.round(summary.retention * 100)}%`}
@@ -244,7 +244,7 @@ export default function StatsScreen() {
 
         <SectionHeader title={t('collection')} />
         <Surface elevation="sm">
-          <Row gap={theme.spacing.md} justify="space-between" align="flex-start">
+          <Row gap={theme.spacing.md} justify="space-between" align="flex-start" wrap>
             <StatTile value={String(stats.collection.total)} label={t('cards')} />
             <StatTile value={String(stats.collection.decks)} label={t('decks')} />
             <StatTile
