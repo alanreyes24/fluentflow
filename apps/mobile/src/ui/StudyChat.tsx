@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Markdown from 'react-native-markdown-display';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { Card, ChatMessage } from '@fluentflow/core';
@@ -9,6 +9,22 @@ import { useTheme } from './theme';
 
 type StudyContext = Pick<Card, 'front' | 'back' | 'language' | 'examples' | 'grammarNotes' | 'relatedWords'>;
 type StudyMessage = ChatMessage & { context?: StudyContext };
+
+export function useEscapeToClose(open: boolean, onClose: () => void): void {
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+}
 
 /** Capture the card with each question so follow-ups retain the right context. */
 function requestMessages(messages: StudyMessage[]): ChatMessage[] {
@@ -25,7 +41,11 @@ function requestMessages(messages: StudyMessage[]): ChatMessage[] {
   }));
 }
 
-export function StudyChat({ card, open }: { card: StudyContext; open: boolean }) {
+export function StudyChat({ card, open, onClose }: {
+  card: StudyContext;
+  open: boolean;
+  onClose: () => void;
+}) {
   const { t } = useI18n();
   const theme = useTheme();
   const [messages, setMessages] = useState<StudyMessage[]>([]);
@@ -34,6 +54,8 @@ export function StudyChat({ card, open }: { card: StudyContext; open: boolean })
   const [error, setError] = useState<string | null>(null);
   const sending = useRef(false);
   const scroll = useRef<ScrollView>(null);
+
+  useEscapeToClose(open, onClose);
 
   async function send() {
     const text = draft.trim();

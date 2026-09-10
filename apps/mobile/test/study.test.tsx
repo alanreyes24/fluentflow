@@ -87,6 +87,8 @@ describe('StudyScreen', () => {
     expect(screen.getByRole('button', { name: 'Star card' })).toBeTruthy();
     expect((await repository.getCard(first!.id))?.starred).toBe(true);
     await view.unmount();
+    // Make the reviewed card due so reopening selects it again.
+    await repository.updateCard(first!, { nextReview: new Date(Date.now() - 1000).toISOString() });
     await show();
     await screen.findByRole('button', { name: 'Unstar card' });
     await fireEvent.press(screen.getByRole('button', { name: 'Unstar card' }));

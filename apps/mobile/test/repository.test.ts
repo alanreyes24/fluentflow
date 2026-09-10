@@ -251,6 +251,18 @@ describe('Repository', () => {
     expect(queue.cards.map((card) => card.id)).toContain(dueReview.id);
   });
 
+  it('keeps favorite changes when undoing a review', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const card = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    const reviewed = await repository.rateCard(card, 'again');
+    await repository.updateCard(reviewed, { starred: true });
+    const restored = await repository.undoLastReview('u1');
+    expect(restored?.starred).toBe(true);
+    expect(restored?.repetitions).toBe(0);
+    expect((await repository.getCard(card.id))?.starred).toBe(true);
+  });
+
   it('buries and suspends cards out of the due queue', async () => {
     const { repository } = context;
     const deck = await repository.createDeck('u1', 'Spanish', 'es');

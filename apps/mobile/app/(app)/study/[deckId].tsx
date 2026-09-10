@@ -670,7 +670,11 @@ export default function StudyScreen() {
         )}
       </View>
       </View>
-      <StudyChat open={chatOpen} card={{ ...card, examples: examples?.examples ?? card.examples }} />
+      <StudyChat
+        open={chatOpen}
+        onClose={() => setChatOpen(false)}
+        card={{ ...card, examples: examples?.examples ?? card.examples }}
+      />
       </View>
     </Screen>
   );
@@ -904,7 +908,7 @@ function SentenceWords({
       // cannot wrap onto a line by itself. Whitespace-only tokens remain
       // separate so normal word wrapping still works.
       const previous = result[result.length - 1];
-      if (previous.word) previous.punctuation += token;
+      if (previous?.word) previous.punctuation = `${previous.punctuation ?? ''}${token}`;
       else result.push({ text: token });
     } else {
       result.push({ text: token });
@@ -920,21 +924,25 @@ function SentenceWords({
       </Label>
       <View style={styles.sentence}>
         {items.map((item, index) => {
-          return item.word ? (
-            <Pressable
-              key={`${item.word}-${index}`}
-              accessibilityRole="button"
-              accessibilityLabel={item.word}
-              onPress={() => onWordPress(item.word, sentence)}
-              style={({ pressed }) => [
-                styles.wordButton,
-                { borderBottomColor: theme.colors.accent },
-                pressed ? { backgroundColor: theme.colors.accentSoft } : null,
-              ]}
-            >
-              <Label variant="body">{item.word}{item.punctuation}</Label>
-            </Pressable>
-          ) : (
+          if (item.word) {
+            const word = item.word;
+            return (
+              <Pressable
+                key={`${word}-${index}`}
+                accessibilityRole="button"
+                accessibilityLabel={word}
+                onPress={() => onWordPress(word, sentence)}
+                style={({ pressed }) => [
+                  styles.wordButton,
+                  { borderBottomColor: theme.colors.accent },
+                  pressed ? { backgroundColor: theme.colors.accentSoft } : null,
+                ]}
+              >
+                <Label variant="body">{word}{item.punctuation}</Label>
+              </Pressable>
+            );
+          }
+          return (
             <Label key={`text-${index}`} variant="body" style={styles.sentenceText}>
               {item.text}
             </Label>
