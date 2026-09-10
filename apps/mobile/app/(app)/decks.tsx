@@ -3,6 +3,7 @@ import { FlatList, Platform, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
   LANGUAGE_NAMES,
+  addDays,
   collectionDayKey,
   studyStreak,
   type Deck,
@@ -49,6 +50,7 @@ export default function DecksScreen() {
   const [streakData, setStreakData] = useState<{
     streak: StreakSummary;
     days: StudyDay[];
+    forecast: { day: string; count: number }[];
     today: string;
   } | null>(null);
   const loadProgress = useCallback(async () => {
@@ -81,6 +83,7 @@ export default function DecksScreen() {
       setStreakData({
         streak: studyStreak(stats.days, today),
         days: stats.days,
+        forecast: stats.forecast,
         today,
       });
     }
@@ -154,6 +157,12 @@ export default function DecksScreen() {
                     pendingLearning={totals.pendingLearning}
                     cards={totals.cards}
                   />
+                  {streakData ? (
+                    <View style={[styles.insights, wide ? styles.insightsWide : null]}>
+                      <UpcomingWorkload forecast={streakData.forecast} />
+                      <RecentActivity days={streakData.days} today={streakData.today} />
+                    </View>
+                  ) : null}
                   <Spacer size={theme.spacing.xl} />
                   <Label variant="heading">{t('yourDecks')}</Label>
                   <Spacer size={theme.spacing.sm} />
@@ -177,6 +186,63 @@ export default function DecksScreen() {
         </View>
       </View>
     </Screen>
+  );
+}
+
+function UpcomingWorkload({ forecast }: { forecast: { day: string; count: number }[] }) {
+  const { t } = useI18n();
+  const theme = useTheme();
+  const tomorrow = forecast[1]?.count ?? 0;
+  const thisWeek = forecast.slice(0, 7).reduce((total, day) => total + day.count, 0);
+
+  return (
+    <Surface raised elevation="sm" style={styles.insightCard}>
+      <Label variant="overline" tone="muted">{t('upcomingWorkload')}</Label>
+      <Spacer size={theme.spacing.sm} />
+      <Row justify="space-between" gap={theme.spacing.md}>
+        <View style={styles.insightMetric}>
+          <Label variant="title" tone={tomorrow > 0 ? 'accent' : 'default'}>{tomorrow}</Label>
+          <Label variant="caption" tone="faint">{t('dueTomorrow')}</Label>
+        </View>
+        <View style={styles.insightMetric}>
+          <Label variant="title">{thisWeek}</Label>
+          <Label variant="caption" tone="faint">{t('dueThisWeek')}</Label>
+        </View>
+      </Row>
+    </Surface>
+  );
+}
+
+function RecentActivity({ days, today }: { days: StudyDay[]; today: string }) {
+  const { t } = useI18n();
+  const theme = useTheme();
+  const byDay = new Map(days.map((day) => [day.day, day.reviews]));
+  const todayReviews = byDay.get(today) ?? 0;
+  const weekReviews = days.filter((day) => day.day >= addDays(today, -6) && day.day <= today)
+    .reduce((total, day) => total + day.reviews, 0);
+  const lastSession = [...days].filter((day) => day.reviews > 0)
+    .sort((a, b) => b.day.localeCompare(a.day))[0];
+  const lastSessionLabel = lastSession
+    ? new Date(`${lastSession.day}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : t('noActivityYet');
+
+  return (
+    <Surface raised elevation="sm" style={styles.insightCard}>
+      <Label variant="overline" tone="muted">{t('recentActivity')}</Label>
+      <Spacer size={theme.spacing.sm} />
+      <Row justify="space-between" gap={theme.spacing.md}>
+        <View style={styles.insightMetric}>
+          <Label variant="title">{todayReviews}</Label>
+          <Label variant="caption" tone="faint">{t('reviewedTodayLabel')}</Label>
+        </View>
+        <View style={styles.insightMetric}>
+          <Label variant="title">{weekReviews}</Label>
+          <Label variant="caption" tone="faint">{t('lastSevenDays')}</Label>
+        </View>
+      </Row>
+      <Spacer size={theme.spacing.sm} />
+      <Label variant="caption" tone="faint">{t('lastSession', { date: lastSessionLabel })}</Label>
+    </Surface>
   );
 }
 
@@ -337,6 +403,10 @@ const styles = StyleSheet.create({
   summary: { paddingVertical: 18 },
   summaryLead: { flex: 1, minWidth: 0 },
   summaryMetric: { alignItems: 'flex-end', minWidth: 72 },
+  insights: { gap: 12, marginTop: 12 },
+  insightsWide: { flexDirection: 'row' },
+  insightCard: { flex: 1, minWidth: 0 },
+  insightMetric: { flex: 1 },
   grow: { flex: 1 },
   deck: {},
   deckHeader: { alignItems: 'flex-start', gap: 12 },
