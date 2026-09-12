@@ -271,6 +271,59 @@ describe('StudyScreen', () => {
     await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(app)/decks'));
   });
 
+  it('picks up learning cards that become due during the session before returning home', async () => {
+    const [, pending] = await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
+    await repository.updateCard(pending!, {
+      phase: 'learning',
+      learningStep: 1,
+      nextReview: new Date(Date.now() + 60_000).toISOString(),
+    });
+    await show();
+    await screen.findByText('hablar');
+    expect(screen.getByText('1 / 1')).toBeTruthy();
+
+    // Simulate the pending learning timer elapsing while the first card is open.
+    await repository.updateCard((await repository.getCard(pending!.id))!, {
+      nextReview: new Date(Date.now() - 1000).toISOString(),
+    });
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Easy' }));
+    await screen.findByText('comer');
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Easy' }));
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(app)/decks'));
+    expect((await repository.studyQueue(deck.id)).cards).toHaveLength(0);
+  });
+
+  it('continues with another batch when the initial queue is exhausted', async () => {
+    await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
+    const dueCards = repository.dueCards.bind(repository);
+    jest.spyOn(repository, 'dueCards').mockImplementation((id, now, _limit, newLimit, reviewLimit) =>
+      dueCards(id, now, 1, newLimit, reviewLimit));
+    await show();
+    await screen.findByText('hablar');
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Easy' }));
+    await screen.findByText('comer');
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Easy' }));
+    await waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith('/(app)/decks'));
+    expect((await repository.studyQueue(deck.id)).cards).toHaveLength(0);
+  });
+
+  it('honors unlimited daily allowances when opening a session', async () => {
+    deck = await repository.setNewCardsPerDay(deck, null);
+    deck = await repository.setMaxReviewsPerDay(deck, null);
+    await seed(Array.from({ length: 21 }, (_, i) => [`word${i}`, `meaning${i}`]));
+    const dueCards = jest.spyOn(repository, 'dueCards');
+    await show();
+    await screen.findByText('word0');
+    expect(screen.getByText('1 / 21')).toBeTruthy();
+    expect(dueCards).toHaveBeenCalledWith(deck.id, expect.any(Date), 200, null, null);
+  });
+
   it('previews the interval each rating would schedule', async () => {
     await seed([['hablar', 'to speak']]);
     await show();

@@ -33,7 +33,6 @@ import {
 } from '../../../src/ui/components';
 import { CardForm } from '../../../src/ui/CardForm';
 import { formatInterval } from '../../../src/ui/format';
-import { pronounce, pronunciationAvailable, stopPronunciation } from '../../../src/ui/pronunciation';
 
 import { useCardGestures } from '../../../src/ui/useCardGestures';
 import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
@@ -56,7 +55,7 @@ interface SavedStudySession {
  *
  * The sequencing here is the whole product:
  *
- *  1. The queue is loaded once and held in state. Re-querying after each answer
+ *  1. Each queue batch is loaded and held in state. Re-querying after each answer
  *     would re-surface a card the moment its learning step elapsed, and would
  *     drop the ordering the session started with.
  *  2. A card still on its learning steps comes back before the session ends —
@@ -103,12 +102,12 @@ export default function StudyScreen() {
   const [savingStar, setSavingStar] = useState(false);
   const exampleRequest = useRef(0);
   const [loading, setLoading] = useState(true);
+  const [completionError, setCompletionError] = useState<string | null>(null);
+  const [completionAttempt, setCompletionAttempt] = useState(0);
 
   const card = queue[index] ?? null;
   const studyAhead = ahead === '1';
   const remainingCounts = useMemo(() => countQueue(queue.slice(index)), [queue, index]);
-
-  useEffect(() => () => stopPronunciation(), []);
 
   useEffect(() => {
     if (!repository || !deckId) return;
@@ -123,8 +122,8 @@ export default function StudyScreen() {
             deckId,
             new Date(),
             200,
-            loadedDeck?.newCardsPerDay ?? 20,
-            loadedDeck?.maxReviewsPerDay ?? 50,
+            loadedDeck ? loadedDeck.newCardsPerDay : 20,
+            loadedDeck ? loadedDeck.maxReviewsPerDay : 50,
           ));
       if (cancelled) return;
       setDeck(loadedDeck);
@@ -371,8 +370,28 @@ export default function StudyScreen() {
   }, []);
 
   useEffect(() => {
-    if (!loading && !card) router.replace('/(app)/decks');
-  }, [loading, card]);
+    if (loading || card || !repository || !deckId) return;
+    let cancelled = false;
+    setCompletionError(null);
+    void (async () => {
+      // The initial queue is a snapshot. Learning timers can expire while we
+      // study, and large decks can have more than one batch of due cards.
+      // Ask the same queue Home uses before declaring the session finished.
+      const next = studyAhead ? [] : await repository.dueCards(
+        deckId,
+        new Date(),
+        200,
+        deck ? deck.newCardsPerDay : 20,
+        deck ? deck.maxReviewsPerDay : 50,
+      );
+      if (cancelled) return;
+      if (next.length) setQueue((current) => [...current, ...next]);
+      else router.replace('/(app)/decks');
+    })().catch((error) => {
+      if (!cancelled) setCompletionError(error instanceof Error ? error.message : String(error));
+    });
+    return () => { cancelled = true; };
+  }, [loading, card, repository, deckId, deck, studyAhead, completionAttempt]);
 
   const regenerate = useCallback(() => {
     if (!card || !exampleService || generating) return;
@@ -488,7 +507,14 @@ export default function StudyScreen() {
   }
 
   if (!card) {
-    return null;
+    return (
+      <Screen>
+        {completionError ? <>
+          <Label>{completionError}</Label>
+          <Button label={t('retry')} onPress={() => setCompletionAttempt((attempt) => attempt + 1)} />
+        </> : <Loading label={t('loading')} />}
+      </Screen>
+    );
   }
 
   return (
@@ -610,17 +636,6 @@ export default function StudyScreen() {
                       <Label variant="cardFront" align="center" selectable>
                         {card.front}
                       </Label>
-                      {pronunciationAvailable() ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          accessibilityLabel={t('pronunciation', { word: card.front })}
-                          onPress={() => pronounce(card.front, card.language)}
-                          hitSlop={10}
-                          style={styles.pronunciationButton}
-                        >
-                          <Label variant="body" tone="accent">🔊</Label>
-                        </Pressable>
-                      ) : null}
                     </>
                   )}
 
@@ -1169,7 +1184,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   gearIcon: { fontSize: 22 },
-  pronunciationButton: { alignSelf: 'center', padding: 8 },
   toastBubble: {
     borderRadius: 999,
     paddingHorizontal: 16,
