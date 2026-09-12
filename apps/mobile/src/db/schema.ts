@@ -201,6 +201,13 @@ const migrations: Migration[] = [
     await db.execAsync("ALTER TABLE cards ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';");
     await db.execAsync('CREATE INDEX idx_cards_user_live ON cards (userId, deleted);');
   },
+  // 14 — retain English translations alongside generated examples.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE cards ADD COLUMN exampleTranslations TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE example_cache ADD COLUMN translations TEXT NOT NULL DEFAULT '[]';
+    `);
+  },
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

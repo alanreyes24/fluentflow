@@ -76,6 +76,7 @@ function parseCard(value: unknown, userId: string, path: string): Card {
     back: text(raw.back, `${path}.back`, 1),
     language: language(raw.language, `${path}.language`),
     examples: examples(raw.examples, `${path}.examples`),
+    exampleTranslations: examples(raw.exampleTranslations, `${path}.exampleTranslations`),
     grammarNotes: stringList(raw.grammarNotes, `${path}.grammarNotes`, 20, 300),
     relatedWords: stringList(raw.relatedWords, `${path}.relatedWords`, 20, 120),
     tags: stringList(raw.tags, `${path}.tags`, 20, 80),

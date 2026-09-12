@@ -36,6 +36,8 @@ export interface Card {
   language: TargetLanguage;
   /** Cached AI-generated example sentences, always in `language`. */
   examples: string[];
+  /** English translations aligned with the example sentences. */
+  exampleTranslations?: string[];
   /** Optional learner-authored grammar or usage reminders. */
   grammarNotes: string[];
   /** Optional related words or phrases, in the target language. */

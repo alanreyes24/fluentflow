@@ -117,7 +117,7 @@ describe('example generation through the desktop shell', () => {
     expect(result.examples.length).toBeGreaterThan(0);
   });
 
-  it('regenerates Bosnian on every reveal, translation and all, and stores none of it', async () => {
+  it('repairs untranslated Bosnian examples once and reuses their saved translations', async () => {
     const bsResult: GenerateExamplesResult = {
       examples: ['Čitam zanimljivu knjigu.', 'Kupila je knjigu na sajmu jer je bila jeftina.'],
       translations: [
@@ -133,21 +133,55 @@ describe('example generation through the desktop shell', () => {
 
     const { repository } = context;
     const deck = await repository.createDeck('u1', 'Bosnian', 'bs');
-    const card = await repository.addCard('u1', deck, 'knjiga', 'book');
+    const card = await repository.addCard('u1', deck, 'knjiga', 'book', ['Stara knjiga.']);
+    await repository.cacheExamples('knjiga', 'bs', ['Stara knjiga.'], 'model');
     const service = new ExampleService(repository);
 
     const first = await service.forCard(card);
     expect(first.examples).toEqual(bsResult.examples);
     expect(first.translations).toEqual(bsResult.translations);
 
-    // Never promoted onto the card and never written to the word cache — a
-    // Bosnian reveal is deliberately ephemeral.
     const [stored] = await repository.listCards(card.deckId);
-    expect(stored!.examples).toEqual([]);
-    expect(await repository.getCachedExamples('knjiga', 'bs')).toBeNull();
+    expect(stored!.examples).toEqual(bsResult.examples);
+    expect(stored!.exampleTranslations).toEqual(bsResult.translations);
+    expect((await repository.getCachedExamples('knjiga', 'bs'))?.translations).toEqual(bsResult.translations);
 
-    // So the next reveal asks the model again rather than hitting a cache.
-    await service.forCard(stored!);
+    // New sessions and stale study-queue cards both avoid another inference.
+    const second = await new ExampleService(repository).forCard(stored!);
+    expect(second.translations).toEqual(bsResult.translations);
+    expect((await service.forCard(card)).translations).toEqual(bsResult.translations);
+    expect(examples).toHaveBeenCalledTimes(1);
+
+    // An explicit Regenerate action still requests new examples.
+    await service.forCard(stored!, true);
     expect(examples).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([undefined, [], [''], ['   '], ['One', 'Extra']])(
+    'regenerates Bosnian examples with missing or misaligned translations: %j',
+    async (translations) => {
+      const examples = jest.fn().mockResolvedValue({ ok: true, result: {
+        examples: ['Čitam knjigu.'], translations: ['I am reading a book.'],
+        source: 'model', durationMs: 1, attempts: 1,
+      } });
+      installBridge(examples);
+      const deck = await context.repository.createDeck('u1', 'Bosnian', 'bs');
+      const card = await context.repository.addCard('u1', deck, 'knjiga', 'book', ['Stara knjiga.']);
+      card.exampleTranslations = translations;
+      await new ExampleService(context.repository).forCard(card);
+      expect(examples).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('skips generation and prefetch for a translated Bosnian card without a word cache', async () => {
+    const examples = jest.fn();
+    installBridge(examples);
+    const deck = await context.repository.createDeck('u1', 'Bosnian', 'bs');
+    const card = await context.repository.addCard('u1', deck, 'knjiga', 'book', ['Čitam knjigu.']);
+    card.exampleTranslations = ['I am reading a book.'];
+    const service = new ExampleService(context.repository);
+    service.prefetch([card]);
+    expect((await service.forCard(card)).translations).toEqual(card.exampleTranslations);
+    expect(examples).not.toHaveBeenCalled();
   });
 });

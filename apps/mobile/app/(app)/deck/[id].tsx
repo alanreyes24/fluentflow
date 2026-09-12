@@ -33,7 +33,7 @@ import { useTheme } from '../../../src/ui/theme';
 import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 
 const NEW_CARD_LIMIT_OPTIONS = [10, 20, 40, 50, 80] as const;
-const REVIEW_LIMIT_OPTIONS = [50, 100, 200, 400] as const;
+const REVIEW_LIMIT_OPTIONS = [20, 50, 100, 200, 400] as const;
 
 /** Deck detail: progress, the study entry point, and card management. */
 export default function DeckScreen() {

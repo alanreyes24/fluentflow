@@ -27,10 +27,6 @@ export interface FakeDatabase extends SQLiteDatabase {
 
 export function createTestDatabase(): FakeDatabase {
   const db = new DatabaseSync(':memory:');
-  // expo-sqlite's transaction helper does not nest, but screens call
-  // repository methods concurrently and a stray nested BEGIN would fail with a
-  // confusing SQLite error rather than a useful test failure.
-  let depth = 0;
 
   const api = {
     raw: db,
@@ -56,15 +52,6 @@ export function createTestDatabase(): FakeDatabase {
     },
 
     async withTransactionAsync(task: () => Promise<void>): Promise<void> {
-      if (depth++ > 0) {
-        try {
-          await task();
-        } finally {
-          depth--;
-        }
-        return;
-      }
-
       db.exec('BEGIN');
       try {
         await task();
@@ -72,8 +59,6 @@ export function createTestDatabase(): FakeDatabase {
       } catch (error) {
         db.exec('ROLLBACK');
         throw error;
-      } finally {
-        depth--;
       }
     },
 

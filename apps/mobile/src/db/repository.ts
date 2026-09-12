@@ -47,6 +47,7 @@ import {
 
 export interface ExampleCacheEntry {
   examples: string[];
+  translations?: string[];
   source: string;
   createdAt: string;
 }
@@ -63,8 +64,19 @@ export interface StudyStats {
   decks: { deck: Deck; progress: DeckProgress }[];
 }
 
+const transactionQueues = new WeakMap<SQLiteDatabase, Promise<void>>();
+
 export class Repository {
   constructor(private readonly db: SQLiteDatabase) {}
+
+  /** SQLite connections cannot run overlapping BEGIN/COMMIT sequences. */
+  private transaction(task: () => Promise<void>): Promise<void> {
+    const previous = transactionQueues.get(this.db) ?? Promise.resolve();
+    const next = previous.then(() => this.db.withTransactionAsync(task));
+    // A failed transaction must not prevent later writes from being attempted.
+    transactionQueues.set(this.db, next.catch(() => {}));
+    return next;
+  }
 
   // --- decks ---------------------------------------------------------------
 
@@ -116,7 +128,7 @@ export class Repository {
 
   async deleteDeck(deck: Deck): Promise<void> {
     const cards = await this.listCards(deck.id);
-    await this.db.withTransactionAsync(async () => {
+    await this.transaction(async () => {
       await this.writeDecks([softDelete(deck)]);
       // Cards are tombstoned individually so the deletion reaches other devices
       // even if they never learn the deck itself is gone.
@@ -126,7 +138,7 @@ export class Repository {
 
   /** Write decks exactly as given, without re-stamping them. */
   async saveDecks(decks: Deck[]): Promise<void> {
-    await this.db.withTransactionAsync(async () => {
+    await this.transaction(async () => {
       await this.writeDecks(decks);
     });
   }
@@ -338,7 +350,7 @@ export class Repository {
         ? now.toISOString()
         : card.introducedAt;
     const withIntroduction = introducedAt ? { ...reviewed, introducedAt } : reviewed;
-    await this.db.withTransactionAsync(async () => {
+    await this.transaction(async () => {
       await this.writeCards([withIntroduction]);
       await this.db.runAsync(
         `INSERT INTO review_log (eventId, cardId, userId, rating, interval, easeFactor, reviewedAt, syncStatus, previousState)
@@ -439,7 +451,7 @@ export class Repository {
     if (!previous) return null;
     const current = await this.getCard(previous.id);
     const restored = touch({ ...previous, starred: current?.starred ?? false, suspended: previous.suspended ?? false }, now);
-    await this.db.withTransactionAsync(async () => {
+    await this.transaction(async () => {
       await this.writeCards([restored]);
       await this.db.runAsync("DELETE FROM review_log WHERE id = ? AND syncStatus = 'pending'", row.id);
     });
@@ -447,7 +459,7 @@ export class Repository {
   }
 
   async saveCards(cards: Card[]): Promise<void> {
-    await this.db.withTransactionAsync(async () => {
+    await this.transaction(async () => {
       await this.writeCards(cards);
     });
   }
@@ -457,7 +469,7 @@ export class Repository {
   /** Store an imported deck and its cards as one unit. */
   async importDecks(decks: Deck[], cards: Card[]): Promise<void> {
     const withCounts = recomputeCardCounts(decks, cards);
-    await this.db.withTransactionAsync(async () => {
+    await this.transaction(async () => {
       await this.writeDecks(withCounts);
       await this.writeCards(cards);
     });
@@ -630,13 +642,13 @@ export class Repository {
   // --- example cache -------------------------------------------------------
 
   async getCachedExamples(word: string, language: string): Promise<ExampleCacheEntry | null> {
-    const row = await this.db.getFirstAsync<{ examples: string; source: string; createdAt: string }>(
-      'SELECT examples, source, createdAt FROM example_cache WHERE word = ? AND language = ?',
+    const row = await this.db.getFirstAsync<{ examples: string; translations: string; source: string; createdAt: string }>(
+      'SELECT examples, translations, source, createdAt FROM example_cache WHERE word = ? AND language = ?',
       normaliseWord(word),
       language,
     );
     if (!row) return null;
-    return { examples: parseJsonArray(row.examples), source: row.source, createdAt: row.createdAt };
+    return { examples: parseJsonArray(row.examples), translations: parseJsonArray(row.translations), source: row.source, createdAt: row.createdAt };
   }
 
   async cacheExamples(
@@ -644,16 +656,18 @@ export class Repository {
     language: string,
     examples: string[],
     source: string,
+    translations: string[] = [],
   ): Promise<void> {
     // Generic fallback sentences are not worth caching: they cost nothing to
     // regenerate, and caching them would stop the real model from ever getting
     // a second chance once it becomes available.
     if (source === 'fallback' || examples.length === 0) return;
     await this.db.runAsync(
-      `INSERT INTO example_cache (word, language, examples, source, createdAt)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO example_cache (word, language, examples, source, createdAt, translations)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (word, language) DO UPDATE SET
          examples = excluded.examples,
+         translations = excluded.translations,
          source = excluded.source,
          createdAt = excluded.createdAt`,
       normaliseWord(word),
@@ -661,6 +675,7 @@ export class Repository {
       JSON.stringify(examples),
       source,
       new Date().toISOString(),
+      JSON.stringify(translations),
     );
   }
 
@@ -703,7 +718,7 @@ export class Repository {
    * the round trip from being marked synced and then never sent.
    */
   async markSynced(decks: Deck[], cards: Card[], reviewEvents: ReviewEvent[] = []): Promise<void> {
-    await this.db.withTransactionAsync(async () => {
+    await this.transaction(async () => {
       for (const deck of decks) {
         await this.db.runAsync(
           "UPDATE decks SET syncStatus = 'synced' WHERE id = ? AND lastModified = ?",
@@ -733,7 +748,7 @@ export class Repository {
     cards: Card[],
     reviewEvents: ReviewEvent[] = [],
   ): Promise<void> {
-    await this.db.withTransactionAsync(async () => {
+    await this.transaction(async () => {
       await this.writeDecks(decks.map((deck) => ({ ...deck, syncStatus: 'synced' as const })));
       await this.writeCards(cards.map((card) => ({ ...card, syncStatus: 'synced' as const })));
       for (const event of reviewEvents) {
@@ -794,7 +809,7 @@ export class Repository {
   async claimLocalData(fromUserId: string, toUserId: string): Promise<number> {
     const now = new Date().toISOString();
     let moved = 0;
-    await this.db.withTransactionAsync(async () => {
+    await this.transaction(async () => {
       const decks = await this.db.runAsync(
         "UPDATE decks SET userId = ?, lastModified = ?, syncStatus = 'pending' WHERE userId = ?",
         toUserId,
@@ -864,8 +879,8 @@ export class Repository {
       await this.db.runAsync(
         `INSERT INTO cards (id, deckId, userId, front, back, language, examples, grammarNotes, relatedWords, interval,
                             easeFactor, repetitions, phase, lapses, learningStep, leech,
-                            introducedAt, dueDay, buriedUntil, suspended, nextReview, status, lastModified, syncStatus, deleted, starred, tags)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            introducedAt, dueDay, buriedUntil, suspended, nextReview, status, lastModified, syncStatus, deleted, starred, tags, exampleTranslations)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            deckId = excluded.deckId,
            userId = excluded.userId,
@@ -892,7 +907,8 @@ export class Repository {
            syncStatus = excluded.syncStatus,
            deleted = excluded.deleted,
            starred = excluded.starred,
-           tags = excluded.tags`,
+           tags = excluded.tags,
+           exampleTranslations = excluded.exampleTranslations`,
         card.id,
         card.deckId,
         card.userId,
@@ -920,6 +936,7 @@ export class Repository {
         card.deleted ? 1 : 0,
         card.starred ? 1 : 0,
         JSON.stringify(card.tags ?? []),
+        JSON.stringify(card.exampleTranslations ?? []),
       );
     }
   }
@@ -929,7 +946,7 @@ export class Repository {
 
 /** Fixed SQL identifiers; callers can only patch known card columns. */
 const CARD_UPDATE_COLUMNS = [
-  'deckId', 'userId', 'front', 'back', 'language', 'examples', 'grammarNotes',
+  'deckId', 'userId', 'front', 'back', 'language', 'examples', 'exampleTranslations', 'grammarNotes',
   'relatedWords', 'interval', 'easeFactor', 'repetitions', 'phase', 'lapses',
   'learningStep', 'leech', 'introducedAt', 'dueDay', 'buriedUntil', 'suspended',
   'nextReview', 'status', 'lastModified', 'syncStatus', 'deleted', 'starred', 'tags',
@@ -961,6 +978,7 @@ interface CardRow {
   back: string;
   language: string;
   examples: string;
+  exampleTranslations: string;
   grammarNotes: string;
   relatedWords: string;
   interval: number;
@@ -1035,6 +1053,7 @@ function toCard(row: CardRow): Card {
     back: row.back,
     language: row.language as Card['language'],
     examples: parseJsonArray(row.examples),
+    exampleTranslations: parseJsonArray(row.exampleTranslations),
     grammarNotes: parseJsonArray(row.grammarNotes),
     relatedWords: parseJsonArray(row.relatedWords),
     tags: parseJsonArray(row.tags),

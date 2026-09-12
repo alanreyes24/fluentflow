@@ -47,15 +47,11 @@ export interface ExampleResult {
   error?: string;
 }
 
-/**
- * Languages whose examples are regenerated on every reveal instead of cached.
- *
- * Bosnian sentences come paired with an English translation and are meant to
- * feel fresh each time the card comes round, so they are never written to the
- * card or the `example_cache` and never served from either.
- */
-function alwaysFresh(card: Card): boolean {
-  return card.language === 'bs';
+/** Bosnian examples are reusable only when every sentence has a translation. */
+function reusable(card: Card, examples: string[], translations?: string[]): boolean {
+  return examples.length > 0 && (card.language !== 'bs' || (
+    translations?.length === examples.length && translations.every((text) => text.trim().length > 0)
+  ));
 }
 
 /**
@@ -98,12 +94,10 @@ export class ExampleService {
    * @param force   ignore every cache and re-run the model
    */
   async forCard(card: Card, force = false): Promise<ExampleResult> {
-    // Bosnian is regenerated every reveal, translation and all — the stored
-    // sentences and the word cache are both bypassed.
-    const fresh = force || alwaysFresh(card);
+    const fresh = force;
 
-    if (!fresh && card.examples.length > 0) {
-      return { examples: card.examples, source: 'cache', durationMs: 0 };
+    if (!fresh && reusable(card, card.examples, card.exampleTranslations)) {
+      return { examples: card.examples, translations: card.exampleTranslations, source: 'cache', durationMs: 0 };
     }
 
     const key = cacheKey(card);
@@ -117,7 +111,7 @@ export class ExampleService {
       // Now that the card is on screen and in the caller's hand, the examples
       // belong on it.
       if (result.source !== 'fallback' && result.examples.length > 0) {
-        await this.attachToCard(card, result.examples);
+        await this.attachToCard(card, result.examples, result.translations);
       }
       return result;
     }
@@ -153,11 +147,8 @@ export class ExampleService {
     const wanted: Card[] = [];
     for (const card of cards) {
       if (wanted.length >= PREFETCH_DEPTH) break;
-      // Bosnian is regenerated on reveal and never cached, so there is nothing
-      // for a speculative run to leave behind — it would just spend a call.
-      if (alwaysFresh(card)) continue;
       const key = cacheKey(card);
-      if (card.examples.length > 0 || this.resolved.has(key)) continue;
+      if (reusable(card, card.examples, card.exampleTranslations) || this.resolved.has(key)) continue;
       if (this.pending.has(key)) continue;
       wanted.push(card);
     }
@@ -249,11 +240,11 @@ export class ExampleService {
 
     if (!force) {
       const cached = await this.repository.getCachedExamples(card.front, card.language);
-      if (cached && cached.examples.length > 0) {
+      if (cached && reusable(card, cached.examples, cached.translations)) {
         this.resolved.add(key);
         // Promote the cache hit onto the card so it syncs to other devices.
-        if (!speculation) await this.attachToCard(card, cached.examples);
-        return { examples: cached.examples, source: 'cache', durationMs: 0 };
+        if (!speculation) await this.attachToCard(card, cached.examples, cached.translations);
+        return { examples: cached.examples, translations: cached.translations, source: 'cache', durationMs: 0 };
       }
     }
 
@@ -267,17 +258,15 @@ export class ExampleService {
       return { examples: [], source: 'fallback', durationMs: result.durationMs };
     }
 
-    // Bosnian is deliberately ephemeral: fresh sentences and a fresh
-    // translation on every reveal, written to neither the card nor the cache.
-    if (!alwaysFresh(card)) {
+    if (reusable(card, result.examples, result.translations)) {
       // Including a fallback: with no model installed every card falls back, and
       // re-deciding that on every advance is work for a foregone conclusion.
       // `reset()` clears this, which is how a newly installed model takes effect.
       this.resolved.add(key);
 
       if (result.source === 'model' && result.examples.length > 0) {
-        await this.repository.cacheExamples(card.front, card.language, result.examples, 'model');
-        if (!speculation) await this.attachToCard(card, result.examples);
+        await this.repository.cacheExamples(card.front, card.language, result.examples, 'model', result.translations);
+        if (!speculation) await this.attachToCard(card, result.examples, result.translations);
       }
     }
 
@@ -298,9 +287,10 @@ export class ExampleService {
    * not go through `rateCard`, so revealing a card never advances its interval
    * — and neither does generating one the user has not reached yet.
    */
-  private async attachToCard(card: Card, examples: string[]): Promise<void> {
-    if (sameExamples(card.examples, examples)) return;
-    await this.repository.updateCard(card, { examples });
+  private async attachToCard(card: Card, examples: string[], translations: string[] = []): Promise<void> {
+    if (!reusable(card, examples, translations)) return;
+    if (sameExamples(card.examples, examples) && sameExamples(card.exampleTranslations ?? [], translations)) return;
+    await this.repository.updateCard(card, { examples, exampleTranslations: translations });
   }
 
   /**

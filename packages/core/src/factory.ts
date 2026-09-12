@@ -38,6 +38,7 @@ export interface CreateCardInput {
   back: string;
   language: TargetLanguage;
   examples?: string[];
+  exampleTranslations?: string[];
   grammarNotes?: string[];
   relatedWords?: string[];
   tags?: string[];
@@ -56,6 +57,7 @@ export function createCard(input: CreateCardInput): Card {
     back: input.back.trim(),
     language: input.language,
     examples: input.examples ?? [],
+    exampleTranslations: input.exampleTranslations ?? [],
     grammarNotes: input.grammarNotes ?? [],
     relatedWords: input.relatedWords ?? [],
     tags: input.tags ?? [],

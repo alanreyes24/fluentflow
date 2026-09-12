@@ -79,6 +79,9 @@ export default function SettingsScreen() {
                   : t('offline')}
               </Label>
               <Spacer size={theme.spacing.sm} />
+              {sync.error ? (
+                <Label variant="caption" tone="danger">{sync.error}</Label>
+              ) : null}
               <Button
                 label={t('syncNow')}
                 variant="secondary"
