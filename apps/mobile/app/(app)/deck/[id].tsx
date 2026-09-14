@@ -112,7 +112,7 @@ export default function DeckScreen() {
   if (loading) {
     return (
       <Screen>
-        <Loading label={t('loading')} />
+        <Loading fullScreen label={t('loading')} />
       </Screen>
     );
   }

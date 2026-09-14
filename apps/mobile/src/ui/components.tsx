@@ -816,10 +816,10 @@ export function EmptyState({
   );
 }
 
-export function Loading({ label }: { label?: string }) {
+export function Loading({ label, fullScreen = false }: { label?: string; fullScreen?: boolean }) {
   const theme = useTheme();
   return (
-    <View style={styles.loading}>
+    <View style={[styles.loading, fullScreen && styles.grow]}>
       <ActivityIndicator color={theme.colors.accent} />
       {label ? (
         <Label variant="caption" tone="muted" style={styles.loadingLabel}>

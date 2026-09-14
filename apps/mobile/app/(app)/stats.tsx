@@ -90,7 +90,7 @@ export default function StatsScreen() {
   if (loading || !view || !stats) {
     return (
       <Screen>
-        <Loading label={t('loading')} />
+        <Loading fullScreen label={t('loading')} />
       </Screen>
     );
   }

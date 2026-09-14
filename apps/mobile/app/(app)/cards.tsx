@@ -85,7 +85,7 @@ export default function CardsScreen() {
   };
 
   if (loading) {
-    return <Screen><Loading label={t('loading')} /></Screen>;
+    return <Screen><Loading fullScreen label={t('loading')} /></Screen>;
   }
 
   return (

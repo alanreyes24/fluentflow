@@ -44,6 +44,34 @@ async function mount({ enabled }: { enabled: boolean }): Promise<Harness> {
 }
 
 describe('useCardGestures on web', () => {
+  it('handles Space on keydown before a focused button consumes it', async () => {
+    const harness = await mount({ enabled: false });
+    const button = document.createElement('button');
+    const buttonHandler = jest.fn((event: Event) => event.preventDefault());
+    button.addEventListener('keydown', buttonHandler);
+    document.body.appendChild(button);
+    try {
+      button.focus();
+      const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+      act(() => { button.dispatchEvent(event); });
+      expect(harness.reveal).toHaveBeenCalledTimes(1);
+      expect(event.defaultPrevented).toBe(true);
+      expect(buttonHandler).not.toHaveBeenCalled();
+    } finally {
+      button.remove();
+      await harness.unmount();
+    }
+  });
+
+  it('prevents Space from activating a focused rating after reveal', async () => {
+    const harness = await mount({ enabled: true });
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    act(() => { document.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(harness.rate).not.toHaveBeenCalled();
+    await harness.unmount();
+  });
+
   it('maps 1-4 onto the ratings in button order', async () => {
     const cases: [string, RatingName][] = [
       ['1', 'again'],

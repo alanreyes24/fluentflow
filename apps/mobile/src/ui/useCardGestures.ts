@@ -45,15 +45,18 @@ export function useCardGestures({
     const onKeyDown = (event: Event) => {
       const keyboard = event as KeyboardEvent;
       if (!latest.current.active || event.defaultPrevented || keyboard.repeat ||
-          keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.shiftKey) return;
+          keyboard.isComposing || keyboard.ctrlKey || keyboard.metaKey || keyboard.altKey || keyboard.shiftKey) return;
       // Never steal a keystroke from a text field.
       if (isTextEntry(keyboard.target)) return;
 
       const { enabled: canRate, onRate: rate, onReveal: reveal } = latest.current;
 
       if (keyboard.key === ' ' || keyboard.key === 'Enter') {
+        // Handle these before React Native's focused Pressable does. Otherwise
+        // Space can activate a previously clicked control or wait for keyup.
+        event.preventDefault();
+        event.stopPropagation();
         if (!canRate) {
-          event.preventDefault();
           reveal();
         }
         return;
@@ -62,12 +65,13 @@ export function useCardGestures({
       const rating = ratingFromValue(Number(keyboard.key));
       if (rating && canRate) {
         event.preventDefault();
+        event.stopPropagation();
         rate(rating);
       }
     };
 
-    target.addEventListener('keydown', onKeyDown);
-    return () => target.removeEventListener('keydown', onKeyDown);
+    target.addEventListener('keydown', onKeyDown, true);
+    return () => target.removeEventListener('keydown', onKeyDown, true);
   }, []);
 
   return { handlers: {} };

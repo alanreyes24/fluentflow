@@ -76,6 +76,22 @@ describe('StudyScreen', () => {
     expect(screen.getByRole('button', { name: 'Good' })).toBeTruthy();
   });
 
+  it('accepts the next rating while deck totals are still refreshing', async () => {
+    await seed([['hablar', 'to speak'], ['comer', 'to eat'], ['vivir', 'to live']]);
+    const refreshDecks = jest.fn(() => new Promise<void>(() => {}));
+    const rateCard = jest.spyOn(repository, 'rateCard');
+    await renderScreen(<StudyScreen />, { repository, examples, overrides: { refreshDecks } });
+    await screen.findByText('hablar');
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+    await screen.findByText('comer');
+    expect(refreshDecks).toHaveBeenCalledTimes(1);
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+    await screen.findByText('vivir');
+    expect(rateCard).toHaveBeenCalledTimes(2);
+  });
+
   it('persists favorites across reveal, review, and reopening the session', async () => {
     const [first] = await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
     const view = await show();

@@ -67,7 +67,7 @@ function Gate() {
   if (!booted) {
     return (
       <Screen>
-        <Loading />
+        <Loading fullScreen />
       </Screen>
     );
   }

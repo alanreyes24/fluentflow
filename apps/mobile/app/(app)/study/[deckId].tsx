@@ -249,7 +249,11 @@ export default function StudyScreen() {
         // on the end of the queue; anything further out is done for today.
         if (dueWithinSession(answered)) setQueue((current) => [...current, answered]);
         setIndex((current) => current + 1);
-        await refreshDecks();
+        // Deck totals are background work: the next card is already ready for
+        // input, so do not keep its rating locked while every deck is queried.
+        void refreshDecks().catch((error) => {
+          setToast(error instanceof Error ? error.message : String(error));
+        });
       })().catch((error) => {
         setToast(error instanceof Error ? error.message : String(error));
       }).finally(() => { ratingPending.current = false; });
@@ -495,13 +499,13 @@ export default function StudyScreen() {
     onRate: rate,
     onReveal: reveal,
     enabled: revealed && !editing && !toolsOpen && !chatOpen,
-    active: !editing && !toolsOpen && !chatOpen,
+    active: !loading && !!card && !editing && !toolsOpen && !chatOpen,
   });
 
   if (loading) {
     return (
       <Screen>
-        <Loading label={t('loading')} />
+        <Loading fullScreen label={t('loading')} />
       </Screen>
     );
   }
@@ -512,7 +516,7 @@ export default function StudyScreen() {
         {completionError ? <>
           <Label>{completionError}</Label>
           <Button label={t('retry')} onPress={() => setCompletionAttempt((attempt) => attempt + 1)} />
-        </> : <Loading label={t('loading')} />}
+        </> : <Loading fullScreen label={t('loading')} />}
       </Screen>
     );
   }

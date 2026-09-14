@@ -22,6 +22,7 @@
  */
 
 const { execFileSync } = require('node:child_process');
+const { readdirSync } = require('node:fs');
 const { join } = require('node:path');
 
 exports.default = async function afterPack(context) {
@@ -35,6 +36,20 @@ exports.default = async function afterPack(context) {
   }
 
   const app = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
+  // Electron's helper and framework bundles retain linker signatures. Seal them before
+  // signing the containing app so verification succeeds for nested code too.
+  const frameworks = join(app, 'Contents', 'Frameworks');
+  for (const entry of readdirSync(frameworks, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/\.(app|framework)$/.test(entry.name)) continue;
+    const entitlements = entry.name.endsWith('.app')
+      ? ['--entitlements', join(__dirname, '..', 'build', 'entitlements.mac.plist')]
+      : [];
+    execFileSync(
+      'codesign',
+      ['--force', '--sign', '-', '--options', 'runtime', ...entitlements, join(frameworks, entry.name)],
+      { stdio: 'inherit' },
+    );
+  }
   // `--options runtime` keeps the ad-hoc signature consistent with
   // `hardenedRuntime: true` in the config and the entitlements file.
   execFileSync(
@@ -42,5 +57,6 @@ exports.default = async function afterPack(context) {
     ['--force', '--sign', '-', '--options', 'runtime', '--entitlements', join(__dirname, '..', 'build', 'entitlements.mac.plist'), app],
     { stdio: 'inherit' },
   );
+  execFileSync('codesign', ['--verify', '--deep', '--strict', app], { stdio: 'inherit' });
   console.log(`  • ad-hoc signed ${app}`);
 };
