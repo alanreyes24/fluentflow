@@ -28,7 +28,7 @@
     "expo-status-bar": "^57.0.1",
     "firebase": "^12.18.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3",
+    "react-dom": "19.3.0",
     "react-native": "0.86.3",
     "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "^5.9.1",
