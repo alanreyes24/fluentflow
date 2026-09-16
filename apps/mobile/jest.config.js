@@ -27,6 +27,9 @@ const shared = {
 };
 
 module.exports = {
+  // Expo's first transforms are expensive. Bound parallelism so cold installs
+  // do not spend the first view test's timeout competing for CPU and memory.
+  maxWorkers: 2,
   projects: [
     {
       ...shared,

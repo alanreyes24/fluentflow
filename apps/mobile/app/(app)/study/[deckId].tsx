@@ -528,7 +528,19 @@ export default function StudyScreen() {
       <View style={[styles.stage, wide ? styles.stageWide : null]}>
         <View style={styles.studyHeader}>
           <Row style={styles.studyToolbar}>
-            <View style={styles.toolbarSide} />
+            <View style={styles.toolbarSide}>
+              {!editing ? (
+                <Button
+                  label={t('edit')}
+                  variant="ghost"
+                  onPress={() => {
+                    setToolsOpen(false);
+                    setEditError(null);
+                    setEditing(true);
+                  }}
+                />
+              ) : null}
+            </View>
             <View style={styles.chatButton}>
             <Button label={chatOpen ? t('chatHide') : t('chatOpen')} variant="ghost"
               onPress={() => setChatOpen((open) => !open)} />
@@ -708,16 +720,6 @@ export default function StudyScreen() {
                   <>
                     <Spacer size={theme.spacing.sm} />
                     <Row gap={theme.spacing.xs}>
-                      <Button
-                        label={t('edit')}
-                        variant="secondary"
-                        onPress={() => {
-                          setToolsOpen(false);
-                          setEditError(null);
-                          setEditing(true);
-                        }}
-                        style={styles.flex}
-                      />
                       <Button
                         label={t('bury')}
                         variant="secondary"

@@ -8,7 +8,9 @@ build/
 .expo-shared/
 *.tsbuildinfo
 .env
-.env.local
+.env.*
+!.env.example
+!**/.env.example
 *.log
 npm-debug.log*
 yarn-error.log
@@ -17,7 +19,28 @@ Thumbs.db
 
 # Firebase service credentials
 **/serviceAccount*.json
+**/service-account*.json
+**/*firebase-adminsdk*.json
 !**/serviceAccount.example.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+
+# Personal study data and local-only helpers/configuration
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.apkg
+*.colpkg
+cloud.json
+scripts/local/
+.firebaserc.local
+coverage/
 
 # Test scratch
 packages/core/test/.fixtures/

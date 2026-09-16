@@ -55,8 +55,8 @@ async function main() {
     await buildWebExport();
   }
 
-  const sync = await startSyncServer();
   const site = await startStaticServer();
+  const sync = await startSyncServer(site.url);
   const browser = await launchChrome();
   const page = await browser.newPage();
   await page.setViewport({ width: 430, height: 932, deviceScaleFactor: 2 });
@@ -561,8 +561,14 @@ function startStaticServer() {
   });
 }
 
-function startSyncServer() {
-  const config = loadConfig({ ...process.env, NODE_ENV: 'test', PORT: '8787' });
+function startSyncServer(origin) {
+  const config = loadConfig({
+    ...process.env,
+    NODE_ENV: 'test',
+    FLUENTFLOW_MODE: 'local',
+    PORT: '8787',
+    CORS_ORIGINS: origin,
+  });
   const app = createApp({ config, store: new MemoryStore() });
   return new Promise((done) => {
     const server = app.listen(8787, '127.0.0.1', () => done(server));

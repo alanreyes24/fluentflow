@@ -397,20 +397,20 @@ describe('StudyScreen', () => {
     await show();
 
     await screen.findByText('hablar');
-    await reveal();
-    await screen.findByText('to speak');
-
-    await fireEvent.press(screen.getByRole('button', { name: 'Study options' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Edit' }));
 
     const back = await screen.findByLabelText('Meaning or translation');
     await fireEvent.changeText(back, 'to talk');
     await fireEvent.press(screen.getByRole('button', { name: 'Save' }));
 
-    // Back on the same card, still first in the queue, with the new wording.
-    await screen.findByText('to talk');
-    expect(screen.getByText('hablar')).toBeTruthy();
+    // Back on the same card, still first in the queue and awaiting reveal.
+    await screen.findByText('hablar');
+    expect(screen.queryByText('to talk')).toBeNull();
     expect(screen.getByText('1 / 2')).toBeTruthy();
+
+    await reveal();
+    await screen.findByText('to talk');
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy();
 
     const stored = await repository.getCard(card!.id);
     expect(stored?.back).toBe('to talk');

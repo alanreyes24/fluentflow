@@ -84,6 +84,32 @@ test('health does not require a token', async () => {
   assert.deepEqual((await response.json()).mode, 'local');
 });
 
+test('local API permits the development UI origins', async () => {
+  for (const origin of ['http://localhost:8081', 'http://127.0.0.1:8081', 'app://fluentflow']) {
+    const response = await call('/api/ai/status', {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization',
+      },
+    });
+    assert.equal(response.headers.get('access-control-allow-origin'), origin);
+  }
+});
+
+test('local API does not grant browser access to an unrelated website', async () => {
+  const response = await call('/api/ai/chat', {
+    method: 'OPTIONS',
+    headers: {
+      origin: 'https://untrusted.example',
+      'access-control-request-method': 'POST',
+      'access-control-request-headers': 'authorization,content-type',
+    },
+  });
+  assert.equal(response.headers.get('access-control-allow-origin'), null);
+});
+
 test('the sync endpoints reject an unauthenticated caller', async () => {
   const cases: [string, RequestInit][] = [
     ['/api/sync', { method: 'GET' }],

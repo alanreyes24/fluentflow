@@ -6,7 +6,7 @@
   "scripts": {
     "start": "expo start --web",
     "web": "expo start --web",
-    "export:web": "expo export --platform web",
+    "export:web": "expo export --platform web --clear",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "expo lint",
     "test": "jest"
@@ -53,5 +53,6 @@
         "typescript"
       ]
     }
-  }
+  },
+  "license": "MIT"
 }

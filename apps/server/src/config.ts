@@ -55,13 +55,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     mode,
     port: Number(env.PORT ?? 8787),
-    host: env.HOST ?? '0.0.0.0',
+    host: env.HOST ?? (mode === 'local' ? '127.0.0.1' : '0.0.0.0'),
     geminiApiKey: env.GEMINI_API_KEY ?? env.GOOGLE_API_KEY ?? undefined,
     geminiModel: env.GEMINI_MODEL ?? undefined,
     projectId,
     credentialsPath,
     emulatorHost,
     maxUploadBytes: Number(env.MAX_UPLOAD_BYTES ?? 200 * 1024 * 1024),
-    corsOrigins: (env.CORS_ORIGINS ?? '*').split(',').map((o) => o.trim()).filter(Boolean),
+    corsOrigins: (
+      env.CORS_ORIGINS ??
+      'http://localhost:8081,http://127.0.0.1:8081,app://fluentflow'
+    ).split(',').map((o) => o.trim()).filter(Boolean),
   };
 }

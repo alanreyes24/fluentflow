@@ -2,7 +2,7 @@
   "name": "fluentflow",
   "private": true,
   "version": "0.1.0",
-  "description": "Desktop flashcard learning app with a local dictionary and hosted example generation",
+  "description": "A vibe-coded personal app for practicing languages with flashcards",
   "workspaces": [
     "packages/*",
     "apps/server",
@@ -34,7 +34,7 @@
     "verify:desktop": "node scripts/verify-desktop.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=26.1.0"
   },
   "overrides": {
     "react-native": "0.86.3",
@@ -43,5 +43,14 @@
   },
   "devDependencies": {
     "puppeteer-core": "^24.43.1"
-  }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alanreyes24/fluentflow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/alanreyes24/fluentflow/issues"
+  },
+  "homepage": "https://github.com/alanreyes24/fluentflow#readme"
 }

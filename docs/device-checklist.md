@@ -1,23 +1,23 @@
 # Device checklist: iPhone, Expo Go
 
 `verify-web.mjs` drives the web build through Chrome and `verify-desktop.mjs`
-drives the packaged Windows app. Nothing here can drive a phone, so this is the
+drives the packaged desktop app. Nothing here can drive a phone, so this is the
 manual equivalent: an ordered walkthrough where every step is a claim that
 either holds or does not.
 
-It exists because [platform-status.md](platform-status.md) says iOS has never
-run, and that is the largest outstanding claim in the repository. Working
-through this once converts it into evidence.
+Use this to record native behavior that desktop tests cannot cover. Add the
+device, OS version, commit, and results to [platform-status.md](platform-status.md).
 
-Current as of 4 September 2026, against Expo SDK 57.
+Checklist for Expo SDK 57. This is a test plan, not a completed test record.
 
 ## Before you start
 
 ```
-npm install
+npm ci
 npm run build          # the app imports @fluentflow/core from dist/
 npm run sample-deck    # writes sample-deck-60-schema18.apkg
-npm run mobile         # Expo dev server, then scan the QR code
+cd apps/mobile
+npx expo start         # Expo dev server, then scan the QR code
 ```
 
 Install **Expo Go** from the App Store first. The phone and this machine must be
@@ -29,8 +29,8 @@ Two things usually go wrong from Windows, in this order:
   behind the terminal; allow it on private networks. If the QR code scans but
   the bundle never loads, this is why.
 - **Client isolation** on the Wi-Fi network (common on guest and university
-  networks) stops the phone reaching this machine at all. `npm run mobile --
-  --tunnel` routes through Expo's relay instead. It is slower and it works.
+  networks) stops the phone reaching this machine at all. From `apps/mobile`,
+  `npx expo start --tunnel` can route through Expo's relay instead.
 
 ## What this run can and cannot prove
 
@@ -41,7 +41,7 @@ build:
 | Reachable | Not reachable in Expo Go |
 | --- | --- |
 | Native `expo-sqlite` | The app icon and splash screen — Expo Go shows its own |
-| `.apkg` import through the document picker | ONNX Runtime and the model weights, neither installed |
+| `.apkg` import through the document picker | Desktop bridge and hosted AI features |
 | NetInfo on a real radio | Firebase auth persistence — `extra.firebase` is empty, so there is no sign-in |
 | Touch gestures, safe-area insets, dark mode | |
 | The statistics screen under Hermes | |
