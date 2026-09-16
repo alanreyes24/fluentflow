@@ -23,7 +23,7 @@
     "cross-env": "^7.0.3",
     "electron": "^44.1.1",
     "electron-builder": "^25.1.8",
-    "resedit": "^1.7.2"
+    "resedit": "^3.1.0"
   },
   "build": {
     "appId": "com.fluentflow.desktop",
