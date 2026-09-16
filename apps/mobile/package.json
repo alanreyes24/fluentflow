@@ -26,7 +26,7 @@
     "expo-splash-screen": "^57.0.8",
     "expo-sqlite": "^57.0.2",
     "expo-status-bar": "^57.0.1",
-    "firebase": "^12.18.0",
+    "firebase": "^12.19.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
