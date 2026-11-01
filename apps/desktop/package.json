@@ -118,7 +118,7 @@
   },
   "dependencies": {
     "@fluentflow/core": "file:../../packages/core",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.11"
   },
   "license": "MIT"
 }
