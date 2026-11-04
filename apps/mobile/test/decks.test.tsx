@@ -1,4 +1,5 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react-native';
+import { useCallback, useState } from 'react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react-native';
 import { collectionDayKey, type Deck } from '@fluentflow/core';
 import DecksScreen from '../app/(app)/decks';
 import DeckScreen from '../app/(app)/deck/[id]';
@@ -7,7 +8,8 @@ import { BottomBar } from '../src/ui/BottomBar';
 import { SyncIndicator } from '../src/ui/SyncIndicator';
 import { Repository } from '../src/db/repository';
 import { createTestRepository } from './fakes/database';
-import { mockRouter, mockSearchParams, renderScreen, TEST_USER } from './setup';
+import { AppContext } from '../src/state/app';
+import { createAppState, mockRouter, mockSearchParams, renderScreen, TEST_USER } from './setup';
 
 /**
  * The deck list, the toolbar under it, and the offline indicator in that
@@ -63,6 +65,36 @@ describe('DecksScreen', () => {
       expect(screen.getByText('20 due')).toBeTruthy();
     });
     expect(screen.queryByText('25 due')).toBeNull();
+  });
+
+  it('refreshes the deck list once on focus instead of looping', async () => {
+    const deck = await repository.createDeck(TEST_USER.id, 'Spanish', 'es');
+    await repository.addCard(TEST_USER.id, deck, 'hablar', 'to speak');
+    const initial = await repository.listDecks(TEST_USER.id);
+    const base = createAppState({ repository, decks: initial });
+    let refreshes = 0;
+
+    // Like the real provider, every refresh stores a brand-new array even when
+    // nothing changed. A focus effect that depends on anything derived from
+    // `decks` would then re-run forever.
+    function LiveDecks() {
+      const [decks, setDecks] = useState<Deck[]>(initial);
+      const refreshDecks = useCallback(async () => {
+        refreshes += 1;
+        setDecks(await repository.listDecks(TEST_USER.id));
+      }, []);
+      return (
+        <AppContext.Provider value={{ ...base, decks, refreshDecks }}>
+          <DecksScreen />
+        </AppContext.Provider>
+      );
+    }
+
+    await renderScreen(<LiveDecks />, { repository, decks: initial });
+    await screen.findByText('Spanish');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+
+    expect(refreshes).toBe(1);
   });
 
   it('breaks a deck down into new, learning and mastered', async () => {

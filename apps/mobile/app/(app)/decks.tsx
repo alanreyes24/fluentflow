@@ -102,10 +102,14 @@ export default function DecksScreen() {
   }, [loadProgress]);
 
   // Reviews happen on another screen, so counts are stale on the way back.
+  // Only refresh the deck list here: the new `decks` array gives
+  // `loadProgress` a new identity, and the effect above reloads progress.
+  // Depending on `loadProgress` here would re-run this focus effect on every
+  // refresh, an endless refresh → new decks → refresh loop while focused.
   useFocusEffect(
     useCallback(() => {
-      void refreshDecks().then(loadProgress);
-    }, [refreshDecks, loadProgress]),
+      void refreshDecks();
+    }, [refreshDecks]),
   );
 
   const totals = decks.reduce(
