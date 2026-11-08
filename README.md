@@ -83,8 +83,11 @@ same origin, which also gives the hosted app Gemini examples and Anki import.
 On iPhone, open the deployed URL in Safari and choose **Share → Add to Home
 Screen** to launch it full screen like an app.
 
-1. In Railway, create a service from this GitHub repo. `railway.json` selects
-   the `Dockerfile`; Railway provides `PORT`.
+1. In Railway, create a service from this GitHub repo. Railway detects the npm
+   workspaces and offers one service per package: keep only
+   `@fluentflow/server` (its `apps/server/railway.json` builds the root
+   `Dockerfile`, which also bundles the web app) and delete the others.
+   Railway provides `PORT`.
 2. Set these service variables. The `EXPO_PUBLIC_*` values are the same public
    Firebase web config as in `.env`, and are baked into the bundle at build time.
    - `EXPO_PUBLIC_FLUENTFLOW_FIREBASE_API_KEY`, `..._AUTH_DOMAIN`,
