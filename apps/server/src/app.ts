@@ -11,6 +11,8 @@ import {
   type TargetLanguage,
   isTargetLanguage,
 } from '@fluentflow/core';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Config } from './config.ts';
 import { requireAuth, type AuthedRequest } from './auth.ts';
 import { aiStatus, examplesWithAi, resolveWithAi } from './ai.ts';
@@ -209,12 +211,70 @@ export function createApp({ config, store }: AppDeps): express.Express {
     },
   );
 
+  if (config.webDir) serveWebApp(app, config.webDir);
+
   app.use((_req, res) => {
     res.status(404).json({ error: 'not_found' });
   });
 
   app.use(errorHandler);
   return app;
+}
+
+/**
+ * Host the exported web app on the API's own origin.
+ *
+ * The browser build stores its SQLite database through a worker that shares
+ * memory with the page (`SharedArrayBuffer`), which browsers only allow on a
+ * cross-origin isolated page — hence the COOP/COEP pair on every response.
+ * Fingerprinted bundles are cached forever; everything else, `index.html`
+ * above all, is revalidated so a deploy reaches an installed home-screen app
+ * on its next launch.
+ */
+function serveWebApp(app: express.Express, webDir: string): void {
+  const index = join(webDir, 'index.html');
+  if (!existsSync(index)) {
+    console.warn(`[fluentflow] no web build at ${webDir}; serving the API only.`);
+    return;
+  }
+
+  app.use((req, res, next) => {
+    if (isApiPath(req.path)) {
+      next();
+      return;
+    }
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+    next();
+  });
+
+  app.use(
+    express.static(webDir, {
+      index: false,
+      setHeaders(res, filePath) {
+        res.setHeader(
+          'Cache-Control',
+          filePath.includes(join('_expo', 'static'))
+            ? 'public, max-age=31536000, immutable'
+            : 'no-cache',
+        );
+      },
+    }),
+  );
+
+  // Client-side routes (`/decks`, `/study/abc`) all load the single page.
+  app.get('*', (req, res, next) => {
+    if (isApiPath(req.path)) {
+      next();
+      return;
+    }
+    res.setHeader('Cache-Control', 'no-cache');
+    res.sendFile(index);
+  });
+}
+
+function isApiPath(path: string): boolean {
+  return path === '/health' || path === '/api' || path.startsWith('/api/');
 }
 
 /** Maps domain errors onto status codes; everything else is a 500. */

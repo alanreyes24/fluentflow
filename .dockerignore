@@ -1,0 +1,23 @@
+# Keep secrets, local data and other apps' build output out of the image.
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+**/.expo
+.git
+apps/desktop
+.model-cache
+.web-export
+.web-export-shots
+.desktop-shots
+.ios-export
+coverage
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.apkg
+**/serviceAccount*.json
+**/service-account*.json
+**/*firebase-adminsdk*.json

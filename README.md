@@ -76,6 +76,29 @@ still study and use cached or template example sentences.
 connects to mine. Configuration and deployment steps are in
 [the development guide](docs/development.md).
 
+## Hosted web app (Railway)
+
+The repo deploys as one service that serves the web app and its API from the
+same origin, which also gives the hosted app Gemini examples and Anki import.
+On iPhone, open the deployed URL in Safari and choose **Share → Add to Home
+Screen** to launch it full screen like an app.
+
+1. In Railway, create a service from this GitHub repo. `railway.json` selects
+   the `Dockerfile`; Railway provides `PORT`.
+2. Set these service variables. The `EXPO_PUBLIC_*` values are the same public
+   Firebase web config as in `.env`, and are baked into the bundle at build time.
+   - `EXPO_PUBLIC_FLUENTFLOW_FIREBASE_API_KEY`, `..._AUTH_DOMAIN`,
+     `..._PROJECT_ID`, `..._STORAGE_BUCKET`, `..._MESSAGING_SENDER_ID`, `..._APP_ID`
+   - `GEMINI_API_KEY` (runtime only; never use an `EXPO_PUBLIC_` name for it)
+   - `FLUENTFLOW_ALLOWED_EMAILS`: your sign-in email(s), comma separated. Without
+     it, anyone who registers in your Firebase project can spend your Gemini key.
+3. Generate a domain under **Settings → Networking**. If your Firebase API key
+   is restricted by HTTP referrer, add that domain to the key's allowed list.
+
+The server verifies Firebase ID tokens with only the project id. Set
+`FIREBASE_SERVICE_ACCOUNT_JSON` (the key file's contents) only if you also want
+revoked-token checks or the HTTP sync endpoints.
+
 ## Data and privacy
 
 Studying without an account stores cards and review history on your device.

@@ -1,9 +1,8 @@
-import { cert, getApps, initializeApp, applicationDefault, type App } from 'firebase-admin/app';
 import { getFirestore, type Firestore, type DocumentReference } from 'firebase-admin/firestore';
-import { readFileSync } from 'node:fs';
 import type { Card, Deck } from '@fluentflow/core';
 import { resolveConflict } from '@fluentflow/core';
 import type { Config } from '../config.ts';
+import { adminApp } from '../firebase-admin.ts';
 import { toStored, type Store } from './types.ts';
 
 /**
@@ -24,7 +23,7 @@ export class FirestoreStore implements Store {
   private readonly db: Firestore;
 
   constructor(config: Config) {
-    this.db = getFirestore(initialiseApp(config));
+    this.db = getFirestore(adminApp(config));
     this.db.settings({ ignoreUndefinedProperties: true });
   }
 
@@ -106,21 +105,6 @@ export class FirestoreStore implements Store {
 
     return winners;
   }
-}
-
-function initialiseApp(config: Config): App {
-  const existing = getApps()[0];
-  if (existing) return existing;
-
-  if (config.credentialsPath) {
-    const serviceAccount = JSON.parse(readFileSync(config.credentialsPath, 'utf8'));
-    return initializeApp({ credential: cert(serviceAccount), projectId: config.projectId });
-  }
-  // The emulator needs no credential; on Cloud Run the metadata server supplies one.
-  if (config.emulatorHost) {
-    return initializeApp({ projectId: config.projectId });
-  }
-  return initializeApp({ credential: applicationDefault(), projectId: config.projectId });
 }
 
 function dedupeById<T extends { id: string; lastModified: string }>(records: T[]): T[] {

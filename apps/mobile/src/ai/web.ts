@@ -7,7 +7,7 @@ import type { LookupOptions, LookupSources, MeaningLookupResult } from './deskto
 import { appConfig } from '../firebase/config';
 import { authApi } from '../firebase/client';
 
-/** Browser client for the localhost AI proxy. The Gemini key never enters this bundle. */
+/** Browser client for the server AI proxy (localhost in development, the hosting server in production). The Gemini key never enters this bundle. */
 
 export function webAiAvailable(): boolean {
   return Platform.OS === 'web' && appConfig.apiBaseUrl !== null;
@@ -18,7 +18,7 @@ export async function lookupSourcesOnWeb(): Promise<LookupSources> {
   return {
     dictionary: body.dictionary ?? {
       available: false,
-      reason: 'The localhost dictionary is not available.',
+      reason: 'The server dictionary is not available.',
     },
     cloud: body.cloud,
   };
@@ -55,7 +55,7 @@ export async function generateExamplesOnWeb(input: {
 
 async function request(path: string, init: RequestInit): Promise<any> {
   const base = appConfig.apiBaseUrl;
-  if (!webAiAvailable() || !base) throw new Error('The localhost AI server is not configured.');
+  if (!webAiAvailable() || !base) throw new Error('The AI server is not configured.');
 
   const token = (await authApi()?.idToken()) ?? 'local:local-user';
   const response = await fetch(`${base}${path}`, {
@@ -68,7 +68,7 @@ async function request(path: string, init: RequestInit): Promise<any> {
   });
   const body = await response.json().catch(() => null);
   if (!response.ok || !body) {
-    throw new Error(body?.message ?? `The localhost AI server failed (HTTP ${response.status}).`);
+    throw new Error(body?.message ?? `The AI server failed (HTTP ${response.status}).`);
   }
   return body;
 }

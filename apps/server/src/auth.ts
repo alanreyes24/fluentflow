@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { getAuth } from 'firebase-admin/auth';
 import type { Config } from './config.ts';
+import { adminApp, hasAdminCredentials } from './firebase-admin.ts';
 
 /**
  * Bearer-token authentication.
@@ -43,7 +44,19 @@ export function requireAuth(config: Config) {
     }
 
     try {
-      const decoded = await getAuth().verifyIdToken(token, true);
+      // Revocation checks call the Admin API, which needs a service account.
+      // Without one the signature, expiry and audience are still verified.
+      const decoded = await getAuth(adminApp(config)).verifyIdToken(
+        token,
+        hasAdminCredentials(config),
+      );
+      // Not gated on email_verified: email/password accounts start unverified,
+      // and Firebase allows only one account per address.
+      const email = decoded.email?.toLowerCase();
+      if (config.allowedEmails && !(email && config.allowedEmails.includes(email))) {
+        res.status(403).json({ error: 'forbidden', message: 'This account is not allowed on this server.' });
+        return;
+      }
       req.userId = decoded.uid;
       next();
     } catch (error) {

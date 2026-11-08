@@ -60,8 +60,9 @@ function buildConfig(): AppConfig {
   // Expo's web runtime can deserialize a null extra value as an empty object.
   // Treat anything other than a string as absent; calling replace() on that
   // value otherwise prevents the entire packaged renderer from mounting.
-  const apiBaseUrl =
-    typeof extra.apiBaseUrl === 'string' ? extra.apiBaseUrl.replace(/\/+$/, '') || null : null;
+  const apiBaseUrl = resolveApiBaseUrl(
+    process.env.EXPO_PUBLIC_FLUENTFLOW_API_BASE_URL ?? extra.apiBaseUrl,
+  );
 
   return {
     apiBaseUrl,
@@ -82,3 +83,18 @@ export const isCloudEnabled = appConfig.firebase !== null;
 
 /** The user id used before (or instead of) signing in. */
 export const LOCAL_USER_ID = 'local-user';
+
+/**
+ * `same-origin` means the page and the API are served by the same host — the
+ * hosted web build, where the server also serves the bundle. It resolves to
+ * the page's own origin, so one build works on any domain it is deployed to.
+ */
+function resolveApiBaseUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const value = raw.trim();
+  if (value === 'same-origin') {
+    const origin = typeof window !== 'undefined' ? window.location?.origin : undefined;
+    return origin && origin !== 'null' ? origin : null;
+  }
+  return value.replace(/\/+$/, '') || null;
+}

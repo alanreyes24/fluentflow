@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Platform, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../src/state/app';
 import { subscribeToShellImports } from '../../src/desktop-import';
 import { BottomBar } from '../../src/ui/BottomBar';
@@ -23,6 +24,8 @@ import { useTheme } from '../../src/ui/theme';
 export default function AppLayout() {
   const { user } = useApp();
   const theme = useTheme();
+  // The status bar on a full-screen phone; the bottom bar takes the bottom inset.
+  const { top } = useSafeAreaInsets();
 
   // The desktop shell can ask for an import from the File menu, a dropped file
   // or a deck opened with the app. This is the only place mounted for the whole
@@ -51,7 +54,7 @@ export default function AppLayout() {
   const shellBackground = onMacDesktop() ? 'transparent' : theme.colors.background;
 
   return (
-    <View style={{ flex: 1, backgroundColor: shellBackground }}>
+    <View style={{ flex: 1, backgroundColor: shellBackground, paddingTop: top }}>
       <TitleBar />
       {/* `minWidth: 0` so a long word on a card shrinks the pane's content
           rather than stretching the window. */}

@@ -28,3 +28,21 @@ test('a Firebase deployment can explicitly configure its bind address and origin
   assert.equal(config.host, '0.0.0.0');
   assert.deepEqual(config.corsOrigins, ['https://study.example', 'https://preview.example']);
 });
+
+test('a hosted build needs only the web client project id to select firebase mode', () => {
+  const config = loadConfig({
+    NODE_ENV: 'production',
+    EXPO_PUBLIC_FLUENTFLOW_FIREBASE_PROJECT_ID: 'web-project',
+    FLUENTFLOW_ALLOWED_EMAILS: ' Me@Example.com , other@example.com ',
+  });
+  assert.equal(config.mode, 'firebase');
+  assert.equal(config.projectId, 'web-project');
+  assert.equal(config.host, '0.0.0.0');
+  assert.ok(config.webDir?.endsWith(`mobile/dist`));
+  assert.deepEqual(config.allowedEmails, ['me@example.com', 'other@example.com']);
+});
+
+test('development does not serve a stale web export', () => {
+  assert.equal(loadConfig({}).webDir, undefined);
+  assert.equal(loadConfig({}).allowedEmails, undefined);
+});

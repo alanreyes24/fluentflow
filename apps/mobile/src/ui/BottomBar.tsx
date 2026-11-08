@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { router, usePathname } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../i18n';
 import { Label } from './components';
 import { SyncIndicator } from './SyncIndicator';
@@ -35,6 +36,9 @@ export function BottomBar() {
   const theme = useTheme();
   const pathname = usePathname();
   const { compact } = useLayout();
+  // The home indicator on a full-screen phone (a home-screen web app, or the
+  // native build). Zero on desktop and in a browser tab with its own toolbar.
+  const { bottom } = useSafeAreaInsets();
 
   return (
     <View
@@ -43,6 +47,8 @@ export function BottomBar() {
         {
           backgroundColor: onMacDesktop() ? 'transparent' : theme.colors.bar,
           borderTopColor: theme.colors.border,
+          gap: compact ? 0 : 4,
+          paddingBottom: BAR_PADDING + bottom,
         },
         // A translucent bar over scrolling content needs the blur to stay
         // legible; harmless where the bar is opaque, and a no-op off web.
@@ -58,6 +64,7 @@ export function BottomBar() {
       />
       <BarAction
         label={t('newDeck')}
+        selected={pathname === '/new-deck' || pathname === '/import'}
         onPress={() => router.push('/(app)/new-deck')}
       />
       <BarAction
@@ -65,7 +72,11 @@ export function BottomBar() {
         selected={pathname === '/cards'}
         onPress={() => router.push('/(app)/cards')}
       />
-      <BarAction label={t('pasteShort')} onPress={() => router.push('/(app)/text-import')} />
+      <BarAction
+        label={t('pasteShort')}
+        selected={pathname === '/text-import'}
+        onPress={() => router.push('/(app)/text-import')}
+      />
       <BarAction
         label={t('settings')}
         selected={pathname === '/settings'}
@@ -74,7 +85,7 @@ export function BottomBar() {
 
       {/* Pushes status to the trailing edge, and is the first thing to give up
           width when the window is narrow. */}
-      <View style={styles.spacer} />
+      {!compact ? <View style={styles.spacer} /> : null}
       <SyncIndicator compact={compact} />
     </View>
   );
@@ -96,6 +107,7 @@ function BarAction({
   onPress: () => void;
 }) {
   const theme = useTheme();
+  const { compact } = useLayout();
   const [hovered, setHovered] = useState(false);
 
   const background = selected
@@ -114,13 +126,15 @@ function BarAction({
       onPointerLeave={() => setHovered(false)}
       style={({ pressed }) => [
         styles.action,
+        { minHeight: compact ? 44 : 32, paddingHorizontal: compact ? 4 : 8 },
         { backgroundColor: background, borderRadius: theme.radius.pill, opacity: pressed ? 0.7 : 1 },
       ]}
     >
       <Label
         variant="caption"
         tone={selected ? 'accent' : 'muted'}
-        numberOfLines={1}
+        numberOfLines={compact ? 2 : 1}
+        align={compact ? 'center' : 'left'}
         style={selected ? styles.selectedLabel : undefined}
       >
         {label}
@@ -129,13 +143,15 @@ function BarAction({
   );
 }
 
+const BAR_PADDING = 7;
+
 const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 7,
+    paddingVertical: BAR_PADDING,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   // Let each action absorb an equal share of a split-screen window. Without

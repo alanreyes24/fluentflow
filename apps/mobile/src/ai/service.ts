@@ -331,7 +331,7 @@ export class ExampleService {
         return await generateExamplesOnWeb(request);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        console.warn(`The localhost AI server could not write examples: ${reason}`);
+        console.warn(`The AI server could not write examples: ${reason}`);
       }
     }
 
