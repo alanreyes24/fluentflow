@@ -77,7 +77,7 @@ export default function StudyScreen() {
   const { deckId, ahead } = useLocalSearchParams<{ deckId: string; ahead?: string }>();
   const { t } = useI18n();
   const theme = useTheme();
-  const { wide } = useLayout();
+  const { wide, compact } = useLayout();
   const { repository, examples: exampleService, refreshDecks, user } = useApp();
 
   const [deck, setDeck] = useState<Deck | null>(null);
@@ -654,7 +654,11 @@ export default function StudyScreen() {
               onReveal={reveal}
               label={revealed ? (deck?.reverseCards ? card.front : card.back) : t('showAnswer')}
             >
-              <Surface raised elevation="lg" style={[styles.card, { borderRadius: theme.radius.lg }]}>
+              <Surface
+                raised
+                elevation="lg"
+                style={[styles.card, compact ? styles.cardCompact : null, { borderRadius: theme.radius.lg }]}
+              >
                 <View style={styles.cardContent}>
                   {deck?.reverseCards ? (
                     <DefinitionBlock
@@ -720,13 +724,14 @@ export default function StudyScreen() {
             {revealed ? (
               <>
                 <Row gap={theme.spacing.xs} align="flex-start">
-                  <Row gap={theme.spacing.xs} style={styles.ratingRow}>
+                  <Row gap={compact ? theme.spacing.sm : theme.spacing.xs} style={styles.ratingRow}>
                     {RATING_NAMES.map((rating) => (
                       <RatingButton
                         key={rating}
                         rating={rating}
                         tone={theme.colors[rating]}
                         interval={intervals?.[rating]}
+                        compact={compact}
                         onPress={rate}
                       />
                     ))}
@@ -830,11 +835,14 @@ function RatingButton({
   rating,
   tone,
   interval,
+  compact,
   onPress,
 }: {
   rating: RatingName;
   tone: string;
   interval?: { days: number; minutes: number };
+  /** Phone width: no keyboard, so no shortcut digit to wrap the label. */
+  compact?: boolean;
   onPress: (rating: RatingName) => void;
 }) {
   const { t } = useI18n();
@@ -843,7 +851,7 @@ function RatingButton({
   return (
     <View style={styles.flex}>
       <Button
-        label={Platform.OS === 'web' ? `${RATINGS[rating]}  ${label}` : label}
+        label={Platform.OS === 'web' && !compact ? `${RATINGS[rating]}  ${label}` : label}
         tone={tone}
         onPress={() => onPress(rating)}
         accessibilityHint={`Rate this card ${label}`}
@@ -930,6 +938,7 @@ function ExampleBlock({
 }) {
   const { t } = useI18n();
   const theme = useTheme();
+  const { compact } = useLayout();
 
   if (generating && !result) {
     return <Loading label={t('generatingExamples')} />;
@@ -943,7 +952,7 @@ function ExampleBlock({
   const empty = result.examples.length === 0;
 
   return (
-    <View style={styles.examples}>
+    <View style={[styles.examples, compact ? styles.examplesCompact : null]}>
       <Row gap={theme.spacing.sm}>
         <Label variant="caption" tone="faint" style={styles.examplesLabel}>
           {isFallback && !empty ? t('examplesOffline') : t('examples')}
@@ -1005,6 +1014,7 @@ function SentenceWords({
   onWordPress: (word: string, sentence: string) => void;
 }) {
   const theme = useTheme();
+  const { compact } = useLayout();
   const tokens = sentence.match(/[\p{L}\p{M}\p{N}]+(?:['’-][\p{L}\p{M}\p{N}]+)*|[^\p{L}\p{M}\p{N}]+/gu) ?? [sentence];
   const items = tokens.reduce<SentenceItem[]>((result, token) => {
     const isWord = /[\p{L}\p{M}\p{N}]/u.test(token);
@@ -1041,7 +1051,12 @@ function SentenceWords({
                 onPress={() => onWordPress(word, sentence)}
                 style={({ pressed }) => [
                   styles.wordButton,
-                  { borderBottomColor: theme.colors.accent },
+                  // On a phone every word is underlined in a narrow column, and
+                  // a solid accent rule boxes each one in. A faint dotted rule
+                  // still says "tap to look up" without the grid.
+                  compact
+                    ? [styles.wordButtonCompact, { borderBottomColor: theme.colors.textFaint }]
+                    : { borderBottomColor: theme.colors.accent },
                   pressed ? { backgroundColor: theme.colors.accentSoft } : null,
                 ]}
               >
@@ -1176,10 +1191,12 @@ const styles = StyleSheet.create({
   // longer scrolls inside the card.
   cardWrapWide: { maxHeight: 560, justifyContent: 'center' },
   card: { flex: 1, justifyContent: 'center', padding: 24 },
+  cardCompact: { paddingHorizontal: 20, paddingVertical: 28 },
   cardContent: { flexGrow: 1, justifyContent: 'center' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 24 },
   definitionBlock: { alignItems: 'center', gap: 8 },
   examples: { gap: 8 },
+  examplesCompact: { gap: 16 },
   contextBlock: { gap: 4, marginTop: 12 },
   contextLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
   examplesLabel: { textTransform: 'uppercase', letterSpacing: 0.6, flex: 1 },
@@ -1200,6 +1217,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderRadius: 3,
     paddingHorizontal: 2,
+  },
+  wordButtonCompact: {
+    borderRadius: 0,
+    borderStyle: 'dotted',
+    paddingHorizontal: 1,
+    marginVertical: 3,
   },
   toast: {
     alignItems: 'center',
