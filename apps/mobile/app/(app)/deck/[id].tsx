@@ -136,6 +136,8 @@ export default function DeckScreen() {
         ListHeaderComponent={
           <View style={styles.header}>
             <Surface elevation="sm">
+              <Label variant="title">{deck.name}</Label>
+              <Spacer size={theme.spacing.xs} />
               <Label variant="caption" tone="faint">
                 {LANGUAGE_NAMES[deck.language]}
               </Label>
@@ -159,37 +161,98 @@ export default function DeckScreen() {
 
             <Spacer size={theme.spacing.md} />
 
-            <Surface>
-              <SectionLabel>{t('studyToday')}</SectionLabel>
-              <Spacer size={theme.spacing.sm} />
-              <StudyQueueCounts
-                counts={{
-                  new: today?.new ?? 0,
-                  learning: today?.learning ?? 0,
-                  review: today?.review ?? 0,
+            {adding ? (
+              <CardForm
+                onCancel={() => {
+                  setAdding(false);
+                  setDuplicateCardId(null);
                 }}
-                labels={{
-                  new: t('queueNew'),
-                  learning: t('queueLearn'),
-                  review: t('queueReview'),
+                error={duplicateCardId === 'new' ? t('duplicateCardHint') : undefined}
+                onCreate={async (front, back, grammarNotes, relatedWords, tags) => {
+                  if (!repository || !user) return false;
+                  const normalizedFront = await normalizeCardFront(front, deck.language, back);
+                  if (await repository.findCardByFront(deck.id, normalizedFront)) {
+                    setDuplicateCardId('new');
+                    return false;
+                  }
+                  await repository.addCard(
+                    user.id,
+                    deck,
+                    normalizedFront,
+                    back,
+                    [],
+                    grammarNotes,
+                    relatedWords,
+                    tags,
+                  );
+                  await load();
+                  await refreshDecks();
+                  setDuplicateCardId(null);
+                  return true;
                 }}
               />
-            </Surface>
+            ) : (
+              <Row gap={theme.spacing.sm}>
+                <Button
+                  label={t('addCard')}
+                  variant="secondary"
+                  onPress={() => {
+                    setDuplicateCardId(null);
+                    setAdding(true);
+                  }}
+                  style={styles.grow}
+                />
+                <Button
+                  label={t('pasteText')}
+                  variant="secondary"
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(app)/text-import',
+                      params: { deckId: deck.id },
+                    })
+                  }
+                  style={styles.grow}
+                />
+              </Row>
+            )}
 
             <Spacer size={theme.spacing.md} />
 
-            <Button
-              label={due > 0 ? `${t('study')} · ${t('dueCount', { count: due })}` : t('studyAhead')}
-              onPress={() =>
-                router.push({
-                  pathname: '/(app)/study/[deckId]',
-                  params: { deckId: deck.id, ahead: due > 0 ? '0' : '1' },
-                })
-              }
-              disabled={cards.length === 0}
-            />
+            {cards.length > 0 ? (
+              <>
+                <Surface>
+                  <SectionLabel>{t('studyToday')}</SectionLabel>
+                  <Spacer size={theme.spacing.sm} />
+                  <StudyQueueCounts
+                    counts={{
+                      new: today?.new ?? 0,
+                      learning: today?.learning ?? 0,
+                      review: today?.review ?? 0,
+                    }}
+                    labels={{
+                      new: t('queueNew'),
+                      learning: t('queueLearn'),
+                      review: t('queueReview'),
+                    }}
+                  />
+                </Surface>
 
-            <Spacer size={theme.spacing.sm} />
+                <Spacer size={theme.spacing.md} />
+
+                <Button
+                  label={due > 0 ? `${t('study')} · ${t('dueCount', { count: due })}` : t('studyAhead')}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(app)/study/[deckId]',
+                      params: { deckId: deck.id, ahead: due > 0 ? '0' : '1' },
+                    })
+                  }
+                  disabled={cards.length === 0}
+                />
+
+                <Spacer size={theme.spacing.sm} />
+              </>
+            ) : null}
 
             <Surface style={styles.limitCard}>
               <Pressable
@@ -323,63 +386,6 @@ export default function DeckScreen() {
                 }}
               />
             </Surface>
-
-            <Spacer size={theme.spacing.sm} />
-
-            {adding ? (
-              <CardForm
-                onCancel={() => {
-                  setAdding(false);
-                  setDuplicateCardId(null);
-                }}
-                error={duplicateCardId === 'new' ? t('duplicateCardHint') : undefined}
-                onCreate={async (front, back, grammarNotes, relatedWords, tags) => {
-                  if (!repository || !user) return false;
-                  const normalizedFront = await normalizeCardFront(front, deck.language, back);
-                  if (await repository.findCardByFront(deck.id, normalizedFront)) {
-                    setDuplicateCardId('new');
-                    return false;
-                  }
-                  await repository.addCard(
-                    user.id,
-                    deck,
-                    normalizedFront,
-                    back,
-                    [],
-                    grammarNotes,
-                    relatedWords,
-                    tags,
-                  );
-                  await load();
-                  await refreshDecks();
-                  setDuplicateCardId(null);
-                  return true;
-                }}
-              />
-            ) : (
-              <Row gap={theme.spacing.sm}>
-                <Button
-                  label={t('addCard')}
-                  variant="secondary"
-                  onPress={() => {
-                    setDuplicateCardId(null);
-                    setAdding(true);
-                  }}
-                  style={styles.grow}
-                />
-                <Button
-                  label={t('pasteText')}
-                  variant="secondary"
-                  onPress={() =>
-                    router.push({
-                      pathname: '/(app)/text-import',
-                      params: { deckId: deck.id },
-                    })
-                  }
-                  style={styles.grow}
-                />
-              </Row>
-            )}
 
             <Spacer size={theme.spacing.md} />
             <Pressable

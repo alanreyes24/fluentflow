@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import type { Card, Deck } from '@fluentflow/core';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
@@ -63,6 +63,11 @@ export default function CardsScreen() {
   }), [cards, filter]);
   const selectedCards = useMemo(() => cards.filter((card) => selected.has(card.id)), [cards, selected]);
   const deckNames = useMemo(() => new Map(decks.map((deck) => [deck.id, deck.name])), [decks]);
+  const hasFilters = query.trim().length > 0 || filter !== 'all';
+  const clearFilters = () => {
+    setQuery('');
+    setFilter('all');
+  };
 
   const toggle = (id: string) => {
     setSelected((current) => {
@@ -96,6 +101,8 @@ export default function CardsScreen() {
         contentContainerStyle={content}
         ListHeaderComponent={
           <View>
+            <Label variant="title">{t('cardLibrary')}</Label>
+            <Spacer size={theme.spacing.md} />
             <Field
               label={t('searchCards')}
               hint={t('searchCardsHint')}
@@ -115,6 +122,14 @@ export default function CardsScreen() {
               value={filter}
               onChange={setFilter}
             />
+            <Spacer size={theme.spacing.sm} />
+            <Row justify="space-between" wrap>
+              <Label variant="caption" tone="muted">{t('cardCount', { count: visible.length })}</Label>
+              {hasFilters ? <Button label={t('clearFilters')} variant="ghost" onPress={clearFilters} /> : null}
+            </Row>
+            {visible.length > 0 && selectedCards.length === 0 ? (
+              <Label variant="caption" tone="faint">{t('librarySelectionHint')}</Label>
+            ) : null}
             {selectedCards.length > 0 ? (
               <>
                 <Spacer size={theme.spacing.md} />
@@ -188,7 +203,15 @@ export default function CardsScreen() {
             <Spacer size={theme.spacing.md} />
           </View>
         }
-        ListEmptyComponent={<EmptyState title={t('noMatchingCards')} />}
+        ListEmptyComponent={
+          <EmptyState
+            title={hasFilters ? t('noMatchingCards') : t('libraryEmpty')}
+            hint={hasFilters ? t('noMatchingCardsHint') : t('libraryEmptyHint')}
+            action={!hasFilters ? (
+              <Button label={t('addCards')} onPress={() => router.push('/(app)/text-import')} />
+            ) : undefined}
+          />
+        }
         renderItem={({ item }) => (
           <CardLibraryRow
             card={item}

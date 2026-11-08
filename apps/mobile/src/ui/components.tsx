@@ -565,10 +565,13 @@ export function SegmentedControl<T extends string>({
   style?: ViewStyleProp;
 }) {
   const theme = useTheme();
+  const { compact } = useLayout();
+  const wrap = compact && options.length > 3;
   return (
     <View
       style={[
         styles.segmented,
+        wrap && styles.wrap,
         { backgroundColor: theme.colors.surfaceSunken, borderRadius: theme.radius.md },
         style,
       ]}
@@ -580,6 +583,7 @@ export function SegmentedControl<T extends string>({
             key={option.value}
             label={option.label}
             selected={selected}
+            wrap={wrap}
             onPress={() => onChange(option.value)}
           />
         );
@@ -592,10 +596,12 @@ function Segment({
   label,
   selected,
   onPress,
+  wrap,
 }: {
   label: string;
   selected: boolean;
   onPress: () => void;
+  wrap: boolean;
 }) {
   const theme = useTheme();
   const [hovered, setHovered] = useState(false);
@@ -616,6 +622,7 @@ function Segment({
       onPointerLeave={() => setHovered(false)}
       style={[
         styles.segment,
+        wrap && { flexBasis: '40%', minHeight: 44 },
         {
           backgroundColor: background,
           borderRadius: theme.radius.md - 3,

@@ -36,7 +36,12 @@ export function buildInstruction(input: ExamplePromptInput): string {
   const count = input.count ?? 2;
   const languageName = LANGUAGE_NAMES_EN[input.language];
   const localized = LANGUAGE_INSTRUCTIONS[input.language](input.word, count);
-  const meaning = input.meaning ? ` The word means "${input.meaning}" in English.` : '';
+  // Stated as a constraint, not a hint: given `petar` / "to feel like", the
+  // model wrote about crowded clubs and crashing servers, because those senses
+  // are more common, and the card was teaching a meaning it does not show.
+  const meaning = input.meaning
+    ? ` The word means "${input.meaning}" in English. Use it only in that sense, even if it has other, more common meanings.`
+    : '';
 
   return (
     `Generate ${count} example sentences using the word "${input.word}" in ${languageName}.` +
@@ -48,7 +53,9 @@ export function buildInstruction(input: ExamplePromptInput): string {
     ' If more than two sentences are requested, keep the additional sentences at the more complex level. If only one is requested, use the simple level.' +
     ' Make each sentence specific and useful for learning, with a clear difference in difficulty between the first and second.' +
     ' Do not make the sentence obscure, artificial, or difficult to understand from context.' +
-    ' Prefer a different sentence or construction if the requested phrase would sound unnatural in context.' +
+    ` Use "${input.word}" itself in each sentence; a conjugated or inflected form is fine, but never swap it for a synonym or a different word with the same meaning.` +
+    ' If the word is colloquial, slang or regional, write the sentences in the register and region where it is natural.' +
+    ' If a sentence would sound unnatural, change the context around the word, not the word itself.' +
     outputFormat(input.language)
   );
 }

@@ -42,7 +42,9 @@ interface Candidate {
   translation?: string;
 }
 
-const DEFAULTS = { max: 3, minWords: 3, maxWords: 20 };
+// The prompt asks for at most 20 words in the harder sentence. Models overshoot
+// that by a word or two, and rejecting those threw away good sentences.
+const DEFAULTS = { max: 3, minWords: 3, maxWords: 25 };
 
 /** Characters that legitimately appear in Spanish and Bosnian sentences. */
 const ALLOWED_CHARS: Record<TargetLanguage, RegExp> = {

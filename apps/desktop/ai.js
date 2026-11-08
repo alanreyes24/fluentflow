@@ -40,8 +40,29 @@
  * finished sentences and gets them.
  */
 
+const { existsSync } = require('node:fs');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const dictionary = require('./dictionary');
 const cloud = require('./cloud');
+
+/**
+ * Load core from the vendored build when there is one, as `src/apkg.js` does.
+ *
+ * A packaged app also carries a `node_modules/@fluentflow/core` copied in when
+ * it was first built, and `refresh-desktop.mjs` never updates `node_modules`.
+ * Importing the bare specifier left an installed app writing prompts and
+ * validating examples with that first build's core, whatever had been pushed
+ * since. In the repository `vendor/` may not exist yet, so the workspace
+ * package is the fallback.
+ */
+const VENDORED_CORE = path.join(__dirname, 'vendor', 'core', 'index.js');
+
+function loadCore() {
+  return existsSync(VENDORED_CORE)
+    ? import(pathToFileURL(VENDORED_CORE).href)
+    : import('@fluentflow/core');
+}
 
 /**
  * An inference function backed by the user's hosted model, or null.
@@ -95,7 +116,7 @@ function remoteInference(core, responseSchema, onUsage) {
  * @returns meanings plus measured Gemini usage when the model was called
  */
 async function resolve(words, language, onProgress, useModel = true, modelOnly = false) {
-  const core = await import('@fluentflow/core');
+  const core = await loadCore();
   const usages = [];
 
   const lookup = !modelOnly && dictionary.status().languages[language]
@@ -151,7 +172,7 @@ const EXAMPLE_MAX_TOKENS_WITH_TRANSLATION = 320;
  * @returns a `GenerateExamplesResult`: sentences, and which source wrote them
  */
 async function examples(request, signal) {
-  const core = await import('@fluentflow/core');
+  const core = await loadCore();
   const { word, meaning, language, count = 2 } = request ?? {};
 
   return core.generateExamples(
@@ -176,7 +197,7 @@ function sources() {
 }
 
 async function chat(messages) {
-  const core = await import('@fluentflow/core');
+  const core = await loadCore();
   return core.chatWithGemini({ apiKey: cloud.apiKey(), model: cloud.model() }, messages);
 }
 

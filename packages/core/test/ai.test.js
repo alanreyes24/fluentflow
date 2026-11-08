@@ -31,6 +31,26 @@ test('the instruction names the word, the language and the output format', () =>
   assert.doesNotMatch(instruction, /Every sentence must|Cada frase debe/);
 });
 
+test('the instruction keeps the model on the word instead of a synonym', () => {
+  // Asked for `petar` meaning "to feel like", Gemini wrote every sentence with
+  // `apetecer`, and the validator rejected them all.
+  const instruction = buildInstruction({ word: 'petar', meaning: 'to feel like', language: 'es' });
+
+  assert.match(instruction, /Use "petar" itself in each sentence/);
+  assert.match(instruction, /never swap it for a synonym/);
+  assert.match(instruction, /colloquial, slang or regional/);
+  assert.match(instruction, /Use it only in that sense, even if it has other, more common meanings/);
+  assert.doesNotMatch(instruction, /Prefer a different sentence or construction/);
+});
+
+test('a complex sentence a few words over the prompt target is still accepted', () => {
+  const sentence =
+    'Aunque tenía pensado quedarme descansando en casa, ahora me peta salir a cenar por el centro con mis amigos.';
+  const result = parseExamples(JSON.stringify([sentence]), { word: 'petar', language: 'es' });
+
+  assert.deepEqual(result.examples, [sentence]);
+});
+
 test('the prompt is the bare instruction, with no chat template around it', () => {
   const input = { word: 'raditi', language: 'bs' };
 

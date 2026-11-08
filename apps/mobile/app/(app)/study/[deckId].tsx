@@ -173,18 +173,15 @@ export default function StudyScreen() {
 
   useEffect(() => () => { exampleRequest.current += 1; }, [card?.id, index]);
 
-  const reveal = useCallback(() => {
-    if (revealed || !card) return;
-    setRevealed(true);
-    if (deck?.showExamples === false || !exampleService) {
-      setGenerating(false);
-      return;
-    }
+  // A restored study session can already be revealed. Loading examples from
+  // an effect covers that path as well as the ordinary reveal click; keeping
+  // the request here also prevents the restored card from appearing without
+  // its cached or generated sentence context.
+  useEffect(() => {
+    if (loading || !revealed || !card || deck?.showExamples === false || !exampleService) return;
+
     setGenerating(true);
     setExamples(null);
-
-    // Deliberately not awaited: the rating buttons are live the moment the
-    // answer is on screen, whatever the model is doing.
     const request = ++exampleRequest.current;
     exampleService
       .forCard(card)
@@ -193,7 +190,12 @@ export default function StudyScreen() {
         if (request === exampleRequest.current) setExamples({ examples: [], source: 'fallback', durationMs: 0 });
       })
       .finally(() => { if (request === exampleRequest.current) setGenerating(false); });
-  }, [revealed, card, deck, exampleService]);
+  }, [loading, revealed, card, deck?.showExamples, exampleService]);
+
+  const reveal = useCallback(() => {
+    if (revealed || !card) return;
+    setRevealed(true);
+  }, [revealed, card]);
 
   /**
    * What each button would schedule, from the card's current state.
@@ -311,13 +313,25 @@ export default function StudyScreen() {
         setEditError(t('duplicateCardHint'));
         return false;
       }
+      // Sentences written for the old word or meaning are wrong for the new
+      // one. Drop them from the card so they cannot come back on the next
+      // reveal, and regenerate past the word-keyed cache, which would
+      // otherwise hand the same stale sentences straight back.
+      const wordingChanged = normalizedFront !== card.front || back !== card.back;
       const updated = await repository.updateCard(card, {
         front: normalizedFront,
         back,
         grammarNotes,
         relatedWords,
         tags,
+        ...(wordingChanged ? { examples: [], exampleTranslations: [] } : {}),
       });
+      if (wordingChanged && exampleService && deck?.showExamples !== false) {
+        // Registered as the in-flight request for this word, so the reveal
+        // effect re-running for the edited card joins it instead of reading
+        // the cache. Failures surface through that effect.
+        exampleService.forCard(updated, true).catch(() => undefined);
+      }
       setQueue((current) =>
         current.map((item) =>
           item.id === updated.id
@@ -328,6 +342,8 @@ export default function StudyScreen() {
                 grammarNotes: updated.grammarNotes,
                 relatedWords: updated.relatedWords,
                 tags: updated.tags,
+                examples: updated.examples,
+                exampleTranslations: updated.exampleTranslations,
               }
             : item,
         ),
@@ -341,7 +357,7 @@ export default function StudyScreen() {
       await refreshDecks();
       return true;
     },
-    [repository, card, refreshDecks, t],
+    [repository, card, exampleService, deck?.showExamples, refreshDecks, t],
   );
 
   const showToast = useCallback((message: string) => {
@@ -919,15 +935,18 @@ function ExampleBlock({
     return <Loading label={t('generatingExamples')} />;
   }
 
-  if (!result || result.examples.length === 0) return null;
+  if (!result) return null;
 
   const isFallback = result.source === 'fallback';
+  // An empty result still gets the header, so Regenerate stays reachable.
+  // Hiding the whole block left no way to retry a word that came back empty.
+  const empty = result.examples.length === 0;
 
   return (
     <View style={styles.examples}>
       <Row gap={theme.spacing.sm}>
         <Label variant="caption" tone="faint" style={styles.examplesLabel}>
-          {isFallback ? t('examplesOffline') : t('examples')}
+          {isFallback && !empty ? t('examplesOffline') : t('examples')}
         </Label>
         <Pressable
           accessibilityRole="button"
@@ -950,7 +969,11 @@ function ExampleBlock({
         />
       ))}
 
-      {isFallback ? (
+      {empty ? (
+        <Label variant="caption" tone="faint">
+          {t('examplesUnavailable')}
+        </Label>
+      ) : isFallback ? (
         <>
           <Label variant="caption" tone="faint">
             {t('examplesOfflineHint')}

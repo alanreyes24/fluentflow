@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Platform, StyleSheet, View } from 'react-native';
+import { FlatList, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
   LANGUAGE_NAMES,
@@ -43,15 +43,11 @@ export default function DecksScreen() {
   const { t } = useI18n();
   const theme = useTheme();
   const { width, wide } = useLayout();
-  // A macOS half-screen window is usually around 700–800pt wide. Keep the
-  // calendar in a compact side rail there instead of stacking a full calendar
-  // above the deck list, which makes the list feel slow to reach while the
-  // Split View divider is moving.
-  // A 700–800px split window is wide enough for two columns in theory, but
-  // not wide enough for a useful 220px calendar rail plus deck content. Stack
-  // the calendar until the rail has room for its status copy to stay readable.
+  // Keep study actions first. On smaller windows the calendar shares the
+  // deck list's scroll area, below the decks, instead of taking fixed height.
   const calendarSideRail = width >= 840;
-  const content = useContentStyle({ full: wide });
+  const deckColumns = width >= 1180 ? 2 : 1;
+  const content = useContentStyle({ full: calendarSideRail });
   const { decks, repository, user, refreshDecks } = useApp();
 
   const [progress, setProgress] = useState<Record<string, DeckStudyProgress>>({});
@@ -142,13 +138,14 @@ export default function DecksScreen() {
   return (
     <Screen>
       <View style={[styles.split, calendarSideRail ? styles.splitSideRail : null, wide ? styles.splitWide : null]}>
-        {streakData ? (
-          <View
+        {streakData && calendarSideRail && decks.length > 0 ? (
+          <ScrollView
             style={[
               styles.calendarPane,
-              calendarSideRail ? styles.calendarPaneSideRail : null,
-              wide ? styles.calendarPaneWide : null,
+              styles.calendarPaneSideRail,
+              deckColumns === 2 ? styles.calendarPaneWide : null,
             ]}
+            contentContainerStyle={styles.calendarContent}
           >
             <Surface raised elevation="md">
               <StreakCard
@@ -157,7 +154,7 @@ export default function DecksScreen() {
                 today={streakData.today}
               />
             </Surface>
-          </View>
+          </ScrollView>
         ) : null}
 
         <View style={styles.decksPane}>
@@ -166,10 +163,10 @@ export default function DecksScreen() {
             // FlatList does not support changing numColumns on an existing
             // instance. Split View can cross this breakpoint while the deck
             // screen stays mounted, so force a fresh list for each layout.
-            key={wide ? 'two-columns' : 'one-column'}
+            key={deckColumns}
             keyExtractor={(deck) => deck.id}
-            numColumns={wide ? 2 : 1}
-            columnWrapperStyle={wide ? styles.deckRow : undefined}
+            numColumns={deckColumns}
+            columnWrapperStyle={deckColumns === 2 ? styles.deckRow : undefined}
             contentContainerStyle={content}
             ListHeaderComponent={
               progressReady ? (
@@ -179,18 +176,25 @@ export default function DecksScreen() {
                     pendingLearning={totals.pendingLearning}
                     cards={totals.cards}
                   />
-                  {streakData ? (
-                    <View style={[styles.insights, wide ? styles.insightsWide : null]}>
-                      <UpcomingWorkload forecast={streakData.forecast} />
-                      <RecentActivity days={streakData.days} today={streakData.today} />
-                    </View>
-                  ) : null}
                   <Spacer size={theme.spacing.xl} />
                   <Label variant="heading">{t('yourDecks')}</Label>
                   <Spacer size={theme.spacing.sm} />
                 </View>
               ) : null
             }
+            ListFooterComponent={streakData && decks.length > 0 ? (
+              <View style={styles.activityFooter}>
+                <View style={[styles.insights, calendarSideRail ? styles.insightsWide : null]}>
+                  <UpcomingWorkload forecast={streakData.forecast} />
+                  <RecentActivity days={streakData.days} today={streakData.today} />
+                </View>
+                {!calendarSideRail ? (
+                  <Surface raised elevation="sm">
+                    <StreakCard streak={streakData.streak} days={streakData.days} today={streakData.today} />
+                  </Surface>
+                ) : null}
+              </View>
+            ) : null}
             ListEmptyComponent={
               <EmptyState
                 title={t('noDecksYet')}
@@ -199,7 +203,7 @@ export default function DecksScreen() {
               />
             }
             renderItem={({ item }) => (
-              <View style={wide ? styles.deckGridItem : null}>
+              <View style={deckColumns === 2 ? styles.deckGridItem : null}>
                 <DeckRow deck={item} progress={progress[item.id]} />
               </View>
             )}
@@ -297,14 +301,18 @@ function Summary({ due, pendingLearning, cards }: { due: number; pendingLearning
         </Label>
         <Spacer size={theme.spacing.xs} />
         <Label variant="title" tone={due > 0 ? 'accent' : 'default'}>
-          {due > 0
+          {cards === 0
+            ? t('readyForCards')
+            : due > 0
             ? t('dueCount', { count: due })
             : pendingLearning > 0
               ? t('learningPending', { count: pendingLearning })
               : t('allCaughtUp')}
         </Label>
         <Label variant="caption" tone="faint">
-          {due > 0
+          {cards === 0
+            ? t('readyForCardsHint')
+            : due > 0
             ? t('cardCount', { count: cards })
             : pendingLearning > 0
               ? t('learningPendingHint')
@@ -354,7 +362,7 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress 
                 {LANGUAGE_NAMES[deck.language]} · {t('cardCount', { count: deck.cardCount })}
               </Label>
             </View>
-            {progress ? (
+            {progress && deck.cardCount > 0 ? (
               progress.due > 0
                 ? <Badge>{progress.due}</Badge>
                 : progress.pendingLearning > 0
@@ -368,7 +376,7 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress 
               <Spacer size={theme.spacing.sm} />
               <ProgressBar progress={progress} />
               <Spacer size={theme.spacing.xs} />
-              <Row gap={theme.spacing.md}>
+              <Row gap={theme.spacing.md} wrap>
                 <Label variant="caption" tone="faint">
                   {t('statusNew')} {progress.new}
                 </Label>
@@ -386,18 +394,20 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress 
         <Spacer size={theme.spacing.md} />
         <Row gap={theme.spacing.sm}>
           <Button
-            label={due > 0 ? t('study') : t('studyAhead')}
+            label={deck.cardCount === 0 ? t('addCards') : due > 0 ? t('study') : t('studyAhead')}
             onPress={() =>
-              router.push({
+              deck.cardCount === 0 ? router.push({
+                pathname: '/(app)/text-import',
+                params: { deckId: deck.id },
+              }) : router.push({
                 pathname: '/(app)/study/[deckId]',
                 params: { deckId: deck.id, ahead: due > 0 ? '0' : '1' },
               })
             }
-            disabled={deck.cardCount === 0}
             style={styles.deckAction}
           />
           <Button
-            label={t('settings')}
+            label={t('manageDeck')}
             variant="secondary"
             onPress={() => router.push({ pathname: '/(app)/deck/[id]', params: { id: deck.id } })}
             style={styles.deckAction}
@@ -425,15 +435,17 @@ const styles = StyleSheet.create({
     gap: 24,
     paddingHorizontal: 24,
   },
-  calendarPane: { padding: 16 },
+  calendarPane: { flexGrow: 0 },
+  calendarContent: { paddingBottom: 24 },
   calendarPaneSideRail: { width: 280, paddingHorizontal: 0, paddingTop: 16 },
-  calendarPaneWide: { width: 326, paddingHorizontal: 0, paddingTop: 24 },
+  calendarPaneWide: { width: 300, paddingHorizontal: 0, paddingTop: 24 },
   decksPane: { flex: 1, minWidth: 0 },
   summaryWrap: { marginBottom: 0 },
   summary: { paddingVertical: 18 },
   summaryLead: { flex: 1, minWidth: 0 },
   summaryMetric: { alignItems: 'flex-end', minWidth: 72 },
-  insights: { gap: 12, marginTop: 12 },
+  activityFooter: { gap: 16, marginTop: 24 },
+  insights: { gap: 12 },
   insightsWide: { flexDirection: 'row' },
   insightCard: { flex: 1, minWidth: 0 },
   insightMetric: { flex: 1 },
