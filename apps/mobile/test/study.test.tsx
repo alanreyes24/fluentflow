@@ -131,6 +131,43 @@ describe('StudyScreen', () => {
     await screen.findByText('comer');
   });
 
+  it('starts a fresh queue instead of resuming a session from an earlier day', async () => {
+    const [, second, third] = await seed([
+      ['hablar', 'to speak'],
+      ['comer', 'to eat'],
+      ['vivir', 'to live'],
+    ]);
+    // Yesterday's session stopped on its last card, a review card that has
+    // since come due again. Resuming it would show that card alone and hide
+    // today's new cards.
+    await repository.updateCard(third!, {
+      phase: 'review',
+      status: 'learning',
+      interval: 1,
+      introducedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      nextReview: new Date(Date.now() - 1000).toISOString(),
+    });
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    await AsyncStorage.setItem('fluentflow.studySession', JSON.stringify({
+      deckId: deck.id,
+      studyAhead: false,
+      day: collectionDayKey(yesterday),
+      cardIds: [second!.id, third!.id],
+      index: 1,
+      reviewed: 1,
+      lapses: 0,
+      revealed: false,
+    }));
+
+    await show();
+    // Today's queue: the due review, then both new cards. The stale session
+    // would have shown "2 / 2" with no new cards left.
+    await screen.findByText('1 / 3');
+    expect(screen.queryByText('2 / 2')).toBeNull();
+    expect(screen.getByLabelText('New: 2')).toBeTruthy();
+  });
+
   it('starts no more than the deck limit of untouched new cards', async () => {
     deck = await repository.setNewCardsPerDay(deck, 2);
     await seed([

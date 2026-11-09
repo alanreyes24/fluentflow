@@ -6,6 +6,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import {
   RATING_NAMES,
   RATINGS,
+  collectionDayKey,
   fuzzRandomForCard,
   review,
   schedulingStateFor,
@@ -43,6 +44,8 @@ const STUDY_SESSION_KEY = 'fluentflow.studySession';
 interface SavedStudySession {
   deckId: string;
   studyAhead: boolean;
+  /** Collection day the session was saved on; a new day starts a new queue. */
+  day: string;
   cardIds: string[];
   index: number;
   reviewed: number;
@@ -153,6 +156,7 @@ export default function StudyScreen() {
     const snapshot: SavedStudySession = {
       deckId,
       studyAhead,
+      day: collectionDayKey(),
       cardIds: queue.map((item) => item.id),
       index,
       reviewed,
@@ -1144,9 +1148,13 @@ async function restoreStudySession(
     if (!raw) return null;
     const saved = JSON.parse(raw) as Partial<SavedStudySession>;
     const savedIndex = saved.index;
+    // A session left unfinished yesterday is not today's queue: its leftover
+    // cards were chosen under yesterday's limits, and resuming it would hide
+    // today's new-card and review allowances until those leftovers are done.
     if (
       saved.deckId !== deckId ||
       saved.studyAhead !== studyAhead ||
+      saved.day !== collectionDayKey() ||
       !Array.isArray(saved.cardIds) ||
       typeof savedIndex !== 'number' ||
       !Number.isInteger(savedIndex) ||
