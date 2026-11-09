@@ -283,8 +283,13 @@ export function useRepository(): Repository {
   return repository;
 }
 
-const OPEN_RETRY_ATTEMPTS = 12;
+/**
+ * About six seconds in all, backing off. Chrome releases a handle within a few
+ * hundred milliseconds; Safari, restoring a suspended tab, can take seconds.
+ */
+const OPEN_RETRY_ATTEMPTS = 20;
 const OPEN_RETRY_DELAY_MS = 100;
+const OPEN_RETRY_MAX_DELAY_MS = 500;
 const RELOAD_MARKER = 'fluentflow.storageReload';
 
 /**
@@ -295,8 +300,12 @@ const RELOAD_MARKER = 'fluentflow.storageReload';
  * starts the new document before the old one's worker has let go, and the open
  * fails one of two ways:
  *
- *  - `NoModificationAllowedError` — the handle is still held. It is released
- *    within a few hundred milliseconds, so waiting is enough.
+ *  - The handle is still held: `NoModificationAllowedError` in Chrome,
+ *    `InvalidStateError` ("The object is in an invalid state") in Safari. It
+ *    is released shortly, so waiting is enough. If it is not, the holder is
+ *    usually a page that will never let go — a reload gets a clean document,
+ *    and a second FluentFlow tab is the remaining cause, which the error
+ *    message then names.
  *  - `Invalid VFS state` — wa-sqlite's own module state is now unusable, and
  *    no amount of retrying inside this document will clear it. A fresh
  *    document always works.
@@ -321,16 +330,28 @@ async function openDatabase(): Promise<SQLiteDatabase> {
         await delay(10_000);
       }
       if (!isLockedError(cause)) throw cause;
-      await delay(OPEN_RETRY_DELAY_MS);
+      await delay(Math.min(OPEN_RETRY_DELAY_MS * 2 ** Math.floor(attempt / 4), OPEN_RETRY_MAX_DELAY_MS));
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  if (reloadOnce()) await delay(10_000);
+  throw new Error(
+    'FluentFlow could not open its storage because another tab is using it. ' +
+      'Close other FluentFlow tabs, then reload.',
+    { cause: lastError },
+  );
 }
 
 function isLockedError(cause: unknown): boolean {
   const name = (cause as { name?: string } | null)?.name ?? '';
-  return name === 'NoModificationAllowedError' || /access handle/i.test(messageOf(cause));
+  const message = messageOf(cause);
+  // The worker passes errors back as text, so the name is often only in the
+  // message ("InvalidStateError: The object is in an invalid state.").
+  return (
+    name === 'NoModificationAllowedError' ||
+    name === 'InvalidStateError' ||
+    /NoModificationAllowedError|InvalidStateError|object is in an invalid state|access handle/i.test(message)
+  );
 }
 
 function isVfsCorruptError(cause: unknown): boolean {
