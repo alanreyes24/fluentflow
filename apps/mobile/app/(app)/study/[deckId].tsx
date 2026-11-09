@@ -543,7 +543,7 @@ export default function StudyScreen() {
       <View style={styles.studyMain}>
       <View style={[styles.stage, wide ? styles.stageWide : null]}>
         <View style={styles.studyHeader}>
-          <Row style={styles.studyToolbar}>
+          <Row style={[styles.studyToolbar, compact ? styles.studyToolbarCompact : null]}>
             <View style={styles.toolbarSide}>
               {!editing ? (
                 <Button
@@ -603,7 +603,7 @@ export default function StudyScreen() {
               review: t('queueReview'),
             }}
           />
-          <View style={styles.progressRow}>
+          <View style={[styles.progressRow, compact ? styles.progressRowCompact : null]}>
             <Label variant="caption" tone="faint">
               {index + 1} / {queue.length}
             </Label>
@@ -657,9 +657,18 @@ export default function StudyScreen() {
               <Surface
                 raised
                 elevation="lg"
-                style={[styles.card, compact ? styles.cardCompact : null, { borderRadius: theme.radius.lg }]}
+                style={[styles.card, { borderRadius: theme.radius.lg }]}
               >
-                <View style={styles.cardContent}>
+                {/* The card's height is set by the screen, not its content: a
+                    long definition plus two long examples and notes does not
+                    fit a phone held upright. Centred while it fits, scrolled
+                    inside the card when it does not, instead of spilling over
+                    the word above and the rating buttons below. */}
+                <ScrollView
+                  style={styles.cardScroll}
+                  contentContainerStyle={[styles.cardContent, compact ? styles.cardContentCompact : null]}
+                  showsVerticalScrollIndicator={false}
+                >
                   {deck?.reverseCards ? (
                     <DefinitionBlock
                       value={card.back}
@@ -677,7 +686,7 @@ export default function StudyScreen() {
 
                   {revealed ? (
                     <>
-                      <Divider style={styles.divider} />
+                      <Divider style={[styles.divider, compact ? styles.dividerCompact : null]} />
                       {deck?.reverseCards ? (
                         <Label variant="cardBack" align="center" tone="muted" selectable>
                           {card.front}
@@ -715,12 +724,12 @@ export default function StudyScreen() {
                       </Label>
                     </>
                   )}
-                </View>
+                </ScrollView>
               </Surface>
             </CardShell>
           </Animated.View>
 
-          <View style={styles.controls}>
+          <View style={[styles.controls, compact ? styles.controlsCompact : null]}>
             {revealed ? (
               <>
                 <Row gap={theme.spacing.xs} align="flex-start">
@@ -1166,6 +1175,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   studyScreen: { position: 'relative' },
   studyToolbar: { paddingBottom: 8 },
+  // On a phone every point of height the header gives up goes to the card.
+  studyToolbarCompact: { paddingBottom: 0 },
   toolbarSide: { width: 96, flexDirection: 'row', alignItems: 'center' },
   chatButton: { flex: 1, alignItems: 'center' },
   studyBody: { flex: 1, flexDirection: 'row', minHeight: 0 },
@@ -1185,24 +1196,32 @@ const styles = StyleSheet.create({
     marginTop: 8,
     paddingVertical: 8,
   },
+  progressRowCompact: { marginTop: 4, paddingVertical: 6 },
   cardWrap: { flex: 1, paddingHorizontal: 16 },
   // Tall enough for a word, its meaning and two examples; short enough that a
   // three-word card is not floating in half a window of nothing. Anything
   // longer scrolls inside the card.
   cardWrapWide: { maxHeight: 560, justifyContent: 'center' },
-  card: { flex: 1, justifyContent: 'center', padding: 24 },
-  cardCompact: { paddingHorizontal: 20, paddingVertical: 28 },
-  cardContent: { flexGrow: 1, justifyContent: 'center' },
+  // Padding lives on the scroll content so scrolled text clips at the card's
+  // edge rather than at an inset.
+  card: { flex: 1, padding: 0, overflow: 'hidden' },
+  cardScroll: { flex: 1 },
+  cardContent: { flexGrow: 1, justifyContent: 'center', padding: 24 },
+  cardContentCompact: { paddingHorizontal: 20, paddingVertical: 20 },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 24 },
+  dividerCompact: { marginVertical: 16 },
   definitionBlock: { alignItems: 'center', gap: 8 },
   examples: { gap: 8 },
-  examplesCompact: { gap: 16 },
+  examplesCompact: { gap: 12 },
   contextBlock: { gap: 4, marginTop: 12 },
   contextLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
   examplesLabel: { textTransform: 'uppercase', letterSpacing: 0.6, flex: 1 },
   example: {},
   sentenceWrap: { position: 'relative' },
-  sentenceFullText: { position: 'absolute', opacity: 0, height: 0, width: 0 },
+  // Clipped as well as hidden: at zero width the text still wraps one word per
+  // line outside the box, and inside the card's scroll view that invisible
+  // column made the card scroll far past its last line.
+  sentenceFullText: { position: 'absolute', opacity: 0, height: 0, width: 0, overflow: 'hidden' },
   // The visible token layer is for word actions, not text selection. The
   // hidden full sentence above remains the copyable/accessibility surface.
   sentence: {
@@ -1222,7 +1241,7 @@ const styles = StyleSheet.create({
     borderRadius: 0,
     borderStyle: 'dotted',
     paddingHorizontal: 1,
-    marginVertical: 3,
+    marginVertical: 1,
   },
   toast: {
     alignItems: 'center',
@@ -1243,5 +1262,6 @@ const styles = StyleSheet.create({
     maxWidth: 440,
   },
   controls: { padding: 16 },
+  controlsCompact: { paddingTop: 12, paddingBottom: 12 },
   editScroll: { padding: 16, flexGrow: 1 },
 });
