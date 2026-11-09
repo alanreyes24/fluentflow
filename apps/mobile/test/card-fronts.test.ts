@@ -95,4 +95,12 @@ describe('card-front normalization', () => {
     expect(bosnianCard?.front).toBe('stići');
     expect(bosnianCard?.back).toBe('to arrive, reach');
   });
+
+  it('keeps the front as typed when the source check fails', async () => {
+    // The hosted server answers a signed-out browser with 401. Adding a card
+    // must not depend on the lookup service being reachable.
+    const shell = (globalThis as unknown as { fluentflowDesktop: { ai: { status: jest.Mock } } }).fluentflowDesktop;
+    shell.ai.status.mockRejectedValueOnce(new Error('Decoding Firebase ID token failed.'));
+    await expect(normalizeCardFront('  comieron ', 'es')).resolves.toBe('comieron');
+  });
 });

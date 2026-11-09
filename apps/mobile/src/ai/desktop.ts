@@ -161,12 +161,13 @@ const NO_SHELL = 'Looking words up needs the desktop app.';
 
 export async function lookupSources(): Promise<LookupSources> {
   const ai = bridge();
-  if (!ai) return webAiAvailable()
-    ? lookupSourcesOnWeb()
-    : { dictionary: { available: false, reason: NO_SHELL } };
+  if (!ai && !webAiAvailable()) return { dictionary: { available: false, reason: NO_SHELL } };
 
+  // Unavailable is an answer, not an error. The hosted server refuses a
+  // signed-out browser, and callers such as adding a card treat "no
+  // dictionary" as "leave the word as typed"; a throw here aborted the save.
   try {
-    return await ai.status();
+    return await (ai ? ai.status() : lookupSourcesOnWeb());
   } catch (error) {
     const reason = String((error as Error)?.message ?? error);
     return { dictionary: { available: false, reason } };
