@@ -16,7 +16,7 @@
     "@fluentflow/core": "*",
     "cors": "^2.8.5",
     "express": "^4.21.2",
-    "firebase-admin": "^13.0.2"
+    "firebase-admin": "^14.4.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
