@@ -21,6 +21,21 @@ if (fs.existsSync(rootEnv)) {
   }
 }
 
+// The commit a build was made from, shown in Settings so the web and desktop
+// apps can be compared at a glance. Hosted builds pass it in (the Dockerfile
+// sets it from Railway); local builds ask git. Expo inlines EXPO_PUBLIC_*
+// values into the bundle when it is built.
+if (!process.env.EXPO_PUBLIC_FLUENTFLOW_COMMIT) {
+  try {
+    process.env.EXPO_PUBLIC_FLUENTFLOW_COMMIT = require('node:child_process')
+      .execSync('git rev-parse HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    // Not a git checkout (the Docker image excludes .git): no commit to show.
+  }
+}
+
 function env(name, fallback) {
   return process.env[name] || fallback;
 }

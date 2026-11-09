@@ -26,6 +26,17 @@ export type DesktopImportResult =
   | { ok: true; decks: Deck[]; cards: Card[]; summary: ApkgImportSummary }
   | { ok: false; code: string; message: string };
 
+export interface WebBundleStatus {
+  /** The hosted app's origin, or null when updates are off. */
+  source: string | null;
+  active: { kind: 'bundled' | 'downloaded'; id: string | null; commit: string | null };
+  pending: { kind: 'bundled' | 'downloaded'; id: string | null; commit: string | null } | null;
+  state: 'idle' | 'disabled' | 'current' | 'ready' | 'shell-mismatch' | 'error';
+  checkedAt: string | null;
+  message: string | null;
+  latestCommit: string | null;
+}
+
 export interface DesktopBridge {
   platform: string;
   appVersion: string;
@@ -39,6 +50,15 @@ export interface DesktopBridge {
   hasLocalModel: boolean;
   /** The shell parses `.apkg` itself, so import needs no server and no account. */
   canImportLocally: boolean;
+  /**
+   * The web build the shell runs, kept in step with the hosted app. Optional:
+   * shells older than this feature do not have it.
+   */
+  webBundle?: {
+    status(): Promise<WebBundleStatus>;
+    /** Checks now; when a newer build is ready the shell offers to reload. */
+    check(): Promise<WebBundleStatus | null>;
+  };
   pickApkg(): Promise<{ canceled: boolean; file?: DesktopFile }>;
   importApkg(request: {
     path: string;

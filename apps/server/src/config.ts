@@ -46,6 +46,8 @@ export interface Config {
    * spend its Gemini key.
    */
   allowedEmails?: string[];
+  /** The deployed commit, published with the desktop bundle manifest. */
+  commit?: string;
 }
 
 const DEFAULT_WEB_DIR = fileURLToPath(new URL('../../mobile/dist', import.meta.url));
@@ -101,6 +103,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ).split(',').map((o) => o.trim()).filter(Boolean),
     webDir: env.FLUENTFLOW_WEB_DIR || (production ? DEFAULT_WEB_DIR : undefined),
     allowedEmails: parseList(env.FLUENTFLOW_ALLOWED_EMAILS)?.map((email) => email.toLowerCase()),
+    // Railway sets RAILWAY_GIT_COMMIT_SHA on every deploy.
+    commit: env.FLUENTFLOW_COMMIT || env.RAILWAY_GIT_COMMIT_SHA || undefined,
   };
 }
 

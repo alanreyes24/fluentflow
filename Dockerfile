@@ -26,13 +26,18 @@ ARG EXPO_PUBLIC_FLUENTFLOW_FIREBASE_PROJECT_ID
 ARG EXPO_PUBLIC_FLUENTFLOW_FIREBASE_STORAGE_BUCKET
 ARG EXPO_PUBLIC_FLUENTFLOW_FIREBASE_MESSAGING_SENDER_ID
 ARG EXPO_PUBLIC_FLUENTFLOW_FIREBASE_APP_ID
+# Railway passes the deployed commit to builds that declare it. It is shown in
+# Settings and published with the desktop bundle manifest.
+ARG RAILWAY_GIT_COMMIT_SHA
 
 RUN npm run build -w @fluentflow/core \
-  && EXPO_PUBLIC_FLUENTFLOW_API_BASE_URL=same-origin NODE_ENV=production npm run web:export
+  && EXPO_PUBLIC_FLUENTFLOW_API_BASE_URL=same-origin EXPO_PUBLIC_FLUENTFLOW_COMMIT=${RAILWAY_GIT_COMMIT_SHA} \
+     NODE_ENV=production npm run web:export
 
 ENV NODE_ENV=production
 # The server needs the project id to verify sign-in tokens; reuse the build value.
 ENV EXPO_PUBLIC_FLUENTFLOW_FIREBASE_PROJECT_ID=${EXPO_PUBLIC_FLUENTFLOW_FIREBASE_PROJECT_ID}
+ENV FLUENTFLOW_COMMIT=${RAILWAY_GIT_COMMIT_SHA}
 
 EXPOSE 8787
 CMD ["node", "apps/server/src/index.ts"]

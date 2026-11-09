@@ -4,7 +4,7 @@ import { router } from 'expo-router';
 import { LANGUAGE_NAMES, SUPPORTED_LANGUAGES, type LanguageCode } from '@fluentflow/core';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
-import { desktopBridge } from '../../src/desktop';
+import { desktopBridge, type DesktopBridge, type WebBundleStatus } from '../../src/desktop';
 import { modelStatus, type ModelStatus } from '../../src/ai/model';
 import {
   clearCloudSettings,
@@ -130,7 +130,13 @@ export default function SettingsScreen() {
                 </Label>
               </>
             ) : null}
+            {desktop.webBundle ? <WebBundleUpdates bridge={desktop.webBundle} /> : null}
           </Section>
+        ) : null}
+        {BUILD_COMMIT ? (
+          <Label variant="caption" tone="faint" align="center">
+            {t('buildCommit', { commit: BUILD_COMMIT.slice(0, 7) })}
+          </Label>
         ) : null}
       </ScrollView>
     </Screen>
@@ -295,6 +301,72 @@ function ExamplesSection() {
 }
 
 /** Chromium reports four components; only the first is worth showing. */
+/** Inlined by Expo at build time; see app.config.js and the Dockerfile. */
+const BUILD_COMMIT = process.env.EXPO_PUBLIC_FLUENTFLOW_COMMIT || '';
+
+/**
+ * Whether this desktop app is running the same web build as the hosted app,
+ * and a way to check now. The shell does the work (apps/desktop/src/web-bundle.js)
+ * and offers its own reload prompt when a newer build is downloaded.
+ */
+function WebBundleUpdates({ bridge }: { bridge: NonNullable<DesktopBridge['webBundle']> }) {
+  const { t } = useI18n();
+  const theme = useTheme();
+  const [status, setStatus] = useState<WebBundleStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    bridge.status().then((next) => { if (!cancelled) setStatus(next); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [bridge]);
+
+  const check = () => {
+    setChecking(true);
+    bridge
+      .check()
+      .then((next) => { if (next) setStatus(next); })
+      .catch(() => {})
+      .finally(() => setChecking(false));
+  };
+
+  const message = !status
+    ? null
+    : status.state === 'disabled'
+      ? t('webUpdatesOff')
+      : status.state === 'ready'
+        ? t('webUpdatesReady')
+        : status.state === 'shell-mismatch'
+          ? t('webUpdatesShell')
+          : status.state === 'error'
+            ? t('webUpdatesError', { message: status.message ?? '' })
+            : status.state === 'current'
+              ? t('webUpdatesCurrent')
+              : t('webUpdatesIdle');
+
+  return (
+    <>
+      <Spacer size={theme.spacing.sm} />
+      {message ? (
+        <Label variant="caption" tone={status?.state === 'error' || status?.state === 'shell-mismatch' ? 'muted' : 'faint'}>
+          {message}
+        </Label>
+      ) : null}
+      {status?.source ? (
+        <>
+          <Spacer size={theme.spacing.xs} />
+          <Button
+            label={checking ? t('checkingForUpdates') : t('checkForUpdates')}
+            variant="ghost"
+            disabled={checking}
+            onPress={check}
+          />
+        </>
+      ) : null}
+    </>
+  );
+}
+
 function majorVersion(version: string | undefined): string {
   return String(version ?? '').split('.')[0] || '?';
 }

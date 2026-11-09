@@ -10,7 +10,8 @@
     "build:icon": "node ../../scripts/make-icons.mjs",
     "make-icon": "node scripts/make-icon.mjs",
     "build:web": "cd ../mobile && npx expo export --platform web --output-dir ../desktop/web --clear",
-    "build": "npm run build:icon && npm run build:core && npm run build:web",
+    "build:shell-info": "node ../../scripts/desktop-shell-fingerprint.mjs && node ../../scripts/desktop-web-source.mjs",
+    "build": "npm run build:icon && npm run build:core && npm run build:shell-info && npm run build:web",
     "test": "node --test \"test/*.test.mjs\"",
     "start": "node scripts/launch.mjs",
     "dev": "cross-env FLUENTFLOW_DEV_URL=http://localhost:8081 node scripts/launch.mjs",
@@ -37,6 +38,7 @@
     },
     "files": [
       "*.js",
+      "web-source.json",
       "src/**/*",
       "vendor/**/*",
       "web/**/*",

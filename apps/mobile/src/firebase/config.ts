@@ -93,8 +93,11 @@ function resolveApiBaseUrl(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const value = raw.trim();
   if (value === 'same-origin') {
+    // Only a page served over HTTP has an API beside it. The desktop app runs
+    // the hosted build too (see apps/desktop/src/web-bundle.js), from
+    // `app://fluentflow`, where the shell's bridge answers instead.
     const origin = typeof window !== 'undefined' ? window.location?.origin : undefined;
-    return origin && origin !== 'null' ? origin : null;
+    return origin && /^https?:\/\//.test(origin) ? origin : null;
   }
   return value.replace(/\/+$/, '') || null;
 }

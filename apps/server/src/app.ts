@@ -19,6 +19,7 @@ import { aiStatus, examplesWithAi, resolveWithAi } from './ai.ts';
 import { openAnkiCollection } from './sqlite.ts';
 import { ValidationError, parseCards, parseDecks } from './validate.ts';
 import type { Store } from './store/types.ts';
+import { desktopBundleManifest, type DesktopBundleManifest } from './desktop-bundle.ts';
 
 /**
  * The sync API.
@@ -211,7 +212,7 @@ export function createApp({ config, store }: AppDeps): express.Express {
     },
   );
 
-  if (config.webDir) serveWebApp(app, config.webDir);
+  if (config.webDir) serveWebApp(app, config.webDir, config.commit ?? null);
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'not_found' });
@@ -231,12 +232,26 @@ export function createApp({ config, store }: AppDeps): express.Express {
  * above all, is revalidated so a deploy reaches an installed home-screen app
  * on its next launch.
  */
-function serveWebApp(app: express.Express, webDir: string): void {
+function serveWebApp(app: express.Express, webDir: string, commit: string | null): void {
   const index = join(webDir, 'index.html');
   if (!existsSync(index)) {
     console.warn(`[fluentflow] no web build at ${webDir}; serving the API only.`);
     return;
   }
+
+  // What the desktop app updates its bundle from (apps/desktop/src/web-bundle.js).
+  // The export does not change while this process runs, so hash it once, on
+  // first request rather than at startup, which keeps health checks fast.
+  let manifest: DesktopBundleManifest | null = null;
+  app.get('/api/desktop-bundle', (_req, res, next) => {
+    try {
+      manifest ??= desktopBundleManifest(webDir, commit);
+      res.setHeader('Cache-Control', 'no-cache');
+      res.json(manifest);
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.use((req, res, next) => {
     if (isApiPath(req.path)) {

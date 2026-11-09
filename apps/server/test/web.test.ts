@@ -69,3 +69,18 @@ test('unknown API paths still answer with JSON, not the page', async () => {
   const health = await fetch(`${baseUrl}/health`);
   assert.equal((await health.json()).status, 'ok');
 });
+
+test('publishes a manifest of the export for the desktop app to update from', async () => {
+  const res = await fetch(`${baseUrl}/api/desktop-bundle`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('cache-control'), 'no-cache');
+  const manifest = (await res.json()) as {
+    id: string;
+    files: { path: string; size: number; sha256: string }[];
+  };
+  assert.match(manifest.id, /^[0-9a-f]{64}$/);
+  const paths = manifest.files.map((file) => file.path);
+  assert.deepEqual(paths, ['_expo/static/js/entry-abc.js', 'index.html', 'manifest.json']);
+  const bundle = manifest.files.find((file) => file.path === '_expo/static/js/entry-abc.js');
+  assert.equal(bundle?.size, 'console.log(1)'.length);
+});

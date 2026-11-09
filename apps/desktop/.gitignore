@@ -3,3 +3,4 @@ build/
 vendor/
 web/
 dist/
+web-source.json

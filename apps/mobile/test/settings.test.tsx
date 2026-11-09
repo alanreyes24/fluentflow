@@ -5,6 +5,7 @@ import { Repository } from '../src/db/repository';
 import * as model from '../src/ai/model';
 import { createTestRepository } from './fakes/database';
 import { mockRouter, renderScreen, TEST_USER } from './setup';
+import type { DesktopBridge, WebBundleStatus } from '../src/desktop';
 
 /**
  * Settings.
@@ -26,6 +27,52 @@ describe('SettingsScreen', () => {
 
   afterEach(async () => {
     await context.close();
+    delete (globalThis as Record<string, unknown>).fluentflowDesktop;
+  });
+
+  function installShell(webBundle: NonNullable<DesktopBridge['webBundle']>) {
+    globalThis.fluentflowDesktop = {
+      platform: 'darwin',
+      appVersion: '0.1.0',
+      electronVersion: '44.1.1',
+      chromeVersion: '152.0.0.0',
+      hasLocalModel: false,
+      canImportLocally: true,
+      pickApkg: jest.fn(async () => ({ canceled: true })),
+      importApkg: jest.fn(),
+      onImportRequest: jest.fn(() => jest.fn()),
+      reportTheme: jest.fn(),
+      webBundle,
+    } as unknown as DesktopBridge;
+  }
+
+  const status = (overrides: Partial<WebBundleStatus>): WebBundleStatus => ({
+    source: 'https://fluentflow.example',
+    active: { kind: 'bundled', id: null, commit: null },
+    pending: null,
+    state: 'idle',
+    checkedAt: null,
+    message: null,
+    latestCommit: null,
+    ...overrides,
+  });
+
+  it('says when the desktop app needs a shell refresh before it can update', async () => {
+    installShell({
+      status: jest.fn(async () => status({ state: 'shell-mismatch' })),
+      check: jest.fn(async () => null),
+    });
+    await renderScreen(<SettingsScreen />, { repository });
+    await screen.findByText(/needs a newer desktop shell/);
+  });
+
+  it('checks the hosted app for a newer build on request', async () => {
+    const check = jest.fn(async () => status({ state: 'current' }));
+    installShell({ status: jest.fn(async () => status({})), check });
+    await renderScreen(<SettingsScreen />, { repository });
+    await fireEvent.press(await screen.findByRole('button', { name: 'Check for updates' }));
+    await screen.findByText('In step with the web app.');
+    expect(check).toHaveBeenCalledTimes(1);
   });
 
   it('says exactly what is missing, not just "unavailable"', async () => {

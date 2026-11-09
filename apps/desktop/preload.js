@@ -46,6 +46,15 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
   appVersion: APP_VERSION,
   electronVersion: process.versions.electron,
 
+  /**
+   * The web build this shell is running and whether a newer one is on the
+   * hosted app. `check()` offers a reload itself when one is ready.
+   */
+  webBundle: {
+    status: () => ipcRenderer.invoke('web-bundle:status'),
+    check: () => ipcRenderer.invoke('web-bundle:check'),
+  },
+
   ai: {
     chat: (messages) => ipcRenderer.invoke('ai:chat', messages),
     /** `{ dictionary, model }` — what is installed, each with its own status. */

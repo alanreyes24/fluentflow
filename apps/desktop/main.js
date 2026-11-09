@@ -38,12 +38,13 @@ const {
 } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { existsSync, statSync } = require('node:fs');
+const { existsSync, readFileSync, statSync } = require('node:fs');
 const ai = require('./ai');
 const cloud = require('./cloud');
 const windowState = require('./src/window-state');
 const updater = require('./updater');
 const { importApkg, EXTENSIONS } = require('./src/apkg');
+const { createWebBundles, shellFingerprint } = require('./src/web-bundle');
 
 // The name Electron derives every per-user path from. Without this it takes the
 // package name, `@fluentflow/desktop`, and the scope's slash turns into a
@@ -58,6 +59,27 @@ app.setName('FluentFlow');
 const DEV_URL = process.env.FLUENTFLOW_DEV_URL;
 const WEB_ROOT = path.join(__dirname, 'web');
 const INDEX_HTML = path.join(WEB_ROOT, 'index.html');
+
+/**
+ * The hosted web app this shell keeps its bundle in step with.
+ *
+ * `npm run desktop:refresh` (and every desktop build) writes it from
+ * `FLUENTFLOW_WEB_URL` in `.env`; `FLUENTFLOW_WEB_URL` in the environment wins,
+ * which is how a test points one launch at a local server. Without either,
+ * the app runs only the bundle it shipped with.
+ */
+function webUpdateSource() {
+  if (process.env.FLUENTFLOW_WEB_URL !== undefined) return process.env.FLUENTFLOW_WEB_URL || null;
+  try {
+    return JSON.parse(readFileSync(path.join(__dirname, 'web-source.json'), 'utf8')).url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Created once the app is ready, because it stores under `userData`. */
+let webBundles = null;
+const WEB_UPDATE_INTERVAL_MS = 30 * 60 * 1000;
 
 const SCHEME = 'app';
 const APP_ORIGIN = `${SCHEME}://fluentflow`;
@@ -116,13 +138,17 @@ function registerProtocolHandler() {
   protocol.handle(SCHEME, (request) => {
     const { pathname } = new URL(request.url);
     const relative = decodeURIComponent(pathname).replace(/^\/+/, '');
-    const candidate = path.join(WEB_ROOT, relative);
+    // The bundle downloaded from the hosted app when there is one, otherwise
+    // the export that shipped inside the app. See src/web-bundle.js.
+    const root = webBundles?.activeRoot() ?? WEB_ROOT;
+    const candidate = path.join(root, relative);
 
     // Refuse anything that escapes the export directory.
     const withinRoot =
-      candidate === WEB_ROOT || candidate.startsWith(WEB_ROOT + path.sep);
+      candidate === root || candidate.startsWith(root + path.sep);
 
-    const target = withinRoot && relative && existsSync(candidate) ? candidate : INDEX_HTML;
+    const target =
+      withinRoot && relative && existsSync(candidate) ? candidate : path.join(root, 'index.html');
     return net.fetch(pathToFileURL(target).toString());
   });
 }
@@ -374,7 +400,7 @@ function buildMenu() {
               { role: 'about' },
               {
                 label: 'Check for Updates…',
-                click: () => updater.checkNow(),
+                click: () => void checkWebUpdates({ interactive: true }),
               },
               { type: 'separator' },
               { role: 'services' },
@@ -642,6 +668,91 @@ if (isMac) {
   });
 }
 
+// --- web bundle updates -----------------------------------------------------
+
+function startWebBundles() {
+  if (DEV_URL) return;
+  try {
+    webBundles = createWebBundles({
+      bundledRoot: WEB_ROOT,
+      storeDir: path.join(app.getPath('userData'), 'web-bundles'),
+      shell: shellFingerprint(__dirname),
+      source: webUpdateSource(),
+      fetch: (url, init) => net.fetch(url, init),
+    });
+  } catch (error) {
+    // A broken store must never stop the app opening on its bundled copy.
+    console.error('[fluentflow] web bundle updates disabled:', error);
+    webBundles = null;
+    return;
+  }
+
+  ipcMain.handle('web-bundle:status', () => webBundles.status());
+  ipcMain.handle('web-bundle:check', () => checkWebUpdates({ interactive: false, fromPage: true }));
+
+  if (!webBundles.status().source) return;
+  setTimeout(() => void checkWebUpdates({ interactive: false }), 5_000).unref?.();
+  setInterval(() => void checkWebUpdates({ interactive: false }), WEB_UPDATE_INTERVAL_MS).unref?.();
+}
+
+/** Only one "reload now?" prompt at a time, and not again for the same bundle. */
+let promptedBundleId = null;
+
+/**
+ * Check the hosted app for a newer bundle and, when one is ready, offer to
+ * reload into it. `interactive` is the menu item: it also reports "up to date"
+ * and failures, which a background check keeps to itself.
+ */
+async function checkWebUpdates({ interactive, fromPage = false }) {
+  if (!webBundles) {
+    if (interactive) {
+      await dialog.showMessageBox({ type: 'info', message: 'Web updates are not available in development.' });
+    }
+    return null;
+  }
+
+  const status = await webBundles.check();
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+
+  if (status.pending && (interactive || fromPage || promptedBundleId !== status.pending.id)) {
+    promptedBundleId = status.pending.id;
+    const commit = status.pending.commit ? ` (${status.pending.commit.slice(0, 7)})` : '';
+    const options = {
+      type: 'info',
+      buttons: ['Reload now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      message: `A newer FluentFlow build is ready${commit}`,
+      detail: 'Reload to use it. Otherwise it is used the next time FluentFlow opens.',
+    };
+    const { response } = window
+      ? await dialog.showMessageBox(window, options)
+      : await dialog.showMessageBox(options);
+    if (response === 0 && webBundles.activatePending()) {
+      mainWindow?.webContents.reloadIgnoringCache();
+    }
+    return webBundles.status();
+  }
+
+  if (interactive) {
+    const messages = {
+      disabled: ['info', 'Web updates are off.', 'Set FLUENTFLOW_WEB_URL in .env to your hosted app and run npm run desktop:refresh.'],
+      current: ['info', 'FluentFlow is up to date.', status.latestCommit ? `Build ${status.latestCommit.slice(0, 7)}.` : ''],
+      'shell-mismatch': [
+        'warning',
+        'The hosted app needs a newer desktop shell.',
+        'Run npm run desktop:refresh to update the shell. Until then this app keeps its current build.',
+      ],
+      error: ['warning', 'Could not check for updates.', status.message ?? ''],
+    };
+    const [type, message, detail] = messages[status.state] ?? messages.current;
+    const options = { type, message, detail };
+    if (window) await dialog.showMessageBox(window, options);
+    else await dialog.showMessageBox(options);
+  }
+  return status;
+}
+
 // --- lifecycle --------------------------------------------------------------
 
 /**
@@ -673,6 +784,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    startWebBundles();
     registerProtocolHandler();
     applyContentSecurityPolicy();
     registerAiHandlers();

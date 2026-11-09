@@ -50,6 +50,7 @@ const PAYLOAD = [
   'ai.js',
   'cloud.js',
   'dictionary.js',
+  'web-source.json',
   'src',
   'vendor',
   'web',
@@ -113,6 +114,8 @@ async function main() {
       // Remove first: the export uses content-hashed filenames, so copying
       // over the top would leave every previous build's bundles behind.
       await rm(destination, { recursive: true, force: true });
+      // `web-source.json` exists only once a build has written it.
+      if (!existsSync(join(DESKTOP, entry))) continue;
       await cp(join(DESKTOP, entry), destination, { recursive: true });
     }
     stampVersion(target.appDir, version);

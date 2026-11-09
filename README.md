@@ -98,6 +98,16 @@ Screen** to launch it full screen like an app.
 3. Generate a domain under **Settings → Networking**. If your Firebase API key
    is restricted by HTTP referrer, add that domain to the key's allowed list.
 
+**Keeping the desktop app in step.** Set `FLUENTFLOW_WEB_URL` in `.env` to the
+deployed domain and run `npm run desktop:refresh` once. From then on the
+desktop app checks the hosted app on launch and every 30 minutes, downloads a
+newer web build (every file is checked against the server's SHA-256 manifest),
+and offers to reload. Shell changes (`apps/desktop/*.js`, `src/`) still need a
+refresh: the web build records which shell it was made for in
+`apps/mobile/public/desktop-shell.json`, and the desktop app waits rather than
+run a build meant for a different shell. `npm test` fails if that file is stale;
+regenerate it with `node scripts/desktop-shell-fingerprint.mjs`.
+
 The server verifies Firebase ID tokens with only the project id. Set
 `FIREBASE_SERVICE_ACCOUNT_JSON` (the key file's contents) only if you also want
 revoked-token checks or the HTTP sync endpoints.
