@@ -1,5 +1,6 @@
 import { StyleSheet, View } from 'react-native';
 import type { HeatmapCell } from '@fluentflow/core';
+import { useI18n } from '../i18n';
 import { Label, Row } from './components';
 import { useTheme } from './theme';
 import type { ViewStyleProp } from './styles';
@@ -167,12 +168,15 @@ export function StudyCalendar({
   style?: ViewStyleProp;
 }) {
   const theme = useTheme();
+  const { t } = useI18n();
   const studied = weeks.flat().filter((day) => day.reviews > 0).length;
 
   return (
     <View style={style}>
       <View
-        accessibilityLabel={`Study calendar: ${studied} days with reviews`}
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={`${t('studyCalendar')}. ${t('daysStudied')}: ${studied}`}
         style={[styles.calendar, { gap }]}
       >
         {weeks.map((week) => (
@@ -199,10 +203,13 @@ export function StudyCalendar({
           <Label variant="caption" tone="faint">
             {legend.less}
           </Label>
-          {theme.colors.heat.map((shade, level) => (
+          {theme.colors.heat.map((shade) => (
+            // The legend's swatches say nothing on their own; "Less … More"
+            // around them is the text, so they are hidden from a screen reader.
             <View
               key={shade}
-              accessibilityLabel={`level ${level}`}
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
               style={{ width: cell, height: cell, borderRadius: 3, backgroundColor: shade }}
             />
           ))}

@@ -102,6 +102,7 @@ export default function StatsScreen() {
     return (
       <Screen>
         <EmptyState
+          icon="barChart"
           title={t('noStatsYet')}
           hint={t('noStatsHint')}
           action={<Button label={t('decks')} onPress={() => router.back()} />}
@@ -259,7 +260,10 @@ export default function StatsScreen() {
             />
           </Row>
           <Spacer size={theme.spacing.md} />
-          <ProgressBar progress={stats.collection} />
+          <ProgressBar
+            progress={stats.collection}
+            accessibilityLabel={`${t('statusMastered')} ${stats.collection.mastered} / ${stats.collection.total}`}
+          />
         </Surface>
 
         {stats.decks.length > 0 ? (
@@ -289,7 +293,11 @@ export default function StatsScreen() {
                     />
                   </Row>
                   <Spacer size={theme.spacing.sm} />
-                  <ProgressBar progress={entry.progress} height={6} />
+                  <ProgressBar
+                    progress={entry.progress}
+                    height={6}
+                    accessibilityLabel={`${entry.deck.name}: ${t('statusMastered')} ${entry.progress.mastered} / ${entry.progress.total}`}
+                  />
                   <Spacer size={theme.spacing.xs} />
                   <Label variant="caption" tone="faint">
                     {LANGUAGE_NAMES[entry.deck.language]} ·{' '}

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { LANGUAGE_NAMES, TARGET_LANGUAGES, type TargetLanguage } from '@fluentflow/core';
 import { useI18n } from '../i18n';
-import { Button, Field, Label, Row, SegmentedControl } from './components';
+import { Button, Field, FieldLabel, Row, SegmentedControl } from './components';
 import { useTheme } from './theme';
 
 export function NewDeckForm({
@@ -41,9 +41,7 @@ export function NewDeckForm({
       />
 
       <View style={styles.field}>
-        <Label variant="caption" tone="muted" style={styles.fieldLabel}>
-          {t('deckLanguage')}
-        </Label>
+        <FieldLabel>{t('deckLanguage')}</FieldLabel>
         <SegmentedControl
           options={TARGET_LANGUAGES.map((code) => ({ value: code, label: LANGUAGE_NAMES[code] }))}
           value={language}
@@ -68,6 +66,5 @@ export function NewDeckForm({
 const styles = StyleSheet.create({
   form: { gap: 16 },
   field: { gap: 6 },
-  fieldLabel: { textTransform: 'uppercase', letterSpacing: 0.6 },
   grow: { flex: 1 },
 });

@@ -513,7 +513,7 @@ function CardRow({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; o
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Delete ${card.front}`}
+          accessibilityLabel={`${t('delete')} ${card.front}`}
           onPress={onDelete}
           hitSlop={6}
           style={[styles.iconButton, { borderRadius: theme.radius.sm }]}

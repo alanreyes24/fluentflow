@@ -66,6 +66,8 @@ interface LabelProps {
   numberOfLines?: number;
   selectable?: boolean;
   accessibilityLabel?: string;
+  /** `header` for a screen or section title, so a screen reader can jump between them. */
+  accessibilityRole?: 'header';
 }
 
 export function Label({
@@ -77,6 +79,7 @@ export function Label({
   numberOfLines,
   selectable,
   accessibilityLabel,
+  accessibilityRole,
 }: LabelProps) {
   const theme = useTheme();
   const colors: Record<Tone, string> = {
@@ -94,6 +97,7 @@ export function Label({
       numberOfLines={numberOfLines}
       selectable={selectable}
       accessibilityLabel={accessibilityLabel}
+      accessibilityRole={accessibilityRole}
       style={[
         theme.typography[variant],
         // Uppercasing in the component rather than at every call site.
@@ -180,7 +184,9 @@ export function Button({
         break;
       case 'danger':
         background = theme.colors.danger;
-        hoverBackground = theme.colors.danger;
+        // A step lighter on hover, like every other filled control; it used
+        // to be the resting colour, so the pointer got no response at all.
+        hoverBackground = withAlpha(theme.colors.danger, 'd9');
         textColor = theme.colors.accentText;
         shadow = theme.elevation.sm;
         break;
@@ -352,7 +358,7 @@ export function PageHeader({
             {overline}
           </Label>
         ) : null}
-        <Label variant="title" style={wide ? styles.pageTitleWide : null}>
+        <Label variant="title" accessibilityRole="header" style={wide ? styles.pageTitleWide : null}>
           {title}
         </Label>
         {subtitle ? (
@@ -466,7 +472,7 @@ export function SectionHeader({
 }) {
   return (
     <View style={[styles.sectionHeader, style]}>
-      <Label variant="overline" tone="faint" style={styles.grow}>
+      <Label variant="overline" tone="faint" accessibilityRole="header" style={styles.grow}>
         {title}
       </Label>
       {action}
@@ -739,6 +745,19 @@ function Segment({
 
 // --- inputs -----------------------------------------------------------------
 
+/**
+ * The small uppercase name above a control. `Field` draws its own; a segmented
+ * control or a list of choices uses this one, so every control on a form is
+ * named the same way rather than half in capitals and half in sentence case.
+ */
+export function FieldLabel({ children, style }: { children: ReactNode; style?: TextStyleProp }) {
+  return (
+    <Label variant="caption" tone="muted" style={[styles.fieldLabel, style]}>
+      {children}
+    </Label>
+  );
+}
+
 interface FieldProps extends TextInputProps {
   label?: string;
   hint?: string;
@@ -752,25 +771,27 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
   const theme = useTheme();
   const [focused, setFocused] = useState(false);
 
+  // `borderStrong` at rest: the field's edge is the only thing that says
+  // "type here" against a surface of nearly the same grey, so it gets the
+  // border that has to read rather than the hairline between cards.
   const borderColor = error
     ? theme.colors.danger
     : focused
       ? theme.colors.accent
-      : theme.colors.border;
+      : theme.colors.borderStrong;
 
   return (
     <View style={styles.field}>
-      {label ? (
-        <Label variant="caption" tone="muted" style={styles.fieldLabel}>
-          {label}
-        </Label>
-      ) : null}
+      {label ? <FieldLabel>{label}</FieldLabel> : null}
       <TextInput
         ref={ref}
         // The visible label is a sibling `Text`, which a screen reader has no
         // way to associate with this input — without this the field is
         // announced as an unnamed text box.
         accessibilityLabel={props.accessibilityLabel ?? label}
+        // The hint or error under the field is a separate node too; carrying
+        // it as the input's hint means it is read when the field is focused.
+        accessibilityHint={props.accessibilityHint ?? error ?? hint}
         placeholderTextColor={theme.colors.textFaint}
         onFocus={(event) => {
           setFocused(true);
@@ -799,9 +820,12 @@ export const Field = forwardRef<TextInput, FieldProps>(function Field(
         {...props}
       />
       {error ? (
-        <Label variant="caption" tone="danger" style={styles.fieldHint}>
-          {error}
-        </Label>
+        // Announced as it appears, without moving focus off the field.
+        <View accessibilityLiveRegion="polite">
+          <Label variant="caption" tone="danger" style={styles.fieldHint}>
+            {error}
+          </Label>
+        </View>
       ) : hint ? (
         <Label variant="caption" tone="faint" style={styles.fieldHint}>
           {hint}
@@ -821,9 +845,12 @@ export function StatusDot({ status, size = 8 }: { status: CardStatus; size?: num
     mastered: theme.colors.statusMastered,
   }[status];
 
+  // Decorative: every dot sits beside its status in words (or a row that
+  // says it), and the raw English key it used to announce was noise.
   return (
     <View
-      accessibilityLabel={status}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
       style={{
         width: size,
         height: size,
@@ -845,9 +872,12 @@ export function StatusDot({ status, size = 8 }: { status: CardStatus; size?: num
 export function ProgressBar({
   progress,
   height,
+  accessibilityLabel,
 }: {
   progress: DeckProgress;
   height?: number;
+  /** What the bar measures, e.g. "Mastered 3 of 12". A progress bar with no name is read as just a number. */
+  accessibilityLabel?: string;
 }) {
   const theme = useTheme();
   const total = Math.max(progress.total, 1);
@@ -861,6 +891,7 @@ export function ProgressBar({
   return (
     <View
       accessibilityRole="progressbar"
+      accessibilityLabel={accessibilityLabel}
       accessibilityValue={{ min: 0, max: progress.total, now: progress.mastered }}
       style={[
         styles.progressTrack,
@@ -890,19 +921,21 @@ export function EmptyState({
   hint,
   action,
 }: {
-  icon?: string;
+  /** A line icon in a soft disc above the title. Decorative: the title says it. */
+  icon?: IconName;
   title: string;
   hint?: string;
   action?: ReactNode;
 }) {
+  const theme = useTheme();
   return (
     <View style={styles.empty}>
       {icon ? (
-        <Text accessibilityElementsHidden importantForAccessibility="no" style={styles.emptyIcon}>
-          {icon}
-        </Text>
+        <View style={[styles.emptyIcon, { backgroundColor: theme.colors.accentSoft }]}>
+          <Icon name={icon} size={24} color={theme.colors.textMuted} />
+        </View>
       ) : null}
-      <Label variant="heading" align="center">
+      <Label variant="heading" align="center" accessibilityRole="header">
         {title}
       </Label>
       {hint ? (
@@ -937,7 +970,7 @@ const styles = StyleSheet.create({
   pageSubtitle: { marginTop: 4 },
   pageAction: { flexDirection: 'row', gap: 8 },
   smallLabel: { fontSize: 14 },
-  emptyIcon: { fontSize: 40, textAlign: 'center' },
+  emptyIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   wrap: { flexWrap: 'wrap' },
   overline: { textTransform: 'uppercase' },
   sectionHeader: {

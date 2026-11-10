@@ -154,6 +154,7 @@ export default function DecksScreen() {
 
         {decks.length === 0 ? (
           <EmptyState
+            icon="layers"
             title={t('noDecksYet')}
             hint={t('noDecksHint')}
             action={<Button label={t('newDeck')} icon="plus" onPress={() => router.push('/(app)/new-deck')} />}
@@ -185,7 +186,7 @@ export default function DecksScreen() {
               <View style={styles.main}>
                 <View style={styles.sectionHead}>
                   <Row gap={theme.spacing.sm} style={styles.grow}>
-                    <Label variant="heading">{t('yourDecks')}</Label>
+                    <Label variant="heading" accessibilityRole="header">{t('yourDecks')}</Label>
                     <Badge tone="plain">{decks.length}</Badge>
                   </Row>
                   <Button
@@ -381,6 +382,7 @@ function DeckCard({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress
           { borderRadius: theme.radius.lg },
           hovered ? { borderColor: theme.colors.borderStrong } : null,
           Platform.OS === 'web' && hovered ? styles.lifted : null,
+          Platform.OS === 'web' ? styles.liftTransition : null,
         ]}
       >
         <View style={styles.deckHeader}>
@@ -399,7 +401,7 @@ function DeckCard({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress
           </View>
           {progress && deck.cardCount > 0 ? (
             progress.due > 0
-              ? <Badge>{progress.due}</Badge>
+              ? <Badge accessibilityLabel={t('dueCount', { count: progress.due })}>{progress.due}</Badge>
               : progress.pendingLearning > 0
                 ? (
                   <Badge
@@ -416,7 +418,11 @@ function DeckCard({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress
 
         {progress && progress.total > 0 ? (
           <View style={styles.deckProgress}>
-            <ProgressBar progress={progress} height={6} />
+            <ProgressBar
+              progress={progress}
+              height={6}
+              accessibilityLabel={`${t('statusMastered')} ${progress.mastered} / ${progress.total}`}
+            />
             <Row gap={theme.spacing.md} wrap>
               <Legend color={theme.colors.statusNew}>{t('statusNew')} {progress.new}</Legend>
               <Legend color={theme.colors.statusLearning}>{t('statusLearning')} {progress.learning}</Legend>
@@ -429,7 +435,9 @@ function DeckCard({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress
           <Button
             label={deck.cardCount === 0 ? t('addCards') : due > 0 ? t('study') : t('studyAhead')}
             icon={deck.cardCount === 0 ? 'plus' : 'play'}
-            variant={due > 0 || deck.cardCount === 0 ? 'primary' : 'secondary'}
+            // Secondary on every card: "Start studying" above is the screen's
+            // one primary action, and a filled button per deck competed with it.
+            variant="secondary"
             size="small"
             onPress={() =>
               deck.cardCount === 0 ? router.push({
@@ -504,4 +512,10 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   lifted: { transform: [{ translateY: -2 }] },
+  // The lift eases in rather than snapping. Web only: the keys are CSS.
+  liftTransition: {
+    transitionProperty: 'transform, box-shadow, border-color',
+    transitionDuration: '160ms',
+    transitionTimingFunction: 'ease-out',
+  } as object,
 });

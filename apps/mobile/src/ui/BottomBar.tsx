@@ -285,6 +285,6 @@ const styles = StyleSheet.create({
   // can widen the whole bar instead of yielding space to its neighbours.
   tab: { flex: 1, minWidth: 0, minHeight: 48, alignItems: 'center', justifyContent: 'center', gap: 2 },
   tabIcon: { width: 52, height: 28, alignItems: 'center', justifyContent: 'center' },
-  tabLabel: { fontSize: 11, lineHeight: 14 },
+  tabLabel: { fontSize: 12, lineHeight: 15 },
   tabSync: { justifyContent: 'center', paddingHorizontal: 10 },
 });

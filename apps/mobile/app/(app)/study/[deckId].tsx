@@ -592,6 +592,7 @@ export default function StudyScreen() {
                   accessibilityState={{ selected: Boolean(card.starred), disabled: savingStar }}
                   disabled={savingStar}
                   onPress={() => void toggleStar()}
+                  hitSlop={4}
                   style={[styles.iconButton, { borderRadius: theme.radius.sm }]}
                 >
                   <Icon
@@ -608,6 +609,7 @@ export default function StudyScreen() {
                   accessibilityLabel={t('studyOptions')}
                   accessibilityState={{ expanded: toolsOpen }}
                   onPress={() => setToolsOpen((open) => !open)}
+                  hitSlop={4}
                   style={[
                     styles.iconButton,
                     { borderRadius: theme.radius.sm, backgroundColor: toolsOpen ? theme.colors.accentSoft : 'transparent' },
@@ -853,7 +855,9 @@ function Toast({ message }: { message: string | null }) {
   const theme = useTheme();
   if (!message) return null;
   return (
-    <View pointerEvents="none" style={styles.toast}>
+    // A live region, so "Card buried" and the like are read out as they
+    // appear; the toast never takes focus.
+    <View pointerEvents="none" style={styles.toast} accessibilityLiveRegion="polite">
       <View style={[styles.toastBubble, { backgroundColor: theme.colors.text }]}>
         <Label variant="caption" tone="inverse" align="center">
           {message}
@@ -894,7 +898,9 @@ function RatingButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint={`Rate this card ${label}`}
+      // The name stays the bare rating; what it will do to the card is the
+      // hint, in the user's language rather than a hard-coded English one.
+      accessibilityHint={interval === undefined ? undefined : formatInterval(interval.days, interval.minutes, t)}
       onPress={() => onPress(rating)}
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
@@ -902,7 +908,13 @@ function RatingButton({
         styles.rating,
         compact ? styles.ratingCompact : null,
         {
-          backgroundColor: withAlpha(tone, hovered || pressed ? '33' : '1f'),
+          // On white the wash has to stay faint: the label is set in the same
+          // colour, and amber on a stronger amber tint falls under 4.5:1. The
+          // border carries the hover change there instead.
+          backgroundColor: withAlpha(
+            tone,
+            theme.name === 'light' ? (hovered || pressed ? '14' : '0d') : hovered || pressed ? '33' : '1f',
+          ),
           borderColor: withAlpha(tone, hovered ? '80' : '40'),
           borderRadius: theme.radius.md,
           transform: [{ translateY: pressed ? 1 : 0 }],
@@ -978,7 +990,7 @@ function DefinitionBlock({
           accessibilityState={{ disabled: generating, busy: generating }}
           disabled={generating}
           onPress={onRegenerate}
-          hitSlop={8}
+          hitSlop={12}
         >
           <Label variant="caption" tone="accent">
             {generating ? t('generatingDefinition') : t('regenerate')}
@@ -1032,7 +1044,7 @@ function ExampleBlock({
           accessibilityRole="button"
           accessibilityLabel={t('regenerateExamples')}
           onPress={onRegenerate}
-          hitSlop={8}
+          hitSlop={12}
         >
           <Label variant="caption" tone="accent">
             {t('regenerate')}
@@ -1272,7 +1284,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  keyCapText: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
+  keyCapText: { fontSize: 12, lineHeight: 14, fontWeight: '700' },
   studyBody: { flex: 1, flexDirection: 'row', minHeight: 0 },
   studyMain: { flex: 1, minWidth: 0 },
   stage: { flex: 1, minWidth: 0 },

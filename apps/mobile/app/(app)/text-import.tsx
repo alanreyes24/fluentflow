@@ -24,6 +24,7 @@ import {
   Label,
   Row,
   Screen,
+  FieldLabel,
   SegmentedControl,
   Spacer,
   Surface,
@@ -378,9 +379,7 @@ export default function TextImportScreen() {
           <Surface style={styles.options}>
             {decks.length > 0 ? (
               <>
-                <Label variant="caption" tone="muted">
-                  {t('pasteTargetDeck')}
-                </Label>
+                <FieldLabel>{t('pasteTargetDeck')}</FieldLabel>
                 <SegmentedControl
                   options={[
                     { value: 'new', label: t('pasteNewDeck') },
@@ -404,9 +403,7 @@ export default function TextImportScreen() {
             ) : null}
             {!selectedDeckId ? (
               <>
-                <Label variant="caption" tone="muted">
-                  {t('importOverride')}
-                </Label>
+                <FieldLabel>{t('importOverride')}</FieldLabel>
                 <SegmentedControl
                   options={[
                     { value: 'auto', label: 'Auto' },

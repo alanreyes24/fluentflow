@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Platform, useColorScheme, useWindowDimensions } from 'react-native';
+import { Platform, useColorScheme, useWindowDimensions, type TextStyle } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { syncDesktopTheme } from './shell';
 
@@ -98,16 +98,19 @@ const light: Palette = {
   fill: '#3f3f46',
   fillHover: '#52525b',
   fillText: '#ffffff',
-  statusNew: '#0ea5e9',
-  statusLearning: '#d97706',
-  statusMastered: '#059669',
-  again: '#dc2626',
-  hard: '#d97706',
-  good: '#059669',
-  easy: '#0ea5e9',
-  danger: '#dc2626',
+  // The 700 steps rather than the 500s: these are set as text (queue counts,
+  // rating labels, error lines) as well as fills, and on white the brighter
+  // steps fall to 2.8–3.8:1. Each of these clears 4.5:1 on every light ground.
+  statusNew: '#0369a1',
+  statusLearning: '#b45309',
+  statusMastered: '#047857',
+  again: '#b91c1c',
+  hard: '#b45309',
+  good: '#047857',
+  easy: '#0369a1',
+  danger: '#b91c1c',
   offline: '#80808a',
-  streak: '#c2410c',
+  streak: '#9a3412',
   streakSoft: '#f7e6d8',
   // Anchored to the palette it sits in: step 0 is `surfaceSunken`, so an empty
   // day reads as part of the card, and step 4 is `accent`, so the busiest day
@@ -204,13 +207,18 @@ export type ElevationLevel = keyof (typeof elevation)['light'];
 /** The shadow ramp for one theme: every level resolved to a `box-shadow` string. */
 export type ElevationRamp = Record<ElevationLevel, string>;
 
+/** Tabular (fixed-width) figures. Mutable on purpose: `TextStyle` will not take a readonly tuple. */
+const TABULAR: NonNullable<TextStyle['fontVariant']> = ['tabular-nums'];
+
 export const typography = {
   /** The streak count, and nothing else — one number the screen is built around. */
-  display: { fontSize: 44, lineHeight: 50, fontWeight: '700', letterSpacing: -0.8, fontFamily: FONT_STACK },
+  display: { fontSize: 44, lineHeight: 50, fontWeight: '700', letterSpacing: -0.8, fontFamily: FONT_STACK, fontVariant: TABULAR },
   /** A statistic's headline number, in a tile beside three others. */
-  metric: { fontSize: 28, lineHeight: 32, fontWeight: '700', letterSpacing: -0.3, fontFamily: FONT_STACK },
+  // Tabular figures on both numeric styles, so a count ticking from 9 to 10
+  // (or a column of them side by side) does not shift its neighbours.
+  metric: { fontSize: 28, lineHeight: 32, fontWeight: '700', letterSpacing: -0.3, fontFamily: FONT_STACK, fontVariant: TABULAR },
   /** A section's name above the thing it names. Uppercased by `Label`. */
-  overline: { fontSize: 11, lineHeight: 14, fontWeight: '700', letterSpacing: 0.8, fontFamily: FONT_STACK },
+  overline: { fontSize: 12, lineHeight: 16, fontWeight: '700', letterSpacing: 0.8, fontFamily: FONT_STACK },
   cardFront: { fontSize: 40, lineHeight: 48, fontWeight: '600', letterSpacing: -0.4, fontFamily: FONT_STACK },
   cardBack: { fontSize: 26, lineHeight: 34, fontWeight: '500', letterSpacing: -0.2, fontFamily: FONT_STACK },
   title: { fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: -0.4, fontFamily: FONT_STACK },
@@ -291,15 +299,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * The keyboard focus ring, as one stylesheet rather than a prop on every
- * control.
+ * The app's few global web rules, as one stylesheet rather than a prop on
+ * every control.
  *
- * react-native-web renders a `Pressable` as a focusable `div`, and the
- * browser's default ring for that is whatever the platform likes (Chrome's
- * is orange on some systems) — or nothing, once a reset removes it. This
- * draws one ring in the accent, for keyboard focus only (`:focus-visible`), so
- * a mouse click never leaves a ring behind. Text fields are left out: `Field`
- * draws its own focus state, and a second outline around it is noise.
+ * - The keyboard focus ring. react-native-web renders a `Pressable` as a
+ *   focusable `div`, and the browser's default ring for that is whatever the
+ *   platform likes (Chrome's is orange on some systems) — or nothing, once a
+ *   reset removes it. This draws one ring in the accent, for keyboard focus
+ *   only (`:focus-visible`), so a mouse click never leaves a ring behind. Text
+ *   fields are left out: `Field` draws its own focus state.
+ * - Reduced motion. Every transition in the app is a web-only CSS one (native
+ *   has none), so one media query turns them all off for anyone who has asked
+ *   their system for less motion.
+ * - `touch-action: manipulation` on controls, so a tap on a phone browser is
+ *   not held back waiting to see whether it was the start of a double-tap.
+ * - A not-allowed cursor on disabled controls, which otherwise keep the
+ *   pointer hand and look as clickable as the live ones.
  */
 function installFocusRing(accent: string): void {
   if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -313,7 +328,12 @@ function installFocusRing(accent: string): void {
   style.textContent =
     `:focus { outline: none; }\n` +
     `:focus-visible { outline: 2px solid ${accent}; outline-offset: 2px; }\n` +
-    `input:focus-visible, textarea:focus-visible { outline: none; }`;
+    `input:focus-visible, textarea:focus-visible { outline: none; }\n` +
+    `[role="button"], [role="switch"], [role="checkbox"], [role="tab"], button, a { touch-action: manipulation; }\n` +
+    `[aria-disabled="true"] { cursor: not-allowed !important; }\n` +
+    `@media (prefers-reduced-motion: reduce) {\n` +
+    `  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }\n` +
+    `}`;
 }
 
 export function useTheme(): Theme {

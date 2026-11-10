@@ -23,7 +23,7 @@ export function SyncIndicator({ compact = false }: { compact?: boolean }) {
   // on the sign-in screen already covers that case.
   if (!cloudAvailable || user.anonymous) {
     return (
-      <View style={styles.container}>
+      <View style={styles.container} accessible accessibilityLabel={t('offline')}>
         <Dot color={theme.colors.offline} />
         {!compact ? <Label variant="caption" tone="faint">{t('offline')}</Label> : null}
       </View>
@@ -55,6 +55,7 @@ export function SyncIndicator({ compact = false }: { compact?: boolean }) {
       accessibilityRole="button"
       accessibilityLabel={`${text}. ${t('syncNow')}`}
       onPress={() => void syncNow()}
+      hitSlop={6}
       style={({ pressed }) => [styles.container, { opacity: pressed ? 0.6 : 1 }]}
     >
       <Dot color={color} />
@@ -80,6 +81,6 @@ function withAlpha(color: string, alpha: string): string {
 }
 
 const styles = StyleSheet.create({
-  container: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, minWidth: 24 },
+  container: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, minWidth: 32, minHeight: 32 },
   dot: { width: 7, height: 7, borderRadius: 3.5 },
 });

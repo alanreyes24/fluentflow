@@ -206,6 +206,7 @@ export default function CardsScreen() {
         }
         ListEmptyComponent={
           <EmptyState
+            icon="library"
             title={hasFilters ? t('noMatchingCards') : t('libraryEmpty')}
             hint={hasFilters ? t('noMatchingCardsHint') : t('libraryEmptyHint')}
             action={!hasFilters ? (

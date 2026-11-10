@@ -18,6 +18,7 @@ import {
   Label,
   Loading,
   Screen,
+  FieldLabel,
   SegmentedControl,
   Spacer,
   Surface,
@@ -143,9 +144,7 @@ export function AnkiImportPanel({ embedded = false }: { embedded?: boolean }) {
           <>
             <Spacer size={theme.spacing.md} />
             <Surface style={styles.options}>
-              <Label variant="caption" tone="muted" style={styles.overrideLabel}>
-                {t('importOverride')}
-              </Label>
+              <FieldLabel style={styles.overrideLabel}>{t('importOverride')}</FieldLabel>
               <SegmentedControl
                 options={[
                   { value: 'auto', label: 'Auto' },
