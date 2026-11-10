@@ -249,8 +249,8 @@ function CardLibraryRow({
     >
       <Surface style={[styles.card, selected ? { borderColor: theme.colors.accent } : null]}>
         <Row gap={theme.spacing.sm} align="center">
-          <View style={[styles.checkbox, { borderColor: selected ? theme.colors.accent : theme.colors.border, backgroundColor: selected ? theme.colors.accent : 'transparent' }]}>
-            {selected ? <Icon name="check" size={14} strokeWidth={3} color={theme.colors.accentText} /> : null}
+          <View style={[styles.checkbox, { borderColor: selected ? theme.colors.fill : theme.colors.border, backgroundColor: selected ? theme.colors.fill : 'transparent' }]}>
+            {selected ? <Icon name="check" size={14} strokeWidth={3} color={theme.colors.fillText} /> : null}
           </View>
           <View style={styles.grow}>
             <Label variant="label" numberOfLines={1}>{card.front}</Label>

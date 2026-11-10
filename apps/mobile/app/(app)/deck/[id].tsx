@@ -537,8 +537,10 @@ function ToggleRow({ label, value, onChange }: { label: string; value: boolean; 
       style={styles.toggleRow}
     >
       <Label variant="body" style={styles.grow}>{label}</Label>
-      <View style={[styles.toggle, { backgroundColor: value ? theme.colors.accent : theme.colors.surfaceSunken }]}>
-        <Label variant="caption" tone={value ? 'inverse' : 'muted'}>{value ? t('on') : t('off')}</Label>
+      <View style={[styles.toggle, { backgroundColor: value ? theme.colors.fill : theme.colors.surfaceSunken }]}>
+        <Label variant="caption" tone="muted" style={value ? { color: theme.colors.fillText } : undefined}>
+          {value ? t('on') : t('off')}
+        </Label>
       </View>
     </Pressable>
   );

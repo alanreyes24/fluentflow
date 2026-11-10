@@ -23,7 +23,7 @@ import { Icon, type IconName } from './Icon';
  * its palette from the theme, which is what makes dark mode a single switch
  * rather than an audit.
  *
- * The look is a quiet neutral system — one indigo accent, a grey surface ramp, and
+ * The look is a quiet monochrome system — grey controls, a grey surface ramp, and
  * soft shadows that lift a card off the page without a hard edge. Motion and
  * focus rings are web-only style props, guarded so the native test preset never
  * sees a style key it does not know.
@@ -168,9 +168,9 @@ export function Button({
   } else {
     switch (variant) {
       case 'primary':
-        background = theme.colors.accent;
-        hoverBackground = theme.colors.accentHover;
-        textColor = theme.colors.accentText;
+        background = theme.colors.fill;
+        hoverBackground = theme.colors.fillHover;
+        textColor = theme.colors.fillText;
         shadow = theme.elevation.sm;
         break;
       case 'secondary':
@@ -609,7 +609,7 @@ export function Badge({
 }) {
   const theme = useTheme();
   const accent = tone === 'accent';
-  const textColor = accent ? theme.colors.accentText : theme.colors.textMuted;
+  const textColor = accent ? theme.colors.fillText : theme.colors.textMuted;
   const hasText = children !== undefined && children !== null && children !== '';
   return (
     <View
@@ -618,7 +618,7 @@ export function Badge({
       style={[
         styles.badge,
         {
-          backgroundColor: accent ? theme.colors.accent : theme.colors.surfaceSunken,
+          backgroundColor: accent ? theme.colors.fill : theme.colors.surfaceSunken,
           borderRadius: theme.radius.pill,
         },
         !hasText ? styles.badgeIconOnly : null,

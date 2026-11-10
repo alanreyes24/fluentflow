@@ -47,6 +47,14 @@ export interface Palette {
   /** The accent while a control is held down. */
   accentPressed: string;
   accentText: string;
+  /**
+   * Filled controls: a primary button, a count badge, a switched-on toggle.
+   * A mid grey rather than the accent, so a button reads as a button without
+   * being the brightest thing on screen.
+   */
+  fill: string;
+  fillHover: string;
+  fillText: string;
   /** Card status colours, also used by the rating buttons. */
   statusNew: string;
   statusLearning: string;
@@ -79,14 +87,17 @@ const light: Palette = {
   borderStrong: '#d4d4d8',
   divider: '#ececee',
   hover: 'rgba(24, 24, 27, 0.05)',
-  accentSoft: 'rgba(79, 70, 229, 0.10)',
+  accentSoft: 'rgba(24, 24, 27, 0.07)',
   text: '#18181b',
   textMuted: '#52525b',
   textFaint: '#63636b',
-  accent: '#4f46e5',
-  accentHover: '#4338ca',
-  accentPressed: '#3730a3',
+  accent: '#27272a',
+  accentHover: '#3f3f46',
+  accentPressed: '#52525b',
   accentText: '#ffffff',
+  fill: '#3f3f46',
+  fillHover: '#52525b',
+  fillText: '#ffffff',
   statusNew: '#0ea5e9',
   statusLearning: '#d97706',
   statusMastered: '#059669',
@@ -100,13 +111,13 @@ const light: Palette = {
   streakSoft: '#f7e6d8',
   // Anchored to the palette it sits in: step 0 is `surfaceSunken`, so an empty
   // day reads as part of the card, and step 4 is `accent`, so the busiest day
-  // is the same indigo as everything else the app calls progress.
-  heat: ['#f0f0f2', '#dcdcfb', '#b4b8f5', '#7c82ec', '#4f46e5'],
+  // is the same ink as everything else the app calls progress.
+  heat: ['#f0f0f2', '#d4d4d8', '#a1a1aa', '#52525b', '#18181b'],
 };
 
 /**
- * A plain neutral dark: zinc greys with no hue of their own, so the accent and
- * the status colours are the only colour on screen. Surfaces step up in
+ * A plain neutral dark: zinc greys with grey controls, so the status colours
+ * (new, learning, mastered, the four ratings) are the only colour on screen. Surfaces step up in
  * lightness rather than relying on shadow, which barely reads on a dark ground.
  */
 const dark: Palette = {
@@ -120,15 +131,20 @@ const dark: Palette = {
   borderStrong: '#3f3f46',
   divider: '#242428',
   hover: 'rgba(255, 255, 255, 0.06)',
-  accentSoft: 'rgba(129, 140, 248, 0.16)',
+  accentSoft: 'rgba(255, 255, 255, 0.08)',
   text: '#f4f4f5',
   textMuted: '#a1a1aa',
   textFaint: '#8e8e97',
-  accent: '#818cf8',
-  accentHover: '#a5b4fc',
-  accentPressed: '#6366f1',
-  // White on indigo-400 fails contrast; near-black passes comfortably.
-  accentText: '#0c0c1d',
+  // A light grey for selected states, links and icons: brighter than muted
+  // text so a selection reads, short of pure white so it does not glare.
+  accent: '#d4d4d8',
+  accentHover: '#e4e4e7',
+  accentPressed: '#a1a1aa',
+  // Text set on the accent itself (the toast bubble, for one) is near-black.
+  accentText: '#0c0c0e',
+  fill: '#3f3f46',
+  fillHover: '#52525b',
+  fillText: '#fafafa',
   statusNew: '#38bdf8',
   statusLearning: '#fbbf24',
   statusMastered: '#34d399',
@@ -140,7 +156,7 @@ const dark: Palette = {
   offline: '#71717a',
   streak: '#fb923c',
   streakSoft: '#2b1f17',
-  heat: ['#16161a', '#262a52', '#373e8a', '#5a62d4', '#818cf8'],
+  heat: ['#16161a', '#2e2e33', '#52525b', '#a1a1aa', '#d4d4d8'],
 };
 
 export const spacing = {

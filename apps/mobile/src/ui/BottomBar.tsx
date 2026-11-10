@@ -90,8 +90,8 @@ export function Sidebar() {
       {titleStrip ? <View {...dragRegionProps} style={{ height: TITLE_BAR_HEIGHT }} /> : null}
 
       <View style={[styles.brand, titleStrip ? null : styles.brandSpaced]}>
-        <View style={[styles.brandMark, { backgroundColor: theme.colors.accent }]}>
-          <Icon name="layers" size={16} strokeWidth={2.25} color={theme.colors.accentText} />
+        <View style={[styles.brandMark, { backgroundColor: theme.colors.fill }]}>
+          <Icon name="layers" size={16} strokeWidth={2.25} color={theme.colors.fillText} />
         </View>
         <Label variant="label" style={styles.brandName}>FluentFlow</Label>
       </View>

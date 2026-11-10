@@ -65,7 +65,7 @@ export default function SignInScreen() {
         >
           <View style={styles.header}>
             <Row gap={theme.spacing.sm}>
-              <View style={[styles.mark, { backgroundColor: theme.colors.accent }]} />
+              <View style={[styles.mark, { backgroundColor: theme.colors.fill }]} />
               <Label variant="title">{t('appName')}</Label>
             </Row>
             <Label variant="body" tone="muted">
