@@ -4,10 +4,11 @@ import { uuid } from '@fluentflow/core';
 /**
  * Local database schema and migrations.
  *
- * SQLite is the source of truth on device. Every read the UI performs and every
- * write a review produces goes here first; Firestore is a replica that catches
- * up when the network allows. That ordering is what makes the app usable on a
- * train, and it is why `syncStatus` is a local column that never leaves.
+ * SQLite is the device's working copy. Every read the UI performs and every
+ * write a review produces goes here first, so the app works on a train; the
+ * sync server's database is the source of truth that this copy is reconciled
+ * with whenever the network allows. `syncStatus` is the local upload queue and
+ * never leaves the device.
  *
  * Migrations run in order and are recorded in `user_version`, so upgrading an
  * installed app never re-runs a completed step.
@@ -206,6 +207,13 @@ const migrations: Migration[] = [
     await db.execAsync(`
       ALTER TABLE cards ADD COLUMN exampleTranslations TEXT NOT NULL DEFAULT '[]';
       ALTER TABLE example_cache ADD COLUMN translations TEXT NOT NULL DEFAULT '[]';
+    `);
+  },
+  // 15 — the sync server's epoch and version cursor this copy was built from.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE sync_meta ADD COLUMN epoch TEXT;
+      ALTER TABLE sync_meta ADD COLUMN cursor TEXT;
     `);
   },
 ];

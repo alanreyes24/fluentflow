@@ -77,6 +77,18 @@ const card = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const review = (overrides: Record<string, unknown> = {}) => ({
+  eventId: 'event-1',
+  cardId: 'card-1',
+  userId: 'alice',
+  rating: 'good',
+  interval: 1,
+  easeFactor: 2.5,
+  reviewedAt: '2024-09-03T10:00:00.000Z',
+  syncStatus: 'pending',
+  ...overrides,
+});
+
 test('health does not require a token', async () => {
   const response = await call('/health', { user: '' });
 
@@ -111,9 +123,12 @@ test('local API does not grant browser access to an unrelated website', async ()
 });
 
 test('the sync endpoints reject an unauthenticated caller', async () => {
+  const post = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
   const cases: [string, RequestInit][] = [
-    ['/api/sync', { method: 'GET' }],
-    ['/api/sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }],
+    ['/api/sync/state', { method: 'GET' }],
+    ['/api/sync/pull', { method: 'GET' }],
+    ['/api/sync/push', post],
+    ['/api/sync/seed', post],
     ['/api/import/apkg', { method: 'POST', body: Buffer.from('x') }],
   ];
 
@@ -125,150 +140,171 @@ test('the sync endpoints reject an unauthenticated caller', async () => {
 
 test('a malformed authorization header is rejected', async () => {
   for (const header of ['', 'Bearer', 'Bearer   ', 'Basic abc', 'local:alice']) {
-    const response = await call('/api/sync', { user: '', headers: { authorization: header } });
+    const response = await call('/api/sync/state', { user: '', headers: { authorization: header } });
     assert.equal(response.status, 401, JSON.stringify(header));
   }
 });
 
-test('a pushed deck and card come back on the next pull', async () => {
-  const pushed = await json('/api/sync', { decks: [deck()], cards: [card()] });
-  assert.equal(pushed.status, 200);
-  assert.deepEqual((await pushed.json()).accepted, { decks: 1, cards: 1 });
+// --- sync -------------------------------------------------------------------
 
-  const pulled = await (await call('/api/sync')).json();
+async function seed(user: string, body: Record<string, unknown> = {}): Promise<string> {
+  const response = await json('/api/sync/seed', body, { user });
+  assert.equal(response.status, 200, await response.clone().text());
+  return (await response.json()).epoch;
+}
+
+async function pull(user: string, epoch: string, since?: string) {
+  const query = new URLSearchParams({ epoch, ...(since ? { since } : {}) });
+  return call(`/api/sync/pull?${query}`, { user });
+}
+
+test('a collection starts unseeded, and the seed becomes what every pull returns', async () => {
+  const state = await (await call('/api/sync/state', { user: 'sam' })).json();
+  assert.equal(state.epoch, null);
+
+  const epoch = await seed('sam', {
+    decks: [deck()],
+    cards: [card()],
+    reviewEvents: [review()],
+  });
+  assert.equal((await (await call('/api/sync/state', { user: 'sam' })).json()).epoch, epoch);
+
+  const pulled = await (await pull('sam', epoch)).json();
   assert.equal(pulled.decks.length, 1);
-  assert.equal(pulled.cards.length, 1);
   assert.equal(pulled.cards[0].front, 'hablar');
+  assert.equal(pulled.reviewEvents[0].eventId, 'event-1');
   // The client-only queue flag is never persisted as "pending".
   assert.equal(pulled.cards[0].syncStatus, 'synced');
 });
 
-test('users cannot see each other data', async () => {
-  await json('/api/sync', { decks: [deck({ id: 'bob-deck', name: 'Bosanski' })] }, { user: 'bob' });
+test('a second seed is refused unless it names the epoch it replaces', async () => {
+  const first = await seed('tess', { cards: [card({ id: 'first' })] });
 
-  const alice = await (await call('/api/sync')).json();
-  const bob = await (await call('/api/sync', { user: 'bob' })).json();
+  const refused = await json('/api/sync/seed', { cards: [card({ id: 'second' })] }, { user: 'tess' });
+  assert.equal(refused.status, 409);
+  assert.equal((await refused.json()).epoch, first);
 
-  assert.ok(!alice.decks.some((d: { id: string }) => d.id === 'bob-deck'));
-  assert.deepEqual(bob.decks.map((d: { id: string }) => d.id), ['bob-deck']);
+  const second = await seed('tess', { cards: [card({ id: 'second' })], replaceEpoch: first });
+  assert.notEqual(second, first);
+  const pulled = await (await pull('tess', second)).json();
+  assert.deepEqual(pulled.cards.map((c: { id: string }) => c.id), ['second'], 'a seed replaces everything');
 });
 
-test('a spoofed userId in the body is replaced by the token owner', async () => {
-  await json('/api/sync', {
-    decks: [deck({ id: 'spoof', userId: 'bob', name: 'Not Bobs' })],
-  });
+test('push and pull from a device on an old epoch answer 409 with the current one', async () => {
+  const first = await seed('uma');
+  const second = await seed('uma', { replaceEpoch: first });
 
-  const bob = await (await call('/api/sync', { user: 'bob' })).json();
-  const alice = await (await call('/api/sync')).json();
+  const pushed = await json('/api/sync/push', { epoch: first, cards: [card()] }, { user: 'uma' });
+  assert.equal(pushed.status, 409);
+  assert.equal((await pushed.json()).epoch, second);
 
-  assert.ok(!bob.decks.some((d: { id: string }) => d.id === 'spoof'), 'must not land in bob account');
-  const stored = alice.decks.find((d: { id: string }) => d.id === 'spoof');
-  assert.equal(stored.userId, 'alice');
+  const pulled = await pull('uma', first);
+  assert.equal(pulled.status, 409);
+  assert.equal((await pulled.json()).error, 'epoch_mismatch');
 });
 
-test('an incremental pull returns only what changed', async () => {
-  await json('/api/sync', {
-    cards: [card({ id: 'old', lastModified: '2024-09-01T00:00:00.000Z' })],
-  }, { user: 'carol' });
-  await json('/api/sync', {
-    cards: [card({ id: 'new', lastModified: '2024-09-05T00:00:00.000Z' })],
-  }, { user: 'carol' });
-
-  const response = await call('/api/sync?since=2024-09-02T00:00:00.000Z', { user: 'carol' });
-  const body = await response.json();
-
-  assert.deepEqual(body.cards.map((c: { id: string }) => c.id), ['new']);
+test('pushing before anything was seeded answers 409 with no epoch', async () => {
+  const response = await json('/api/sync/push', { epoch: 'whatever', cards: [card()] }, { user: 'vic' });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).epoch, null);
 });
 
-test('a stale re-upload cannot roll back a newer record', async () => {
+test('a pushed change comes back on an incremental pull, and nothing else does', async () => {
+  const epoch = await seed('wes', { cards: [card({ id: 'seeded' })] });
+  const { cursor } = await (await pull('wes', epoch)).json();
+
+  const pushed = await json('/api/sync/push', {
+    epoch,
+    cards: [card({ id: 'reviewed', lastModified: '2024-09-05T00:00:00.000Z' })],
+    reviewEvents: [review({ eventId: 'event-wes', cardId: 'reviewed' })],
+  }, { user: 'wes' });
+  assert.equal(pushed.status, 200);
+
+  const changes = await (await pull('wes', epoch, cursor)).json();
+  assert.deepEqual(changes.cards.map((c: { id: string }) => c.id), ['reviewed']);
+  assert.deepEqual(changes.reviewEvents.map((e: { eventId: string }) => e.eventId), ['event-wes']);
+});
+
+test('a stale push is refused and the server copy is handed back', async () => {
   const fresh = card({ id: 'race', interval: 6, lastModified: '2024-09-05T00:00:00.000Z' });
   const stale = card({ id: 'race', interval: 1, lastModified: '2024-09-01T00:00:00.000Z' });
+  const epoch = await seed('xena', { cards: [fresh] });
 
-  await json('/api/sync', { cards: [fresh] }, { user: 'dave' });
-  await json('/api/sync', { cards: [stale] }, { user: 'dave' });
+  const response = await json('/api/sync/push', { epoch, cards: [stale] }, { user: 'xena' });
+  const body = await response.json();
+  assert.equal(body.rejected.cards[0].interval, 6);
 
-  const body = await (await call('/api/sync', { user: 'dave' })).json();
-  assert.equal(body.cards[0].interval, 6);
+  const pulled = await (await pull('xena', epoch)).json();
+  assert.equal(pulled.cards[0].interval, 6);
 });
 
-test('pushing the same batch twice is a no-op', async () => {
-  const payload = { decks: [deck({ id: 'idem' })], cards: [card({ id: 'idem-card', deckId: 'idem' })] };
+test('users cannot see each other data, and a spoofed userId is ignored', async () => {
+  const yara = await seed('yara', { decks: [deck({ id: 'spoof', userId: 'zed', name: 'Not Zeds' })] });
+  const zed = await seed('zed');
 
-  await json('/api/sync', payload, { user: 'erin' });
-  await json('/api/sync', payload, { user: 'erin' });
-
-  const body = await (await call('/api/sync', { user: 'erin' })).json();
-  assert.equal(body.decks.length, 1);
-  assert.equal(body.cards.length, 1);
+  const zedData = await (await pull('zed', zed)).json();
+  assert.equal(zedData.decks.length, 0, 'must not land in the account named in the body');
+  const yaraData = await (await pull('yara', yara)).json();
+  assert.equal(yaraData.decks[0].userId, 'yara');
+  // Another user's epoch is not this user's epoch.
+  assert.equal((await pull('zed', yara)).status, 409);
 });
 
 test('invalid records are rejected with per-field detail', async () => {
-  const response = await json('/api/sync', {
+  const epoch = await seed('alice');
+  const response = await json('/api/sync/push', {
+    epoch,
     cards: [
       card({ id: 'bad-1', easeFactor: 'lots' }),
       card({ id: 'bad-2', language: 'fr' }),
       card({ id: 'bad-3', nextReview: 'whenever' }),
     ],
+    reviewEvents: [review({ rating: 'meh' })],
   });
 
   assert.equal(response.status, 400);
   const body = await response.json();
   assert.equal(body.error, 'invalid_request');
-  assert.equal(body.details.length, 3);
   assert.match(body.details.join(' '), /easeFactor must be a finite number/);
   assert.match(body.details.join(' '), /language must be one of: es, bs/);
-  assert.match(body.details.join(' '), /nextReview must be an ISO-8601 date/);
+
+  const events = await json('/api/sync/push', { epoch, reviewEvents: [review({ rating: 'meh' })] });
+  assert.equal(events.status, 400);
+  assert.match((await events.json()).details.join(' '), /rating must be one of/);
 });
 
-test('scheduler fields survive a round trip, and a bad phase is rejected', async () => {
-  await json(
-    '/api/sync',
-    {
-      cards: [
-        card({ id: 'sched-1', phase: 'relearning', lapses: 3, learningStep: 1, leech: true }),
-      ],
-    },
-    { user: 'gina' },
-  );
-
-  const body = await (await call('/api/sync', { user: 'gina' })).json();
-  assert.equal(body.cards[0].phase, 'relearning');
-  assert.equal(body.cards[0].lapses, 3);
-  assert.equal(body.cards[0].learningStep, 1);
-  assert.equal(body.cards[0].leech, true);
-
-  const response = await json('/api/sync', { cards: [card({ id: 'sched-2', phase: 'limbo' })] });
-  assert.equal(response.status, 400);
-  const rejected = await response.json();
-  assert.match(rejected.details.join(' '), /phase must be one of/);
-});
-
-test('a card from a client with no scheduler fields is given a phase', async () => {
-  // The old client sent interval, ease and repetitions and nothing else; the
-  // card has to arrive schedulable rather than half-filled.
+test('scheduler fields survive a round trip, and a legacy card is given a phase', async () => {
   const legacy = card({ id: 'legacy-1', interval: 15, repetitions: 4, status: 'learning' });
   delete (legacy as Record<string, unknown>).phase;
+  const epoch = await seed('gina', {
+    cards: [card({ id: 'sched-1', phase: 'relearning', lapses: 3, learningStep: 1, leech: true }), legacy],
+  });
 
-  await json('/api/sync', { cards: [legacy] }, { user: 'hank' });
-
-  const body = await (await call('/api/sync', { user: 'hank' })).json();
-  assert.equal(body.cards[0].phase, 'review', 'a day-level interval means it graduated');
-  assert.equal(body.cards[0].lapses, 0);
-  assert.equal(body.cards[0].learningStep, 0);
+  const body = await (await pull('gina', epoch)).json();
+  const sched = body.cards.find((c: { id: string }) => c.id === 'sched-1');
+  assert.equal(sched.phase, 'relearning');
+  assert.equal(sched.lapses, 3);
+  assert.equal(sched.learningStep, 1);
+  assert.equal(sched.leech, true);
+  const old = body.cards.find((c: { id: string }) => c.id === 'legacy-1');
+  assert.equal(old.phase, 'review', 'a day-level interval means it graduated');
 });
 
-test('a valid batch is rejected whole when any record is invalid', async () => {
-  await json('/api/sync', {
+test('a batch is rejected whole when any record is invalid', async () => {
+  const epoch = await seed('frank');
+  await json('/api/sync/push', {
+    epoch,
     cards: [card({ id: 'good-one' }), card({ id: 'bad-one', interval: -5 })],
   }, { user: 'frank' });
 
-  const body = await (await call('/api/sync', { user: 'frank' })).json();
+  const body = await (await pull('frank', epoch)).json();
   assert.equal(body.cards.length, 0, 'a partial write would leave the client unsure what landed');
 });
 
 // --- Anki import ------------------------------------------------------------
 
 test('importing an .apkg creates the deck and cards for the caller', async () => {
+  const epoch = await seed('grace');
   const apkg = buildApkg({
     schema: 18,
     decks: ['Spanish A1'],
@@ -291,15 +327,33 @@ test('importing an .apkg creates the deck and cards for the caller', async () =>
   assert.equal(body.stored, true);
 
   // And it really landed in the store, for this user only.
-  const pulled = await (await call('/api/sync', { user: 'grace' })).json();
+  const pulled = await (await pull('grace', epoch)).json();
   assert.equal(pulled.cards.length, 55);
   assert.ok(pulled.cards.every((c: { userId: string }) => c.userId === 'grace'));
 
-  const other = await (await call('/api/sync', { user: 'heidi' })).json();
+  const heidi = await seed('heidi');
+  const other = await (await pull('heidi', heidi)).json();
   assert.equal(other.cards.length, 0);
 });
 
+test('an import into an account that was never seeded is refused', async () => {
+  const apkg = buildApkg({
+    schema: 11,
+    decks: ['Bosanski'],
+    fieldNames: ['Front', 'Back'],
+    notes: [{ fields: ['raditi', 'to work'] }],
+  });
+  const response = await call('/api/import/apkg?filename=Bosanski.apkg', {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream' },
+    body: apkg,
+    user: 'nobody-yet',
+  });
+  assert.equal(response.status, 409);
+});
+
 test('a dry-run import reports what it would do without writing', async () => {
+  const epoch = await seed('ivan');
   const apkg = buildApkg({
     schema: 11,
     decks: ['Bosanski'],
@@ -318,7 +372,7 @@ test('a dry-run import reports what it would do without writing', async () => {
   assert.equal(body.stored, false);
   assert.equal(body.summary.detection.language, 'bs');
 
-  const pulled = await (await call('/api/sync', { user: 'ivan' })).json();
+  const pulled = await (await pull('ivan', epoch)).json();
   assert.equal(pulled.cards.length, 0);
 });
 
@@ -356,6 +410,7 @@ test('unknown routes return JSON, not an HTML error page', async () => {
 });
 
 test('imported records come back as synced, not as pending uploads', async () => {
+  const epoch = await seed('mallory');
   const apkg = buildApkg({
     schema: 11,
     decks: ['Spanish A1'],
@@ -370,7 +425,7 @@ test('imported records come back as synced, not as pending uploads', async () =>
     user: 'mallory',
   });
 
-  const pulled = await (await call('/api/sync', { user: 'mallory' })).json();
+  const pulled = await (await pull('mallory', epoch)).json();
 
   // The importer marks its output `pending` because on a real device it is —
   // those records still have to reach the server. Once stored, they are the

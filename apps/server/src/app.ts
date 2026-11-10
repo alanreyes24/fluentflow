@@ -17,22 +17,26 @@ import type { Config } from './config.ts';
 import { requireAuth, type AuthedRequest } from './auth.ts';
 import { aiStatus, examplesWithAi, resolveWithAi } from './ai.ts';
 import { openAnkiCollection } from './sqlite.ts';
-import { ValidationError, parseCards, parseDecks } from './validate.ts';
-import type { Store } from './store/types.ts';
+import {
+  MAX_SEED_BATCH,
+  ValidationError,
+  parseCards,
+  parseDecks,
+  parseReviewEvents,
+} from './validate.ts';
+import { EpochError, StoreUnavailableError, type Store } from './store/types.ts';
 import { desktopBundleManifest, type DesktopBundleManifest } from './desktop-bundle.ts';
 
 /**
- * The sync API.
+ * The FluentFlow API.
  *
- * The app's normal path to Firestore is the client SDK's real-time listener —
- * that is what makes a review on one device appear on another a second later.
- * This service covers the two things the client SDK cannot do well:
- *
+ *  - **Sync.** Every device syncs its decks, cards and review history through
+ *    these routes, and the database behind them is the single source of truth.
+ *    Firebase is used only to sign in.
  *  - **Anki import.** Parsing a 100 MB `.apkg` means unzipping it and running
  *    SQLite over the result. Doing that server-side keeps the client from
  *    chewing through memory, and is the only option on the web build.
- *  - **A plain-HTTP fallback.** Useful for scripts, for CI, and for running the
- *    whole app with no Firebase project at all (see local mode in config.ts).
+ *  - **AI proxy** for the browser build, so the Gemini key stays server-side.
  */
 
 export interface AppDeps {
@@ -127,38 +131,73 @@ export function createApp({ config, store }: AppDeps): express.Express {
   });
 
   /**
-   * Pull. `since` makes it incremental: pass the highest `lastModified` seen on
-   * the last successful sync and only newer records come back.
+   * Sync. The database behind `store` is the one source of truth; see
+   * store/types.ts for the epoch and version scheme these routes expose.
+   *
+   *   GET  /api/sync/state           → { epoch }   (null until seeded)
+   *   POST /api/sync/seed            → replace the collection, new epoch
+   *   POST /api/sync/push            → last-write-wins upsert
+   *   GET  /api/sync/pull?since=     → changes after a version cursor
+   *
+   * Push and pull carry the device's epoch and answer 409 with the current one
+   * when it differs, which tells the device to discard its copy and download.
    */
-  app.get('/api/sync', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+  app.get('/api/sync/state', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
-      const userId = req.userId!;
-      const since = typeof req.query.since === 'string' ? req.query.since : undefined;
-      const [decks, cards] = await Promise.all([
-        store.listDecks(userId, since),
-        store.listCards(userId, since),
-      ]);
-      res.json({ decks, cards, serverTime: new Date().toISOString() });
+      res.json({ epoch: await store.getEpoch(req.userId!) });
     } catch (error) {
       next(error);
     }
   });
 
-  /** Push. Idempotent: re-sending the same batch is a no-op. */
-  app.post('/api/sync', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+  app.post('/api/sync/seed', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       const userId = req.userId!;
-      const body = req.body as { decks?: unknown; cards?: unknown };
-      const decks = parseDecks(body.decks, userId);
-      const cards = parseCards(body.cards, userId);
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const records = {
+        decks: parseDecks(body.decks, userId, MAX_SEED_BATCH),
+        cards: parseCards(body.cards, userId, MAX_SEED_BATCH),
+        reviewEvents: parseReviewEvents(body.reviewEvents, userId, MAX_SEED_BATCH),
+      };
+      // A seed replaces everything, so it only happens once unless the caller
+      // names the epoch it means to replace. Two devices racing to seed cannot
+      // both win, and a stale device cannot wipe out a newer collection.
+      const current = await store.getEpoch(userId);
+      const replaces = typeof body.replaceEpoch === 'string' ? body.replaceEpoch : null;
+      if (current !== replaces) throw new EpochError(current);
 
-      await store.putDecks(userId, decks);
-      await store.putCards(userId, cards);
-
+      const result = await store.seed(userId, records);
       res.json({
-        accepted: { decks: decks.length, cards: cards.length },
-        serverTime: new Date().toISOString(),
+        ...result,
+        accepted: {
+          decks: records.decks.length,
+          cards: records.cards.length,
+          reviewEvents: records.reviewEvents.length,
+        },
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/sync/push', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const userId = req.userId!;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const records = {
+        decks: parseDecks(body.decks, userId),
+        cards: parseCards(body.cards, userId),
+        reviewEvents: parseReviewEvents(body.reviewEvents, userId),
+      };
+      res.json(await store.push(userId, epochOf(body.epoch), records));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/sync/pull', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json(await store.pull(req.userId!, epochOf(queryString(req, 'epoch')), queryString(req, 'since')));
     } catch (error) {
       next(error);
     }
@@ -201,8 +240,11 @@ export function createApp({ config, store }: AppDeps): express.Express {
         const cards: Card[] = result.cards;
 
         if (!dryRun) {
-          await store.putDecks(userId, decks);
-          await store.putCards(userId, cards);
+          // Imported records join the collection like any other push, so they
+          // need the collection to exist; a seed always comes first.
+          const epoch = await store.getEpoch(userId);
+          if (!epoch) throw new EpochError(null);
+          await store.push(userId, epoch, { decks, cards, reviewEvents: [] });
         }
 
         res.json({ decks, cards, summary: result.summary, stored: !dryRun });
@@ -304,6 +346,16 @@ function errorHandler(error: unknown, _req: Request, res: Response, next: NextFu
     return;
   }
 
+  if (error instanceof EpochError) {
+    res.status(409).json({ error: 'epoch_mismatch', message: error.message, epoch: error.epoch });
+    return;
+  }
+
+  if (error instanceof StoreUnavailableError) {
+    res.status(503).json({ error: 'sync_unavailable', message: error.message });
+    return;
+  }
+
   if (error instanceof ApkgError) {
     // Every ApkgError is something the user can act on, so the message is safe
     // to show verbatim in the import screen.
@@ -327,6 +379,11 @@ function isPayloadTooLarge(error: unknown): boolean {
     'type' in error &&
     (error as { type?: string }).type === 'entity.too.large'
   );
+}
+
+/** A missing or malformed epoch can never match, so it reads as "out of date". */
+function epochOf(value: unknown): string {
+  return typeof value === 'string' ? value : '';
 }
 
 function queryString(req: Request, key: string): string | undefined {

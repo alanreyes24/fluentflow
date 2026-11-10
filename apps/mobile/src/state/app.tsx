@@ -10,12 +10,15 @@ import {
 import type { ReactNode } from 'react';
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import NetInfo from '@react-native-community/netinfo';
+import { AppState as NativeAppState } from 'react-native';
 import type { Deck } from '@fluentflow/core';
 import { DATABASE_NAME, migrate } from '../db/schema';
 import { Repository } from '../db/repository';
 import { normalizeExistingCards } from '../ai/card-fronts';
 import { ExampleService } from '../ai/service';
 import { SyncEngine, type SyncStatus } from '../sync/engine';
+import { createSyncRemote, syncBaseUrl } from '../sync/remote';
+import { isInstalledDesktopApp } from '../desktop';
 import { authApi, type AuthApi } from '../firebase/client';
 import { LOCAL_USER_ID, isCloudEnabled } from '../firebase/config';
 
@@ -164,6 +167,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       repository,
       userId: user.id,
       cloudEnabled: isCloudEnabled && !user.anonymous,
+      remote: async () => {
+        const base = await syncBaseUrl();
+        return base ? createSyncRemote(base) : null;
+      },
+      // The server's collection was first created from the desktop app's
+      // progress, so only the installed desktop app may create it; every
+      // other device adopts what the server has.
+      canSeed: isInstalledDesktopApp(),
       onStatus: setSync,
       onRemoteCardsApplied: async () => {
         try {
@@ -184,9 +195,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const unsubscribeNet = NetInfo.addEventListener((netState) => {
       engine.setOnline(netState.isConnected !== false);
     });
+    // Returning to the app is when another device's progress is most likely
+    // to be waiting, so do not wait for the next poll.
+    const appState = NativeAppState.addEventListener('change', (next) => {
+      if (next === 'active') void engine.sync().then(refreshDecks);
+    });
 
     return () => {
       unsubscribeNet();
+      appState.remove();
       engine.dispose();
       engineRef.current = null;
       setSync(IDLE_SYNC);

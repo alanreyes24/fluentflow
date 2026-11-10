@@ -2,7 +2,7 @@
  * Build-time configuration for Expo web, Electron, and native builds.
  *
  * Firebase's web configuration is intentionally public client configuration;
- * Firestore rules and Firebase Auth protect the data. Keeping it in env vars
+ * it is used only to sign in, and the sync server verifies the tokens. Keeping it in env vars
  * lets local, staging, and production builds use different projects without
  * editing app.json by hand.
  */
@@ -53,6 +53,10 @@ module.exports = ({ config }) => {
       apiBaseUrl:
         process.env.FLUENTFLOW_API_BASE_URL ??
         (process.env.NODE_ENV === 'production' ? null : current.apiBaseUrl),
+      // The sync server — the hosted app, whose database every device syncs
+      // with. Hosted builds set EXPO_PUBLIC_FLUENTFLOW_SYNC_URL=same-origin
+      // instead, and the desktop shell supplies its own.
+      syncUrl: process.env.FLUENTFLOW_SYNC_URL || process.env.FLUENTFLOW_WEB_URL || null,
       firebase: {
         ...currentFirebase,
         apiKey: env('FLUENTFLOW_FIREBASE_API_KEY', currentFirebase.apiKey),

@@ -15,7 +15,8 @@ be wrong, so check anything that looks off.
 - Cards from pasted word lists or Anki `.apkg` files.
 - Optional local dictionaries for Spanish and Bosnian.
 - Optional Gemini examples, translations, and study chat using your own API key.
-- Local SQLite storage, with optional Firebase account sync.
+- Local SQLite storage, with optional account sync through the hosted server's
+  Postgres database (Firebase is used only to sign in).
 - An Electron desktop app and an Expo UI shared with the browser and mobile targets.
 
 macOS and the browser are the main development paths. Windows packaging is
@@ -72,14 +73,16 @@ desktop app. Requests use Google's hosted API and may incur charges; there are
 no model weights or shared API credentials in this repo. Without a key, you can
 still study and use cached or template example sentences.
 
-**Firebase sync:** use your own Firebase project. Nothing in a fresh checkout
-connects to mine. Configuration and deployment steps are in
-[the development guide](docs/development.md).
+**Account sync:** sign in with your own Firebase project, and sync through the
+hosted server below. Nothing in a fresh checkout connects to mine.
+Configuration steps are in [the development guide](docs/development.md).
 
 ## Hosted web app (Railway)
 
 The repo deploys as one service that serves the web app and its API from the
-same origin, which also gives the hosted app Gemini examples and Anki import.
+same origin. The API is also the sync server: its Postgres database is the one
+source of truth for decks, cards and review history on every device (desktop,
+browser, phone). It also gives the hosted app Gemini examples and Anki import.
 On iPhone, open the deployed URL in Safari and choose **Share → Add to Home
 Screen** to launch it full screen like an app.
 
@@ -95,8 +98,19 @@ Screen** to launch it full screen like an app.
    - `GEMINI_API_KEY` (runtime only; never use an `EXPO_PUBLIC_` name for it)
    - `FLUENTFLOW_ALLOWED_EMAILS`: your sign-in email(s), comma separated. Without
      it, anyone who registers in your Firebase project can spend your Gemini key.
-3. Generate a domain under **Settings → Networking**. If your Firebase API key
+3. Add a Postgres database to the project (**New → Database → PostgreSQL**) and
+   give the server service a variable `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`.
+   The server creates its tables on first use. Without it, sync answers 503.
+4. Generate a domain under **Settings → Networking**. If your Firebase API key
    is restricted by HTTP referrer, add that domain to the key's allowed list.
+
+**The first sync.** The server's collection is created once, from the
+installed desktop app: the first time it syncs with an empty database it
+uploads everything it has. Every other device (the browser, the phone, the
+development desktop) waits until then, and the first time it syncs afterwards
+it replaces its own copy with the server's. From then on devices push their
+changes and pull everyone else's; when two edits to a card disagree, the
+newer one wins and the server hands its copy back to the device that lost.
 
 **Keeping the desktop app in step.** Set `FLUENTFLOW_WEB_URL` in `.env` to the
 deployed domain and run `npm run desktop:refresh` once. From then on the
@@ -110,13 +124,13 @@ regenerate it with `node scripts/desktop-shell-fingerprint.mjs`.
 
 The server verifies Firebase ID tokens with only the project id. Set
 `FIREBASE_SERVICE_ACCOUNT_JSON` (the key file's contents) only if you also want
-revoked-token checks or the HTTP sync endpoints.
+revoked-token checks.
 
 ## Data and privacy
 
 Studying without an account stores cards and review history on your device.
-Enabling Firebase sync uploads decks, cards, generated examples, and review
-events to the project you configured. Using Gemini sends the relevant words,
+Signing in uploads decks, cards, generated examples, and review events to the
+sync server's database. Using Gemini sends the relevant words,
 meanings, or chat messages to Google. The desktop stores its API key separately
 from decks using Electron's encrypted storage; the browser dev proxy keeps its
 key on the server. Never put a Gemini key or service-account credential in an

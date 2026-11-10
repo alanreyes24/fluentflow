@@ -1,5 +1,7 @@
 # The hosted web app: one container that serves the exported Expo web bundle
-# and the API it calls (AI proxy and Anki import) from the same origin.
+# and the API it calls (sync, AI proxy and Anki import) from the same origin.
+# Sync data lives in Postgres: reference a Railway Postgres service as
+# DATABASE_URL on this service.
 #
 # Built by Railway (see railway.json); works with any Docker host. Firebase
 # client config is baked into the bundle at build time, so the EXPO_PUBLIC_*
@@ -19,7 +21,7 @@ RUN npm ci --no-audit --no-fund
 
 COPY . .
 
-# Public Firebase web config (browser-safe; Firestore rules protect the data).
+# Public Firebase web config (browser-safe; used only for sign-in).
 ARG EXPO_PUBLIC_FLUENTFLOW_FIREBASE_API_KEY
 ARG EXPO_PUBLIC_FLUENTFLOW_FIREBASE_AUTH_DOMAIN
 ARG EXPO_PUBLIC_FLUENTFLOW_FIREBASE_PROJECT_ID
@@ -31,7 +33,8 @@ ARG EXPO_PUBLIC_FLUENTFLOW_FIREBASE_APP_ID
 ARG RAILWAY_GIT_COMMIT_SHA
 
 RUN npm run build -w @fluentflow/core \
-  && EXPO_PUBLIC_FLUENTFLOW_API_BASE_URL=same-origin EXPO_PUBLIC_FLUENTFLOW_COMMIT=${RAILWAY_GIT_COMMIT_SHA} \
+  && EXPO_PUBLIC_FLUENTFLOW_API_BASE_URL=same-origin EXPO_PUBLIC_FLUENTFLOW_SYNC_URL=same-origin \
+     EXPO_PUBLIC_FLUENTFLOW_COMMIT=${RAILWAY_GIT_COMMIT_SHA} \
      NODE_ENV=production npm run web:export
 
 ENV NODE_ENV=production

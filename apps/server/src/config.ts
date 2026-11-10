@@ -4,7 +4,8 @@
  * The server has two operating modes and picks between them by looking for
  * Firebase credentials:
  *
- *  - **firebase** — real Firebase Auth + Firestore. Used in production.
+ *  - **firebase** — real Firebase Auth. Used in production, where sync data
+ *    lives in Postgres (`DATABASE_URL`).
  *  - **local** — an in-process store and a permissive dev token. Nothing leaves
  *    the machine. This exists so the app can be run, demoed and tested without
  *    anyone provisioning a Firebase project first; it refuses to start if
@@ -48,6 +49,12 @@ export interface Config {
   allowedEmails?: string[];
   /** The deployed commit, published with the desktop bundle manifest. */
   commit?: string;
+  /**
+   * Postgres connection string for the sync database — the one source of
+   * truth for every user's decks, cards and review history. Railway provides
+   * it when a Postgres service is referenced as `DATABASE_URL`.
+   */
+  databaseUrl?: string;
 }
 
 const DEFAULT_WEB_DIR = fileURLToPath(new URL('../../mobile/dist', import.meta.url));
@@ -105,6 +112,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowedEmails: parseList(env.FLUENTFLOW_ALLOWED_EMAILS)?.map((email) => email.toLowerCase()),
     // Railway sets RAILWAY_GIT_COMMIT_SHA on every deploy.
     commit: env.FLUENTFLOW_COMMIT || env.RAILWAY_GIT_COMMIT_SHA || undefined,
+    databaseUrl: env.DATABASE_URL?.trim() || undefined,
   };
 }
 

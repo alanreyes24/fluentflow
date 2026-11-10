@@ -260,6 +260,22 @@ function createWindow() {
   return window;
 }
 
+/**
+ * The sync server: the hosted app this shell updates its bundle from. Its
+ * database is the source of truth for every device's decks and progress, and
+ * the page talks to it directly, so it has to be allowed here.
+ */
+function syncOrigin() {
+  const source = webUpdateSource();
+  if (!source) return null;
+  try {
+    const url = new URL(source);
+    return url.protocol === 'https:' ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 function applyContentSecurityPolicy() {
   // Applied as a header rather than a meta tag so it also covers the dev server.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
@@ -278,7 +294,7 @@ function applyContentSecurityPolicy() {
             "font-src 'self' data:",
             // wa-sqlite runs in a worker instantiated from a blob URL.
             "worker-src 'self' blob:",
-            `connect-src 'self' ${ALLOWED_CONNECT_HOSTS.join(' ')} ${DEV_URL ?? ''}`.trim(),
+            `connect-src 'self' ${[...ALLOWED_CONNECT_HOSTS, syncOrigin(), DEV_URL].filter(Boolean).join(' ')}`,
             "frame-ancestors 'none'",
           ].join('; '),
         ],

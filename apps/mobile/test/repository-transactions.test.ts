@@ -9,7 +9,7 @@ describe('repository transactions', () => {
       const card = await repository.addCard('u1', deck, 'knjiga', 'book');
       const other = new Repository(database);
       await Promise.all([
-        repository.applyRemote([], [card]),
+        repository.applyServerChanges('u1', { decks: [], cards: [card], reviewEvents: [] }),
         other.markSynced([deck], [card]),
         repository.setMaxReviewsPerDay(deck, 20),
       ]);

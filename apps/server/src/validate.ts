@@ -1,6 +1,9 @@
 import {
+  RATING_NAMES,
   TARGET_LANGUAGES,
   normalizeCard,
+  type RatingName,
+  type ReviewEvent,
   type Card,
   type CardPhase,
   type Deck,
@@ -30,12 +33,41 @@ const MAX_TEXT = 4000;
 const MAX_EXAMPLES = 10;
 const MAX_BATCH = 5000;
 
-export function parseDecks(input: unknown, userId: string): Deck[] {
-  return parseArray(input, 'decks', (value, path) => parseDeck(value, userId, path));
+/**
+ * A seed uploads a whole collection in one request, so it gets a larger cap
+ * than an incremental push.
+ */
+export const MAX_SEED_BATCH = 100_000;
+
+export function parseDecks(input: unknown, userId: string, max = MAX_BATCH): Deck[] {
+  return parseArray(input, 'decks', (value, path) => parseDeck(value, userId, path), max);
 }
 
-export function parseCards(input: unknown, userId: string): Card[] {
-  return parseArray(input, 'cards', (value, path) => parseCard(value, userId, path));
+export function parseCards(input: unknown, userId: string, max = MAX_BATCH): Card[] {
+  return parseArray(input, 'cards', (value, path) => parseCard(value, userId, path), max);
+}
+
+export function parseReviewEvents(input: unknown, userId: string, max = MAX_BATCH): ReviewEvent[] {
+  return parseArray(
+    input,
+    'reviewEvents',
+    (value, path) => parseReviewEvent(value, userId, path),
+    max,
+  );
+}
+
+function parseReviewEvent(value: unknown, userId: string, path: string): ReviewEvent {
+  const raw = asObject(value, path);
+  return {
+    eventId: id(raw.eventId, `${path}.eventId`),
+    cardId: id(raw.cardId, `${path}.cardId`),
+    userId,
+    rating: oneOf<RatingName>(raw.rating, RATING_NAMES, `${path}.rating`),
+    interval: number(raw.interval, `${path}.interval`, 0, 36500),
+    easeFactor: number(raw.easeFactor, `${path}.easeFactor`, 1.3, 10),
+    reviewedAt: isoDate(raw.reviewedAt, `${path}.reviewedAt`),
+    syncStatus: 'synced',
+  };
 }
 
 function parseDeck(value: unknown, userId: string, path: string): Deck {
@@ -115,11 +147,16 @@ function parseCard(value: unknown, userId: string, path: string): Card {
   });
 }
 
-function parseArray<T>(input: unknown, field: string, parse: (v: unknown, path: string) => T): T[] {
+function parseArray<T>(
+  input: unknown,
+  field: string,
+  parse: (v: unknown, path: string) => T,
+  max: number,
+): T[] {
   if (input === undefined || input === null) return [];
   if (!Array.isArray(input)) throw new ValidationError([`${field} must be an array.`]);
-  if (input.length > MAX_BATCH) {
-    throw new ValidationError([`${field} may not exceed ${MAX_BATCH} records per request.`]);
+  if (input.length > max) {
+    throw new ValidationError([`${field} may not exceed ${max} records per request.`]);
   }
 
   const errors: string[] = [];

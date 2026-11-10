@@ -23,16 +23,22 @@ for an internet-facing service, even if you restrict CORS.
 node --env-file=.env apps/server/src/index.ts
 ```
 
-## Firebase (optional)
+## Firebase sign-in and sync (optional)
 
-1. Create your own Firebase project with a web app, Email/Password auth, and
-   Firestore.
+Firebase is used only to sign in. Synced data lives in the server's Postgres
+database (`DATABASE_URL`; see the README's Railway section). In development the
+app syncs with the hosted server named by `FLUENTFLOW_WEB_URL` (override with
+`FLUENTFLOW_SYNC_URL`), so the browser and desktop dev builds see your real
+collection. The local API started by `npm run dev` keeps sync data in memory
+unless you give it a `DATABASE_URL`.
+
+1. Create your own Firebase project with a web app and Email/Password auth.
 2. Fill in both sets of client values in `.env.example`: `FLUENTFLOW_FIREBASE_*`
    for Expo's manifest and `EXPO_PUBLIC_FLUENTFLOW_FIREBASE_*` for web exports.
    These are public client configuration, not admin credentials. Restart the
    dev processes or rebuild after changing them.
-3. Review [firestore.rules](../firestore.rules) before deploying. The client
-   syncs directly through Firebase; the standalone server is optional.
+3. Firestore is no longer used for sync. [firestore.rules](../firestore.rules)
+   remains for projects that still hold data written by older builds.
 4. Deploy to an explicitly selected project:
 
    ```bash

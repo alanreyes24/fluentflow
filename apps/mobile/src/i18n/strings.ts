@@ -227,6 +227,7 @@ export const en = {
   pendingChanges: '{count} pending',
   syncNow: 'Sync now',
   syncFailed: 'Sync failed',
+  waitingForDesktop: 'Waiting for the desktop app to upload',
   lastSynced: 'Last synced {time}',
 
   // Settings
@@ -559,6 +560,7 @@ const es: Strings = {
   pendingChanges: '{count} pendientes',
   syncNow: 'Sincronizar ahora',
   syncFailed: 'Error de sincronización',
+  waitingForDesktop: 'Esperando a que la app de escritorio suba los datos',
   lastSynced: 'Última sincronización: {time}',
 
   settings: 'Ajustes',
@@ -876,6 +878,7 @@ const bs: Strings = {
   pendingChanges: '{count} na čekanju',
   syncNow: 'Sinhronizuj sada',
   syncFailed: 'Sinhronizacija nije uspjela',
+  waitingForDesktop: 'Čeka se da desktop aplikacija pošalje podatke',
   lastSynced: 'Zadnja sinhronizacija: {time}',
 
   settings: 'Postavke',

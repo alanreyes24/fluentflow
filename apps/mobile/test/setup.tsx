@@ -86,17 +86,6 @@ jest.mock('firebase/auth', () => ({
   signOut: jest.fn(),
 }));
 
-jest.mock('firebase/firestore', () => ({
-  collection: jest.fn(),
-  doc: jest.fn(),
-  getDocs: jest.fn(),
-  getFirestore: jest.fn(),
-  onSnapshot: jest.fn(() => jest.fn()),
-  query: jest.fn(),
-  where: jest.fn(),
-  writeBatch: jest.fn(),
-}));
-
 /**
  * These two are `mock`-prefixed because babel-jest hoists `jest.mock` factories
  * above every other statement in the file: a factory may only close over names

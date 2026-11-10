@@ -18,8 +18,9 @@ do not mean every platform has been tested equally.
   store-ready releases.
 - The native mobile targets do not include a local language model. Hosted AI
   support is implemented through the desktop bridge and browser API proxy.
-- Firebase sync is optional and requires your own configuration. Local API
-  tests do not validate a deployed project's Firestore rules or access controls.
+- Account sync is optional and requires your own Firebase project (sign-in)
+  and a Postgres database for the server. The Postgres store is tested on
+  PGlite, not against a hosted database.
 - Anki import is vocabulary-oriented: reverse and cloze siblings are merged,
   and some newer compressed exports are rejected. Keep the original deck.
 - Dependency advisories remain open; see [SECURITY.md](../SECURITY.md).

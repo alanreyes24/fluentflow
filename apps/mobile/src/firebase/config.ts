@@ -20,11 +20,18 @@ export interface FirebaseConfig {
 
 export interface AppConfig {
   apiBaseUrl: string | null;
+  /**
+   * The sync API, whose database is the source of truth for every device's
+   * decks and progress. The desktop shell supplies its own (see
+   * `sync/remote.ts`), so this is for browsers and phones.
+   */
+  syncBaseUrl: string | null;
   firebase: FirebaseConfig | null;
 }
 
 interface RawExtra {
   apiBaseUrl?: string;
+  syncUrl?: string;
   firebase?: Partial<FirebaseConfig>;
 }
 
@@ -64,8 +71,13 @@ function buildConfig(): AppConfig {
     process.env.EXPO_PUBLIC_FLUENTFLOW_API_BASE_URL ?? extra.apiBaseUrl,
   );
 
+  const syncBaseUrl = resolveApiBaseUrl(
+    process.env.EXPO_PUBLIC_FLUENTFLOW_SYNC_URL ?? extra.syncUrl,
+  );
+
   return {
     apiBaseUrl,
+    syncBaseUrl,
     firebase: hasFirebase
       ? {
           apiKey: firebase!.apiKey!,

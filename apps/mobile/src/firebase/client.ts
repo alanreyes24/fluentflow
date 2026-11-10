@@ -8,27 +8,19 @@ import {
   signInWithEmailAndPassword,
   signOut,
   type Auth,
+  type Unsubscribe,
   type User,
 } from 'firebase/auth';
-import {
-  collection,
-  doc,
-  getDocs,
-  getFirestore,
-  onSnapshot,
-  query,
-  where,
-  writeBatch,
-  type Firestore,
-  type Unsubscribe,
-} from 'firebase/firestore';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { normalizeCard, type Card, type Deck, type ReviewEvent } from '@fluentflow/core';
 import { appConfig, isCloudEnabled } from './config';
 
 /**
- * Firebase client wrapper.
+ * Firebase client wrapper — sign-in only.
+ *
+ * Firebase says who the user is; it does not hold their data. Decks, cards and
+ * review history live in the sync server's database (see `sync/remote.ts`),
+ * which verifies the ID token this module hands out.
  *
  * Everything here returns `null` or throws a clear error when Firebase is not
  * configured, so callers never have to branch on `isCloudEnabled` themselves
@@ -42,7 +34,6 @@ import { appConfig, isCloudEnabled } from './config';
 
 let app: FirebaseApp | null = null;
 let authInstance: Auth | null = null;
-let firestoreInstance: Firestore | null = null;
 
 export function firebaseApp(): FirebaseApp | null {
   if (!isCloudEnabled || !appConfig.firebase) return null;
@@ -65,13 +56,6 @@ export function firebaseAuth(): Auth | null {
     });
   }
   return authInstance;
-}
-
-export function firestore(): Firestore | null {
-  const instance = firebaseApp();
-  if (!instance) return null;
-  firestoreInstance ??= getFirestore(instance);
-  return firestoreInstance;
 }
 
 // --- auth -------------------------------------------------------------------
@@ -107,199 +91,6 @@ export function authApi(): AuthApi | null {
       return auth.currentUser ? auth.currentUser.getIdToken() : null;
     },
   };
-}
-
-// --- firestore --------------------------------------------------------------
-
-const MAX_BATCH_WRITES = 500;
-
-function decksRef(db: Firestore, userId: string) {
-  return collection(db, 'users', userId, 'decks');
-}
-
-function cardsRef(db: Firestore, userId: string) {
-  return collection(db, 'users', userId, 'cards');
-}
-
-function reviewEventsRef(db: Firestore, userId: string) {
-  return collection(db, 'users', userId, 'reviewEvents');
-}
-
-export interface RemoteSnapshot {
-  decks: Deck[];
-  cards: Card[];
-  reviewEvents: ReviewEvent[];
-}
-
-export interface RemoteSubscription {
-  unsubscribe: Unsubscribe;
-  /** Resolves true after the initial snapshot from all three collections is merged. */
-  ready: Promise<boolean>;
-}
-
-/** One-shot read of everything, or of everything newer than `since`. */
-export async function fetchRemote(userId: string, since?: string): Promise<RemoteSnapshot> {
-  const db = firestore();
-  if (!db) return { decks: [], cards: [], reviewEvents: [] };
-
-  const constrain = (ref: ReturnType<typeof decksRef>) =>
-    since ? query(ref, where('lastModified', '>', since)) : query(ref);
-
-  const [deckSnap, cardSnap] = await Promise.all([
-    getDocs(constrain(decksRef(db, userId))),
-    getDocs(constrain(cardsRef(db, userId))),
-  ]);
-  // Review history is an append-only set. Reading the full set is deliberate:
-  // reviewedAt comes from a device clock, so using it as an incremental cursor
-  // could miss an offline review after another device has synced.
-  const reviewSnap = await getDocs(reviewEventsRef(db, userId));
-
-  return {
-    decks: deckSnap.docs.map((d) => d.data() as Deck),
-    // A document written by a client older than the Anki scheduler has no
-    // phase; normalizeCard reconstructs one rather than letting it reach the
-    // scheduler half-filled.
-    cards: cardSnap.docs.map((d) => normalizeCard(d.data() as Card)),
-    reviewEvents: reviewSnap.docs.map((d) => d.data() as ReviewEvent),
-  };
-}
-
-/** Upload records. Idempotent, and chunked to respect Firestore's batch limit. */
-export async function pushRemote(
-  userId: string,
-  decks: Deck[],
-  cards: Card[],
-  reviewEvents: ReviewEvent[] = [],
-): Promise<void> {
-  const db = firestore();
-  if (!db || (decks.length === 0 && cards.length === 0 && reviewEvents.length === 0)) return;
-
-  const writes: { ref: ReturnType<typeof doc>; data: Record<string, unknown> }[] = [
-    ...decks.map((deck) => ({
-      ref: doc(db, 'users', userId, 'decks', deck.id),
-      data: toRemote(deck),
-    })),
-    ...cards.map((card) => ({
-      ref: doc(db, 'users', userId, 'cards', card.id),
-      data: toRemote(card),
-    })),
-    ...reviewEvents.map((event) => ({
-      ref: doc(db, 'users', userId, 'reviewEvents', event.eventId),
-      data: toRemote(event),
-    })),
-  ];
-
-  for (let i = 0; i < writes.length; i += MAX_BATCH_WRITES) {
-    const batch = writeBatch(db);
-    for (const write of writes.slice(i, i + MAX_BATCH_WRITES)) {
-      batch.set(write.ref, write.data);
-    }
-    await batch.commit();
-  }
-}
-
-/**
- * Live subscription used for cross-device updates.
- *
- * The listener fires for local writes too (that is how Firestore works), so the
- * caller must run the same merge it uses for a manual pull rather than trusting
- * every callback to be remote news.
- */
-export function subscribeRemote(
-  userId: string,
-  onChange: (snapshot: RemoteSnapshot) => void | Promise<void>,
-  onError: (error: Error) => void,
-): RemoteSubscription {
-  const db = firestore();
-  if (!db) return { unsubscribe: () => undefined, ready: Promise.resolve(false) };
-
-  let decks: Deck[] = [];
-  let cards: Card[] = [];
-  let reviewEvents: ReviewEvent[] = [];
-  let deckReady = false;
-  let cardReady = false;
-  let reviewEventsReady = false;
-  let initialSnapshotHandled = false;
-  let readySettled = false;
-  let resolveReady!: (initialSnapshotMerged: boolean) => void;
-  const ready = new Promise<boolean>((resolve) => {
-    resolveReady = resolve;
-  });
-  const settleReady = (initialSnapshotMerged: boolean) => {
-    if (readySettled) return;
-    readySettled = true;
-    resolveReady(initialSnapshotMerged);
-  };
-
-  const emit = () => {
-    // Wait for both collections before the first emit, so a merge never sees
-    // cards whose deck has not arrived yet.
-    if (!deckReady || !cardReady || !reviewEventsReady) return;
-
-    const snapshot = { decks, cards, reviewEvents };
-    if (!initialSnapshotHandled) {
-      initialSnapshotHandled = true;
-      Promise.resolve(onChange(snapshot)).then(
-        () => settleReady(true),
-        () => settleReady(false),
-      );
-      return;
-    }
-    void onChange(snapshot);
-  };
-
-  const handleError = (error: Error) => {
-    settleReady(false);
-    onError(error);
-  };
-
-  const unsubscribeDecks = onSnapshot(
-    decksRef(db, userId),
-    (snapshot) => {
-      decks = snapshot.docs.map((d) => d.data() as Deck);
-      deckReady = true;
-      emit();
-    },
-    handleError,
-  );
-
-  const unsubscribeCards = onSnapshot(
-    cardsRef(db, userId),
-    (snapshot) => {
-      cards = snapshot.docs.map((d) => normalizeCard(d.data() as Card));
-      cardReady = true;
-      emit();
-    },
-    handleError,
-  );
-
-  const unsubscribeReviewEvents = onSnapshot(
-    reviewEventsRef(db, userId),
-    (snapshot) => {
-      reviewEvents = snapshot.docs.map((d) => d.data() as ReviewEvent);
-      reviewEventsReady = true;
-      emit();
-    },
-    handleError,
-  );
-
-  return {
-    ready,
-    unsubscribe: () => {
-      unsubscribeDecks();
-      unsubscribeCards();
-      unsubscribeReviewEvents();
-      // Do not leave startup waiting forever if the engine is disposed before
-      // all listeners deliver their first snapshot.
-      settleReady(false);
-    },
-  };
-}
-
-/** `syncStatus` is local bookkeeping and must not be written to the cloud. */
-function toRemote<T extends { syncStatus?: string }>(record: T): Record<string, unknown> {
-  const { syncStatus: _local, ...rest } = record;
-  return { ...rest, syncStatus: 'synced' };
 }
 
 /**

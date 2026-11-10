@@ -45,6 +45,16 @@ import {
  *     because the server cannot tell "deleted here" from "not yet uploaded".
  */
 
+/** What this device knows about its last exchange with the sync server. */
+export interface SyncMeta {
+  lastPulledAt?: string;
+  lastPushedAt?: string;
+  /** The server collection's epoch this copy was built from. */
+  epoch?: string;
+  /** The server version this copy has caught up to. */
+  cursor?: string;
+}
+
 export interface ExampleCacheEntry {
   examples: string[];
   translations?: string[];
@@ -742,63 +752,110 @@ export class Repository {
     });
   }
 
-  /** Apply records that arrived from the server, already merged by the caller. */
-  async applyRemote(
-    decks: Deck[],
-    cards: Card[],
-    reviewEvents: ReviewEvent[] = [],
-  ): Promise<void> {
+  /**
+   * Apply records from the server, which is the source of truth.
+   *
+   * The server's copy replaces the local one unconditionally — except where the
+   * local row is still waiting to upload. Those changes were made here after
+   * the last push, and overwriting them would lose a review; the next push
+   * sends them and the server decides.
+   */
+  async applyServerChanges(
+    userId: string,
+    records: { decks: Deck[]; cards: Card[]; reviewEvents: ReviewEvent[] },
+  ): Promise<{ cardsApplied: number }> {
+    let cardsApplied = 0;
+    const touchedDecks = new Set<string>();
     await this.transaction(async () => {
+      const pendingDecks = await this.pendingIds('decks', userId);
+      const pendingCards = await this.pendingIds('cards', userId);
+      const decks = records.decks.filter((deck) => !pendingDecks.has(deck.id));
+      const cards = records.cards.filter((card) => !pendingCards.has(card.id));
       await this.writeDecks(decks.map((deck) => ({ ...deck, syncStatus: 'synced' as const })));
       await this.writeCards(cards.map((card) => ({ ...card, syncStatus: 'synced' as const })));
-      for (const event of reviewEvents) {
-        await this.db.runAsync(
-          `INSERT INTO review_log (eventId, cardId, userId, rating, interval, easeFactor, reviewedAt, syncStatus)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
-           ON CONFLICT (eventId) DO UPDATE SET
-             cardId = excluded.cardId,
-             userId = excluded.userId,
-             rating = excluded.rating,
-             interval = excluded.interval,
-             easeFactor = excluded.easeFactor,
-             reviewedAt = excluded.reviewedAt,
-             syncStatus = 'synced'`,
-          event.eventId,
-          event.cardId,
-          event.userId,
-          event.rating,
-          event.interval,
-          event.easeFactor,
-          event.reviewedAt,
-        );
-      }
+      await this.writeReviewEvents(records.reviewEvents);
+      cardsApplied = cards.length;
+      for (const card of cards) touchedDecks.add(card.deckId);
     });
-    for (const deckId of new Set(cards.map((card) => card.deckId))) {
-      await this.refreshDeckCount(deckId);
-    }
+    for (const deckId of touchedDecks) await this.refreshDeckCount(deckId);
+    return { cardsApplied };
   }
 
-  async getSyncMeta(userId: string): Promise<{ lastPulledAt?: string; lastPushedAt?: string }> {
-    const row = await this.db.getFirstAsync<{ lastPulledAt: string | null; lastPushedAt: string | null }>(
-      'SELECT lastPulledAt, lastPushedAt FROM sync_meta WHERE userId = ?',
-      userId,
-    );
+  /**
+   * Make this device's copy of the account exactly the server's.
+   *
+   * Used the first time a device meets the server's collection (or after the
+   * collection was re-seeded): anything only this device had, including
+   * unsent changes, is dropped, because the server's copy is the truth.
+   */
+  async replaceWithServerCopy(
+    userId: string,
+    records: { decks: Deck[]; cards: Card[]; reviewEvents: ReviewEvent[] },
+  ): Promise<void> {
+    await this.transaction(async () => {
+      await this.db.runAsync('DELETE FROM review_log WHERE userId = ?', userId);
+      await this.db.runAsync('DELETE FROM cards WHERE userId = ?', userId);
+      await this.db.runAsync('DELETE FROM decks WHERE userId = ?', userId);
+      const live = records.cards.filter((card) => !card.deleted);
+      await this.writeDecks(
+        recomputeCardCounts(records.decks, live).map((deck) => ({ ...deck, syncStatus: 'synced' as const })),
+      );
+      await this.writeCards(records.cards.map((card) => ({ ...card, syncStatus: 'synced' as const })));
+      await this.writeReviewEvents(records.reviewEvents);
+    });
+  }
+
+  /** Everything this device holds for the account, tombstones included. */
+  async collectionForUpload(
+    userId: string,
+  ): Promise<{ decks: Deck[]; cards: Card[]; reviewEvents: ReviewEvent[] }> {
+    const decks = await this.db.getAllAsync<DeckRow>('SELECT * FROM decks WHERE userId = ?', userId);
+    const cards = await this.db.getAllAsync<CardRow>('SELECT * FROM cards WHERE userId = ?', userId);
     return {
-      lastPulledAt: row?.lastPulledAt ?? undefined,
-      lastPushedAt: row?.lastPushedAt ?? undefined,
+      decks: decks.map(toDeck),
+      cards: cards.map(toCard),
+      reviewEvents: await this.listReviewEvents(userId),
     };
   }
 
-  async setSyncMeta(userId: string, meta: { lastPulledAt?: string; lastPushedAt?: string }): Promise<void> {
+  /** Mark the whole account as matching the server, after a seed. */
+  async markAllSynced(userId: string): Promise<void> {
+    await this.transaction(async () => {
+      await this.db.runAsync("UPDATE decks SET syncStatus = 'synced' WHERE userId = ?", userId);
+      await this.db.runAsync("UPDATE cards SET syncStatus = 'synced' WHERE userId = ?", userId);
+      await this.db.runAsync("UPDATE review_log SET syncStatus = 'synced' WHERE userId = ?", userId);
+    });
+  }
+
+  async getSyncMeta(userId: string): Promise<SyncMeta> {
+    const row = await this.db.getFirstAsync<{
+      lastPulledAt: string | null;
+      lastPushedAt: string | null;
+      epoch: string | null;
+      cursor: string | null;
+    }>('SELECT lastPulledAt, lastPushedAt, epoch, cursor FROM sync_meta WHERE userId = ?', userId);
+    return {
+      lastPulledAt: row?.lastPulledAt ?? undefined,
+      lastPushedAt: row?.lastPushedAt ?? undefined,
+      epoch: row?.epoch ?? undefined,
+      cursor: row?.cursor ?? undefined,
+    };
+  }
+
+  async setSyncMeta(userId: string, meta: SyncMeta): Promise<void> {
     await this.db.runAsync(
-      `INSERT INTO sync_meta (userId, lastPulledAt, lastPushedAt)
-       VALUES (?1, ?2, ?3)
+      `INSERT INTO sync_meta (userId, lastPulledAt, lastPushedAt, epoch, cursor)
+       VALUES (?1, ?2, ?3, ?4, ?5)
        ON CONFLICT (userId) DO UPDATE SET
          lastPulledAt = COALESCE(?2, lastPulledAt),
-         lastPushedAt = COALESCE(?3, lastPushedAt)`,
+         lastPushedAt = COALESCE(?3, lastPushedAt),
+         epoch = COALESCE(?4, epoch),
+         cursor = COALESCE(?5, cursor)`,
       userId,
       meta.lastPulledAt ?? null,
       meta.lastPushedAt ?? null,
+      meta.epoch ?? null,
+      meta.cursor ?? null,
     );
   }
 
@@ -833,6 +890,32 @@ export class Repository {
   }
 
   // --- internals -----------------------------------------------------------
+
+  private async pendingIds(table: 'decks' | 'cards', userId: string): Promise<Set<string>> {
+    const rows = await this.db.getAllAsync<{ id: string }>(
+      `SELECT id FROM ${table} WHERE userId = ? AND syncStatus = 'pending'`,
+      userId,
+    );
+    return new Set(rows.map((row) => row.id));
+  }
+
+  /** Review events are immutable; a known id is only marked as synced. */
+  private async writeReviewEvents(events: ReviewEvent[]): Promise<void> {
+    for (const event of events) {
+      await this.db.runAsync(
+        `INSERT INTO review_log (eventId, cardId, userId, rating, interval, easeFactor, reviewedAt, syncStatus)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+         ON CONFLICT (eventId) DO UPDATE SET syncStatus = 'synced'`,
+        event.eventId,
+        event.cardId,
+        event.userId,
+        event.rating,
+        event.interval,
+        event.easeFactor,
+        event.reviewedAt,
+      );
+    }
+  }
 
   private async writeDecks(decks: Deck[]): Promise<void> {
     for (const deck of decks) {

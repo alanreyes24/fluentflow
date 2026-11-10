@@ -43,6 +43,8 @@ export function SyncIndicator({ compact = false }: { compact?: boolean }) {
         return { color: theme.colors.offline, text: t('offline') };
       case 'error':
         return { color: theme.colors.danger, text: t('syncFailed') };
+      case 'waiting':
+        return { color: theme.colors.offline, text: t('waitingForDesktop') };
       default:
         return { color: theme.colors.statusMastered, text: t('synced') };
     }

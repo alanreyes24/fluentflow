@@ -1,35 +1,29 @@
-import {
-  planMerge,
-  recomputeCardCounts,
-  type Card,
-  type Deck,
-} from '@fluentflow/core';
 import type { Repository } from '../db/repository';
-import { fetchRemote, pushRemote, subscribeRemote, type RemoteSnapshot } from '../firebase/client';
+import { EpochMismatchError, type SyncRemote } from './remote';
 
 /**
  * The sync engine.
  *
- * Shape of the thing: SQLite is authoritative locally, Firestore is a replica,
- * and `planMerge` from core decides who wins per record. The engine's job is
- * only sequencing and failure handling.
+ * The sync server's database is the single source of truth. This device keeps
+ * a working copy in SQLite so studying never waits on the network, and the
+ * engine's job is to keep that copy equal to the server's:
  *
- * Three details do most of the work:
- *
- *  1. **Push before pull.** Uploading first means the pull that follows already
- *     contains our own writes, so a device that has been offline converges in
- *     one cycle instead of two.
- *  2. **One cycle at a time.** Sync is triggered by app launch, by the network
- *     coming back, by a Firestore snapshot and by a manual tap. Overlapping
- *     cycles would interleave reads and writes and could mark a record synced
- *     that was never sent, so a running cycle is coalesced into a single
- *     pending re-run.
- *  3. **`markSynced` is conditional.** It only clears the pending flag if
- *     `lastModified` still matches what was uploaded, so a review made during
- *     the round trip stays queued.
+ *  1. **Adopt the server's collection.** The first time a device meets the
+ *     server (or after the collection was re-seeded), it throws its own copy
+ *     away and downloads the server's. Only a device allowed to seed — the
+ *     desktop app — uploads its copy instead, and only when the server has
+ *     nothing yet.
+ *  2. **Push, then pull.** Local changes are queued (`syncStatus = 'pending'`)
+ *     and pushed; the server keeps the newer of its copy and ours and hands
+ *     back its copy when ours lost. Then everything that changed on the server
+ *     since the last pull is applied over the local copy.
+ *  3. **One cycle at a time.** Triggers overlap — launch, a review, the app
+ *     coming back to the foreground, the poll — so a running cycle coalesces
+ *     them into a single re-run. `markSynced` is conditional on
+ *     `lastModified`, so a review made during the round trip stays queued.
  */
 
-export type SyncState = 'idle' | 'syncing' | 'offline' | 'error';
+export type SyncState = 'idle' | 'syncing' | 'offline' | 'error' | 'waiting';
 
 export interface SyncStatus {
   state: SyncState;
@@ -41,35 +35,58 @@ export interface SyncStatus {
 export interface SyncEngineOptions {
   repository: Repository;
   userId: string;
-  /** False when Firebase is unconfigured or the user is not signed in. */
+  /** False when sign-in is unconfigured or the user is not signed in. */
   cloudEnabled: boolean;
+  /** Resolves the sync server for this build, or null when it has none. */
+  remote: () => Promise<SyncRemote | null>;
+  /**
+   * Whether this device may create the server's collection from its own copy
+   * when the server has none. Every other device waits for it.
+   */
+  canSeed: boolean;
   onStatus: (status: SyncStatus) => void;
-  /** Called after remote cards have been written locally. */
+  /** Called after server cards have been written locally. */
   onRemoteCardsApplied?: () => Promise<void> | void;
+  /** How often to look for local changes to push. */
+  pushIntervalMs?: number;
+  /** How often to pull when nothing local has changed. */
+  pullIntervalMs?: number;
 }
+
+const DEFAULT_PUSH_INTERVAL_MS = 3_000;
+const DEFAULT_PULL_INTERVAL_MS = 30_000;
 
 export class SyncEngine {
   private readonly repository: Repository;
   private readonly userId: string;
   private readonly cloudEnabled: boolean;
+  private readonly resolveRemote: () => Promise<SyncRemote | null>;
+  private readonly canSeed: boolean;
   private readonly onStatus: (status: SyncStatus) => void;
   private readonly onRemoteCardsApplied?: () => Promise<void> | void;
+  private readonly pushIntervalMs: number;
+  private readonly pullIntervalMs: number;
 
+  private remote: SyncRemote | null = null;
   private status: SyncStatus = { state: 'idle', pending: 0, lastSyncedAt: null, error: null };
   private running = false;
   /** Set when a trigger arrives mid-cycle; drives exactly one re-run. */
   private rerunRequested = false;
   private online = true;
-  private unsubscribe: (() => void) | null = null;
-  private remoteSubscriptionReady = false;
   private disposed = false;
+  private timers: ReturnType<typeof setInterval>[] = [];
+  private lastCycleAt = 0;
 
   constructor(options: SyncEngineOptions) {
     this.repository = options.repository;
     this.userId = options.userId;
     this.cloudEnabled = options.cloudEnabled;
+    this.resolveRemote = options.remote;
+    this.canSeed = options.canSeed;
     this.onStatus = options.onStatus;
     this.onRemoteCardsApplied = options.onRemoteCardsApplied;
+    this.pushIntervalMs = options.pushIntervalMs ?? DEFAULT_PUSH_INTERVAL_MS;
+    this.pullIntervalMs = options.pullIntervalMs ?? DEFAULT_PULL_INTERVAL_MS;
   }
 
   async start(): Promise<void> {
@@ -79,28 +96,26 @@ export class SyncEngine {
       return;
     }
 
+    this.remote = await this.resolveRemote();
+    if (this.disposed) return;
+    if (!this.remote) {
+      this.emit({ state: 'error', error: 'This build has no sync server configured.' });
+      return;
+    }
+
     const meta = await this.repository.getSyncMeta(this.userId);
     this.status.lastSyncedAt = meta.lastPulledAt ?? null;
 
-    const subscription = subscribeRemote(
-      this.userId,
-      (snapshot) => this.applyRemoteSnapshot(snapshot),
-      (error) => {
-        this.remoteSubscriptionReady = false;
-        this.emit({ state: 'error', error: error.message });
-      },
+    this.timers.push(
+      setInterval(() => void this.tick(), this.pushIntervalMs),
     );
-    this.unsubscribe = subscription.unsubscribe;
-    this.remoteSubscriptionReady = await subscription.ready;
-
     await this.sync();
   }
 
   dispose(): void {
     this.disposed = true;
-    this.unsubscribe?.();
-    this.unsubscribe = null;
-    this.remoteSubscriptionReady = false;
+    for (const timer of this.timers) clearInterval(timer);
+    this.timers = [];
   }
 
   setOnline(online: boolean): void {
@@ -114,11 +129,11 @@ export class SyncEngine {
     if (wasOffline) void this.sync();
   }
 
-  /** Run a full push-then-pull cycle. Safe to call from anywhere, any time. */
+  /** Run a full cycle. Safe to call from anywhere, any time. */
   async sync(): Promise<SyncStatus> {
-    if (!this.cloudEnabled) {
+    if (!this.cloudEnabled || !this.remote) {
       await this.refreshPendingCount();
-      return this.emit({ state: 'idle' });
+      return this.status;
     }
     if (!this.online) {
       await this.refreshPendingCount();
@@ -130,21 +145,22 @@ export class SyncEngine {
     }
 
     this.running = true;
-    this.emit({ state: 'syncing', error: null });
+    this.lastCycleAt = Date.now();
+    if (this.status.state !== 'waiting') this.emit({ state: 'syncing', error: null });
 
     try {
+      let waiting = false;
       do {
         this.rerunRequested = false;
-        await this.push();
-        // The live listeners deliver both remote changes and our own writes.
-        // A pull is only needed when listeners are unavailable; otherwise an
-        // idle/manual sync would re-read the same collections unnecessarily.
-        if (!this.remoteSubscriptionReady) await this.pull();
+        const outcome = await this.cycle(this.remote);
+        waiting = outcome.waiting;
+        if (outcome.cardsApplied) await this.onRemoteCardsApplied?.();
       } while (this.rerunRequested && !this.disposed);
 
+      await this.refreshPendingCount();
+      if (waiting) return this.emit({ state: 'waiting', error: null });
       const now = new Date().toISOString();
       await this.repository.setSyncMeta(this.userId, { lastPulledAt: now, lastPushedAt: now });
-      await this.refreshPendingCount();
       return this.emit({ state: 'idle', lastSyncedAt: now, error: null });
     } catch (error) {
       await this.refreshPendingCount();
@@ -160,95 +176,80 @@ export class SyncEngine {
     }
   }
 
-  private async push(): Promise<void> {
-    const [decks, cards] = await Promise.all([
+  /** The poll: push promptly when something changed, pull now and then. */
+  private async tick(): Promise<void> {
+    if (this.disposed || this.running) return;
+    await this.refreshPendingCount();
+    const due = Date.now() - this.lastCycleAt >= this.pullIntervalMs;
+    if (this.status.pending > 0 || due) await this.sync();
+  }
+
+  private async cycle(remote: SyncRemote): Promise<{ cardsApplied: boolean; waiting: boolean }> {
+    const meta = await this.repository.getSyncMeta(this.userId);
+    try {
+      if (meta.epoch) return await this.exchange(remote, meta.epoch, meta.cursor);
+      return await this.adopt(remote, (await remote.state()).epoch);
+    } catch (error) {
+      // The server's collection is not the one this copy was built from.
+      if (error instanceof EpochMismatchError) return this.adopt(remote, error.epoch);
+      throw error;
+    }
+  }
+
+  /** Push local changes, then pull the server's. */
+  private async exchange(
+    remote: SyncRemote,
+    epoch: string,
+    cursor: string | undefined,
+  ): Promise<{ cardsApplied: boolean; waiting: boolean }> {
+    const [decks, cards, reviewEvents] = await Promise.all([
       this.repository.pendingDecks(this.userId),
       this.repository.pendingCards(this.userId),
+      this.repository.pendingReviewEvents(this.userId),
     ]);
-    const reviewEvents = await this.repository.pendingReviewEvents(this.userId);
-    if (decks.length === 0 && cards.length === 0 && reviewEvents.length === 0) return;
-
-    await pushRemote(this.userId, decks, cards, reviewEvents);
-    await this.repository.markSynced(decks, cards, reviewEvents);
-  }
-
-  private async pull(): Promise<void> {
-    // A full pull on first sync, incremental afterwards. `since` comes from the
-    // last *successful* cycle, so an interrupted sync re-reads rather than
-    // skipping a window.
-    const meta = await this.repository.getSyncMeta(this.userId);
-    const remote = await fetchRemote(this.userId, meta.lastPulledAt);
-    const cardsApplied = await this.merge(remote);
-    if (cardsApplied) await this.onRemoteCardsApplied?.();
-  }
-
-  private async applyRemoteSnapshot(snapshot: RemoteSnapshot): Promise<void> {
-    if (this.disposed) return;
-    try {
-      const cardsApplied = await this.merge(snapshot);
-      if (cardsApplied) await this.onRemoteCardsApplied?.();
-      await this.refreshPendingCount();
-      // A snapshot can reveal local records the server has never seen, so nudge
-      // a cycle rather than assuming the listener is the whole story.
-      if (this.status.pending > 0) void this.sync();
-    } catch (error) {
-      this.emit({
-        state: 'error',
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  /** Reconcile a remote snapshot against local state and write the winners. */
-  private async merge(remote: RemoteSnapshot): Promise<boolean> {
-    if (
-      remote.decks.length === 0 &&
-      remote.cards.length === 0 &&
-      remote.reviewEvents.length === 0
-    ) return false;
-
-    const [localDecks, localCards, localReviewEvents] = await Promise.all([
-      this.repository.listDecks(this.userId),
-      this.repository.listAllCards(this.userId),
-      this.repository.listReviewEvents(this.userId),
-    ]);
-
-    const deckPlan = planMerge<Deck>(localDecks, remote.decks.filter(ownedBy(this.userId)));
-    const cardPlan = planMerge<Card>(localCards, remote.cards.filter(ownedBy(this.userId)));
-    const remoteReviewEvents = remote.reviewEvents.filter(ownedBy(this.userId));
-    const localReviewEventIds = new Set(localReviewEvents.map((event) => event.eventId));
-    const reviewEventsToApply = remoteReviewEvents.filter(
-      (event) => !localReviewEventIds.has(event.eventId),
-    );
-    const localReviewEventIdsOnRemote = new Set(remoteReviewEvents.map((event) => event.eventId));
-    const reviewEventsToPush = localReviewEvents.filter(
-      (event) => !localReviewEventIdsOnRemote.has(event.eventId),
-    );
-
-    const cardsApplied = cardPlan.applyLocally.length > 0;
-    if (
-      deckPlan.applyLocally.length > 0 ||
-      cardsApplied ||
-      reviewEventsToApply.length > 0
-    ) {
-      await this.repository.applyRemote(
-        recomputeCardCounts(deckPlan.applyLocally, cardPlan.merged),
-        cardPlan.applyLocally,
-        reviewEventsToApply,
-      );
+    let cardsApplied = 0;
+    if (decks.length + cards.length + reviewEvents.length > 0) {
+      const { rejected } = await remote.push(epoch, { decks, cards, reviewEvents });
+      await this.repository.markSynced(decks, cards, reviewEvents);
+      // The server kept a newer copy than ours: take it.
+      if (rejected.decks.length + rejected.cards.length > 0) {
+        const applied = await this.repository.applyServerChanges(this.userId, {
+          ...rejected,
+          reviewEvents: [],
+        });
+        cardsApplied += applied.cardsApplied;
+      }
     }
 
-    // Records where the local copy won are queued rather than pushed inline:
-    // the next cycle's push picks them up, and that keeps one code path
-    // responsible for uploads.
-    if (
-      deckPlan.pushRemote.length > 0 ||
-      cardPlan.pushRemote.length > 0 ||
-      reviewEventsToPush.length > 0
-    ) {
+    const changes = await remote.pull(epoch, cursor);
+    if (changes.decks.length + changes.cards.length + changes.reviewEvents.length > 0) {
+      const applied = await this.repository.applyServerChanges(this.userId, changes);
+      cardsApplied += applied.cardsApplied;
+    }
+    await this.repository.setSyncMeta(this.userId, { cursor: changes.cursor });
+    return { cardsApplied: cardsApplied > 0, waiting: false };
+  }
+
+  /** Bring this device onto the server's collection, or create it. */
+  private async adopt(
+    remote: SyncRemote,
+    serverEpoch: string | null,
+  ): Promise<{ cardsApplied: boolean; waiting: boolean }> {
+    if (serverEpoch === null) {
+      if (!this.canSeed) return { cardsApplied: false, waiting: true };
+      const records = await this.repository.collectionForUpload(this.userId);
+      const seeded = await remote.seed(records);
+      await this.repository.markSynced(records.decks, records.cards, records.reviewEvents);
+      await this.repository.setSyncMeta(this.userId, { epoch: seeded.epoch, cursor: seeded.cursor });
+      // Anything changed during the upload is still pending; send it now.
       this.rerunRequested = true;
+      return { cardsApplied: false, waiting: false };
     }
-    return cardsApplied;
+
+    const everything = await remote.pull(serverEpoch);
+    await this.repository.replaceWithServerCopy(this.userId, everything);
+    await this.repository.setSyncMeta(this.userId, { epoch: serverEpoch, cursor: everything.cursor });
+    return { cardsApplied: true, waiting: false };
   }
 
   private async refreshPendingCount(): Promise<void> {
@@ -262,15 +263,6 @@ export class SyncEngine {
   }
 }
 
-/**
- * Defence in depth. Firestore rules already scope reads to the signed-in user,
- * but a mis-scoped listener would otherwise write another account's cards into
- * this device's database.
- */
-function ownedBy(userId: string) {
-  return (record: { userId?: string }) => !record.userId || record.userId === userId;
-}
-
 function isNetworkError(message: string): boolean {
-  return /network|offline|unavailable|failed to fetch|timeout|ETIMEDOUT|ENOTFOUND/i.test(message);
+  return /network|offline|unavailable|failed to fetch|load failed|timeout|ETIMEDOUT|ENOTFOUND/i.test(message);
 }

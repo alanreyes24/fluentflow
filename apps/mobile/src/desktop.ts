@@ -111,6 +111,17 @@ export function desktopBridge(): DesktopBridge | null {
   return bridge && typeof bridge.importApkg === 'function' ? bridge : null;
 }
 
+/**
+ * True in the installed desktop app, which serves its page from the shell's
+ * own `app://` origin. The development shell loads the page from the Expo dev
+ * server instead, so it is not this.
+ */
+export function isInstalledDesktopApp(): boolean {
+  if (!desktopBridge()) return false;
+  const origin = typeof window !== 'undefined' ? window.location?.origin : undefined;
+  return origin === 'app://fluentflow';
+}
+
 /** True when the host can parse an Anki package without the sync server. */
 export function canImportLocally(): boolean {
   return desktopBridge()?.canImportLocally === true;
