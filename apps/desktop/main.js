@@ -783,8 +783,13 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
+    // On macOS closing the window leaves the app running with none. Opening
+    // the app again then lands here, and without a window to focus the second
+    // copy quit with nothing on screen — the app looked like it would not open.
+    if (!mainWindow && app.isReady()) createWindow();
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
       mainWindow.focus();
     }
     const file = apkgFromArgv(argv);
