@@ -84,6 +84,8 @@ export class MemoryStore implements Store {
     };
   }
 
+  async check(): Promise<void> {}
+
   async close(): Promise<void> {
     this.users.clear();
   }

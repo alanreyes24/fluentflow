@@ -52,8 +52,16 @@ export function createApp({ config, store }: AppDeps): express.Express {
 
   const auth = requireAuth(config);
 
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', mode: config.mode, time: new Date().toISOString() });
+  // Always 200, so a database outage never fails Railway's deploy healthcheck;
+  // `database` says whether sync can work right now.
+  app.get('/health', async (_req, res) => {
+    res.json({
+      status: 'ok',
+      mode: config.mode,
+      time: new Date().toISOString(),
+      commit: config.commit ?? null,
+      ...(await databaseStatus(store)),
+    });
   });
 
   /**
@@ -379,6 +387,33 @@ function isPayloadTooLarge(error: unknown): boolean {
     'type' in error &&
     (error as { type?: string }).type === 'entity.too.large'
   );
+}
+
+/**
+ * Whether the sync database is usable, for /health. Reports only a status and
+ * an error code (`ENOTFOUND`, Postgres's `28P01` for a bad password, ...) —
+ * never the connection string or a message that might echo it.
+ */
+async function databaseStatus(
+  store: Store,
+): Promise<{ database: 'ok' | 'missing' | 'unreachable'; databaseError?: string }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { code: 'TIMEOUT' })), 3000);
+  });
+  try {
+    await Promise.race([store.check(), timeout]);
+    return { database: 'ok' };
+  } catch (error) {
+    if (error instanceof StoreUnavailableError) return { database: 'missing' };
+    const code = (error as { code?: unknown }).code;
+    return {
+      database: 'unreachable',
+      databaseError: typeof code === 'string' ? code : (error as Error)?.name ?? 'Error',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** A missing or malformed epoch can never match, so it reads as "out of date". */

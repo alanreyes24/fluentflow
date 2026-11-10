@@ -195,6 +195,11 @@ export class PostgresStore implements Store {
     });
   }
 
+  async check(): Promise<void> {
+    await this.migrate();
+    await this.db.query('SELECT 1');
+  }
+
   async close(): Promise<void> {
     await this.db.close();
   }

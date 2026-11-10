@@ -46,3 +46,48 @@ test('development does not serve a stale web export', () => {
   assert.equal(loadConfig({}).webDir, undefined);
   assert.equal(loadConfig({}).allowedEmails, undefined);
 });
+
+test('health reports a missing sync database without failing', async () => {
+  const { createApp } = await import('../src/app.ts');
+  const { createStore } = await import('../src/store/index.ts');
+  const config = loadConfig({
+    NODE_ENV: 'production',
+    FIREBASE_PROJECT_ID: 'demo',
+    FLUENTFLOW_WEB_DIR: '/nonexistent',
+  } as NodeJS.ProcessEnv);
+  const app = createApp({ config, store: createStore(config) });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  try {
+    const { port } = server.address() as import('node:net').AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/health`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).database, 'missing');
+  } finally {
+    server.close();
+  }
+});
+
+test('health names the error code when the database cannot be reached', async () => {
+  const { createApp } = await import('../src/app.ts');
+  const { createStore } = await import('../src/store/index.ts');
+  const config = loadConfig({
+    FLUENTFLOW_MODE: 'local',
+    DATABASE_URL: 'postgresql://user:secret@127.0.0.1:1/none',
+  } as NodeJS.ProcessEnv);
+  const store = createStore(config);
+  const app = createApp({ config, store });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  try {
+    const { port } = server.address() as import('node:net').AddressInfo;
+    const text = await (await fetch(`http://127.0.0.1:${port}/health`)).text();
+    const body = JSON.parse(text);
+    assert.equal(body.database, 'unreachable');
+    assert.equal(body.databaseError, 'ECONNREFUSED');
+    assert.ok(!text.includes('secret'), 'the connection string never leaks');
+  } finally {
+    server.close();
+    await store.close();
+  }
+});

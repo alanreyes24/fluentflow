@@ -81,6 +81,10 @@ class LazyPostgresStore implements Store {
     return (await this.resolve()).pull(...args);
   }
 
+  async check() {
+    return (await this.resolve()).check();
+  }
+
   async close() {
     if (!this.delegate) return;
     return (await this.delegate).close();
@@ -98,6 +102,9 @@ class UnavailableStore implements Store {
     throw new StoreUnavailableError();
   }
   async pull(): Promise<never> {
+    throw new StoreUnavailableError();
+  }
+  async check(): Promise<never> {
     throw new StoreUnavailableError();
   }
   async close(): Promise<void> {}

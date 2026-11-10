@@ -93,7 +93,9 @@ test('health does not require a token', async () => {
   const response = await call('/health', { user: '' });
 
   assert.equal(response.status, 200);
-  assert.deepEqual((await response.json()).mode, 'local');
+  const body = await response.json();
+  assert.deepEqual(body.mode, 'local');
+  assert.equal(body.database, 'ok');
 });
 
 test('local API permits the development UI origins', async () => {

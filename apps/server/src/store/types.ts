@@ -53,6 +53,8 @@ export interface Store {
    * Throws {@link EpochError} unless `epoch` is the current one.
    */
   pull(userId: string, epoch: string, since?: string): Promise<SyncChanges>;
+  /** Resolves when the store can serve requests; rejects with why it cannot. */
+  check(): Promise<void>;
   close(): Promise<void>;
 }
 
