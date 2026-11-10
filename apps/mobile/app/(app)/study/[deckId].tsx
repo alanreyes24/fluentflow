@@ -26,6 +26,7 @@ import {
   Divider,
   Label,
   Loading,
+  Meter,
   Row,
   Screen,
   Spacer,
@@ -37,6 +38,7 @@ import { formatInterval } from '../../../src/ui/format';
 
 import { useCardGestures } from '../../../src/ui/useCardGestures';
 import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
+import { Icon } from '../../../src/ui/Icon';
 import { useLayout, useTheme } from '../../../src/ui/theme';
 
 const STUDY_SESSION_KEY = 'fluentflow.studySession';
@@ -546,13 +548,28 @@ export default function StudyScreen() {
       <View style={styles.studyBody}>
       <View style={styles.studyMain}>
       <View style={[styles.stage, wide ? styles.stageWide : null]}>
-        <View style={styles.studyHeader}>
-          <Row style={[styles.studyToolbar, compact ? styles.studyToolbarCompact : null]}>
-            <View style={styles.toolbarSide}>
+        <View style={[styles.studyHeader, compact ? styles.studyHeaderCompact : null]}>
+          <View style={styles.topBar}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={t('goBack')}
+              onPress={() => (router.canGoBack() ? router.back() : router.replace('/(app)/decks'))}
+              hitSlop={6}
+              style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.6 : 1 }]}
+            >
+              <Icon name="chevronLeft" size={20} color={theme.colors.textMuted} />
+              <Label variant="label" tone="muted" numberOfLines={1} style={styles.backLabel}>
+                {deck?.name ?? ''}
+              </Label>
+            </Pressable>
+            <View style={styles.topActions}>
               {!editing ? (
                 <Button
                   label={t('edit')}
+                  icon="pencil"
                   variant="ghost"
+                  size="small"
+                  iconOnly={compact}
                   onPress={() => {
                     setToolsOpen(false);
                     setEditError(null);
@@ -560,12 +577,14 @@ export default function StudyScreen() {
                   }}
                 />
               ) : null}
-            </View>
-            <View style={styles.chatButton}>
-            <Button label={chatOpen ? t('chatHide') : t('chatOpen')} variant="ghost"
-              onPress={() => setChatOpen((open) => !open)} />
-            </View>
-            <View style={styles.toolbarSide}>
+              <Button
+                label={chatOpen ? t('chatHide') : t('chatOpen')}
+                icon="sparkles"
+                variant={chatOpen ? 'secondary' : 'ghost'}
+                size="small"
+                iconOnly={compact}
+                onPress={() => setChatOpen((open) => !open)}
+              />
               {!editing ? (
                 <Pressable
                   accessibilityRole="button"
@@ -573,51 +592,55 @@ export default function StudyScreen() {
                   accessibilityState={{ selected: Boolean(card.starred), disabled: savingStar }}
                   disabled={savingStar}
                   onPress={() => void toggleStar()}
-                  style={styles.gearButton}
+                  style={[styles.iconButton, { borderRadius: theme.radius.sm }]}
                 >
-                  <Label variant="body" align="center" style={[
-                    styles.gearIcon,
-                    { color: card.starred ? theme.colors.hard : theme.colors.textMuted },
-                  ]}>
-                    {card.starred ? '★' : '☆'}
-                  </Label>
+                  <Icon
+                    name="star"
+                    size={20}
+                    filled={Boolean(card.starred)}
+                    color={card.starred ? theme.colors.hard : theme.colors.textMuted}
+                  />
                 </Pressable>
               ) : null}
-          {revealed && !editing ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('studyOptions')}
-              accessibilityState={{ expanded: toolsOpen }}
-              onPress={() => setToolsOpen((open) => !open)}
-              style={styles.gearButton}
-            >
-              <Label variant="body" align="center" style={styles.gearIcon}>
-                ⚙
-              </Label>
-            </Pressable>
-          ) : null}
+              {revealed && !editing ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('studyOptions')}
+                  accessibilityState={{ expanded: toolsOpen }}
+                  onPress={() => setToolsOpen((open) => !open)}
+                  style={[
+                    styles.iconButton,
+                    { borderRadius: theme.radius.sm, backgroundColor: toolsOpen ? theme.colors.accentSoft : 'transparent' },
+                  ]}
+                >
+                  <Icon name="moreHorizontal" size={20} color={toolsOpen ? theme.colors.accent : theme.colors.textMuted} />
+                </Pressable>
+              ) : null}
             </View>
-          </Row>
-          <StudyQueueCounts
-            compact
-            counts={remainingCounts}
-            labels={{
-              new: t('queueNew'),
-              learning: t('queueLearn'),
-              review: t('queueReview'),
-            }}
-          />
-          <View style={[styles.progressRow, compact ? styles.progressRowCompact : null]}>
-            <Label variant="caption" tone="faint">
-              {index + 1} / {queue.length}
-            </Label>
-            <Row gap={6}>
-              <StatusDot status={card.status} />
-              <Label variant="caption" tone="faint">
-                {t(statusKey(card.status))}
+          </View>
+
+          {/* Where you are in the session, as a bar and as a count, with what
+              is left of today's queue keyed by colour beside it. */}
+          <View style={styles.progressBlock}>
+            <Meter
+              value={queue.length > 0 ? index / queue.length : 0}
+              height={4}
+              accessibilityLabel={`${index + 1} / ${queue.length}`}
+            />
+            <View style={styles.progressRow}>
+              <StudyQueueCounts
+                inline
+                counts={remainingCounts}
+                labels={{
+                  new: t('queueNew'),
+                  learning: t('queueLearn'),
+                  review: t('queueReview'),
+                }}
+              />
+              <Label variant="caption" tone="faint" style={styles.counter}>
+                {index + 1} / {queue.length}
               </Label>
-              {card.leech ? <Badge tone="plain">{t('leech')}</Badge> : null}
-            </Row>
+            </View>
           </View>
         </View>
 
@@ -673,6 +696,13 @@ export default function StudyScreen() {
                   contentContainerStyle={[styles.cardContent, compact ? styles.cardContentCompact : null]}
                   showsVerticalScrollIndicator={false}
                 >
+                  <View style={styles.cardMeta}>
+                    <StatusDot status={card.status} />
+                    <Label variant="caption" tone="faint">
+                      {t(statusKey(card.status))}
+                    </Label>
+                    {card.leech ? <Badge tone="plain">{t('leech')}</Badge> : null}
+                  </View>
                   {deck?.reverseCards ? (
                     <DefinitionBlock
                       value={card.back}
@@ -720,14 +750,7 @@ export default function StudyScreen() {
                         <ContextList title={t('relatedWords')} items={card.relatedWords} />
                       ) : null}
                     </>
-                  ) : (
-                    <>
-                      <Spacer size={theme.spacing.lg} />
-                      <Label variant="caption" tone="faint" align="center">
-                        {t('showAnswer')}
-                      </Label>
-                    </>
-                  )}
+                  ) : null}
                 </ScrollView>
               </Surface>
             </CardShell>
@@ -737,7 +760,7 @@ export default function StudyScreen() {
             {revealed ? (
               <>
                 <Row gap={theme.spacing.xs} align="flex-start">
-                  <Row gap={compact ? theme.spacing.sm : theme.spacing.xs} style={styles.ratingRow}>
+                  <Row gap={theme.spacing.sm} style={styles.ratingRow}>
                     {RATING_NAMES.map((rating) => (
                       <RatingButton
                         key={rating}
@@ -751,30 +774,26 @@ export default function StudyScreen() {
                   </Row>
                 </Row>
                 {toolsOpen ? (
-                  <>
-                    <Spacer size={theme.spacing.sm} />
-                    <Row gap={theme.spacing.xs}>
-                      <Button
-                        label={t('bury')}
-                        variant="secondary"
-                        onPress={() => void removeFromSession('bury')}
-                        style={styles.flex}
-                      />
-                    </Row>
-                    <Spacer size={theme.spacing.xs} />
-                    <Row gap={theme.spacing.xs}>
-                      <Button
-                        label={t('suspend')}
-                        variant="ghostDanger"
-                        onPress={() => void removeFromSession('suspend')}
-                        style={styles.flex}
-                      />
-                    </Row>
-                  </>
+                  <Row gap={theme.spacing.sm} style={styles.tools}>
+                    <Button
+                      label={t('bury')}
+                      variant="secondary"
+                      size="small"
+                      onPress={() => void removeFromSession('bury')}
+                      style={styles.flex}
+                    />
+                    <Button
+                      label={t('suspend')}
+                      variant="ghostDanger"
+                      size="small"
+                      onPress={() => void removeFromSession('suspend')}
+                      style={styles.flex}
+                    />
+                  </Row>
                 ) : null}
               </>
             ) : (
-              <Button label={t('showAnswer')} onPress={reveal} />
+              <Button label={t('showAnswer')} onPress={reveal} style={styles.showAnswer} />
             )}
             {undoState ? (
               <>
@@ -844,6 +863,13 @@ function Toast({ message }: { message: string | null }) {
   );
 }
 
+/**
+ * One answer: the rating, and what it will do to the card, in one target.
+ *
+ * The interval sits inside the button rather than under it, so the whole
+ * choice — "Good, see it again in 10 minutes" — is one thing to read and one
+ * thing to press. With a keyboard the shortcut digit is shown as a key cap.
+ */
 function RatingButton({
   rating,
   tone,
@@ -854,28 +880,60 @@ function RatingButton({
   rating: RatingName;
   tone: string;
   interval?: { days: number; minutes: number };
-  /** Phone width: no keyboard, so no shortcut digit to wrap the label. */
+  /** Phone width: no keyboard, so no shortcut digit to show. */
   compact?: boolean;
   onPress: (rating: RatingName) => void;
 }) {
   const { t } = useI18n();
+  const theme = useTheme();
+  const [hovered, setHovered] = useState(false);
   const label = t(`${rating}Label` as 'againLabel');
+  const showKey = Platform.OS === 'web' && !compact;
 
   return (
-    <View style={styles.flex}>
-      <Button
-        label={Platform.OS === 'web' && !compact ? `${RATINGS[rating]}  ${label}` : label}
-        tone={tone}
-        onPress={() => onPress(rating)}
-        accessibilityHint={`Rate this card ${label}`}
-      />
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={`Rate this card ${label}`}
+      onPress={() => onPress(rating)}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      style={({ pressed }) => [
+        styles.rating,
+        compact ? styles.ratingCompact : null,
+        {
+          backgroundColor: withAlpha(tone, hovered || pressed ? '33' : '1f'),
+          borderColor: withAlpha(tone, hovered ? '80' : '40'),
+          borderRadius: theme.radius.md,
+          transform: [{ translateY: pressed ? 1 : 0 }],
+        },
+        Platform.OS === 'web'
+          ? ({ transitionProperty: 'background-color, border-color, transform', transitionDuration: '120ms' } as object)
+          : null,
+      ]}
+    >
+      {showKey ? (
+        <View style={[styles.keyCap, { borderColor: withAlpha(tone, '66') }]}>
+          <Label variant="caption" style={[styles.keyCapText, { color: tone }]}>
+            {RATINGS[rating]}
+          </Label>
+        </View>
+      ) : null}
+      <Label variant="label" align="center" style={{ color: tone }}>
+        {label}
+      </Label>
       {interval === undefined ? null : (
-        <Label variant="caption" tone="faint" align="center" style={styles.ratingInterval}>
+        <Label variant="caption" tone="muted" align="center">
           {formatInterval(interval.days, interval.minutes, t)}
         </Label>
       )}
-    </View>
+    </Pressable>
   );
+}
+
+/** Append an alpha byte to a `#rrggbb`; leave anything else alone. */
+function withAlpha(color: string, alpha: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? `${color}${alpha}` : color;
 }
 
 function ContextList({ title, items }: { title: string; items: string[] }) {
@@ -1179,14 +1237,42 @@ async function restoreStudySession(
 }
 
 const styles = StyleSheet.create({
-  ratingInterval: { marginTop: 4 },
   flex: { flex: 1 },
   studyScreen: { position: 'relative' },
-  studyToolbar: { paddingBottom: 8 },
-  // On a phone every point of height the header gives up goes to the card.
-  studyToolbarCompact: { paddingBottom: 0 },
-  toolbarSide: { width: 96, flexDirection: 'row', alignItems: 'center' },
-  chatButton: { flex: 1, alignItems: 'center' },
+  topBar: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44 },
+  backButton: { flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1, minWidth: 0, minHeight: 36 },
+  backLabel: { flexShrink: 1 },
+  topActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  iconButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  progressBlock: { gap: 10, marginTop: 8 },
+  counter: { fontVariant: ['tabular-nums'] },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 16 },
+  showAnswer: { minHeight: 52 },
+  tools: { marginTop: 12 },
+  rating: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 64,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    borderWidth: 1,
+  },
+  ratingCompact: { minHeight: 58 },
+  keyCap: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 5,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  keyCapText: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
   studyBody: { flex: 1, flexDirection: 'row', minHeight: 0 },
   studyMain: { flex: 1, minWidth: 0 },
   stage: { flex: 1, minWidth: 0 },
@@ -1196,15 +1282,15 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingVertical: 8,
   },
-  studyHeader: { paddingHorizontal: 16, paddingTop: 8 },
+  studyHeader: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
+  // On a phone every point of height the header gives up goes to the card.
+  studyHeaderCompact: { paddingBottom: 10 },
   progressRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
-    paddingVertical: 8,
+    gap: 12,
   },
-  progressRowCompact: { marginTop: 4, paddingVertical: 6 },
   cardWrap: { flex: 1, paddingHorizontal: 16 },
   // Tall enough for a word, its meaning and two examples; short enough that a
   // three-word card is not floating in half a window of nothing. Anything
@@ -1256,13 +1342,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   ratingRow: { flex: 1 },
-  gearButton: {
-    width: 48,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  gearIcon: { fontSize: 22 },
   toastBubble: {
     borderRadius: 999,
     paddingHorizontal: 16,

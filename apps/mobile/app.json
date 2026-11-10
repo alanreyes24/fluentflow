@@ -16,7 +16,7 @@
       "package": "com.fluentflow.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#059669"
+        "backgroundColor": "#4f46e5"
       }
     },
     "web": {
@@ -33,10 +33,10 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 180,
           "resizeMode": "contain",
-          "backgroundColor": "#f4f7f5",
+          "backgroundColor": "#f6f6f7",
           "dark": {
             "image": "./assets/splash-icon-dark.png",
-            "backgroundColor": "#0b1512"
+            "backgroundColor": "#101012"
           }
         }
       ],

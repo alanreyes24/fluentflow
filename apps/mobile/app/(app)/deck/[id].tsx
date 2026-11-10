@@ -29,6 +29,7 @@ import {
   Surface,
   useContentStyle,
 } from '../../../src/ui/components';
+import { Icon } from '../../../src/ui/Icon';
 import { useTheme } from '../../../src/ui/theme';
 import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 
@@ -264,9 +265,7 @@ export default function DeckScreen() {
               >
                 <Row justify="space-between">
                   <SectionLabel>{t('newCardsPerDay')}</SectionLabel>
-                  <Label variant="body" tone="faint">
-                    {newCardsSettingsExpanded ? '⌃' : '⌄'}
-                  </Label>
+                  <Icon name={newCardsSettingsExpanded ? 'chevronUp' : 'chevronDown'} size={18} color={theme.colors.textFaint} />
                 </Row>
               </Pressable>
               {newCardsSettingsExpanded ? (
@@ -312,9 +311,7 @@ export default function DeckScreen() {
               >
                 <Row justify="space-between">
                   <SectionLabel>{t('maxReviewsPerDay')}</SectionLabel>
-                  <Label variant="body" tone="faint">
-                    {maxReviewsSettingsExpanded ? '⌃' : '⌄'}
-                  </Label>
+                  <Icon name={maxReviewsSettingsExpanded ? 'chevronUp' : 'chevronDown'} size={18} color={theme.colors.textFaint} />
                 </Row>
               </Pressable>
               {maxReviewsSettingsExpanded ? (
@@ -404,9 +401,7 @@ export default function DeckScreen() {
                     {cards.length}
                   </Label>
                 </Row>
-                <Label variant="body" tone="faint">
-                  {cardsExpanded ? '⌃' : '⌄'}
-                </Label>
+                <Icon name={cardsExpanded ? 'chevronUp' : 'chevronDown'} size={18} color={theme.colors.textFaint} />
               </Row>
             </Pressable>
           </View>
@@ -511,21 +506,19 @@ function CardRow({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; o
           accessibilityRole="button"
           accessibilityLabel={`${t('edit')} ${card.front}`}
           onPress={onEdit}
-          hitSlop={8}
+          hitSlop={6}
+          style={[styles.iconButton, { borderRadius: theme.radius.sm }]}
         >
-          <Label variant="caption" tone="accent">
-            ✎
-          </Label>
+          <Icon name="pencil" size={16} color={theme.colors.accent} />
         </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Delete ${card.front}`}
           onPress={onDelete}
-          hitSlop={8}
+          hitSlop={6}
+          style={[styles.iconButton, { borderRadius: theme.radius.sm }]}
         >
-          <Label variant="caption" tone="danger">
-            ✕
-          </Label>
+          <Icon name="x" size={16} color={theme.colors.danger} />
         </Pressable>
       </Row>
     </Surface>
@@ -574,6 +567,9 @@ function confirm(
 }
 
 const styles = StyleSheet.create({
+  // A real target for the edit and delete marks: a 16pt icon alone is too
+  // small to hit, and `hitSlop` does not show where the target is on hover.
+  iconButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   header: {},
   card: { paddingVertical: 12 },
   grow: { flex: 1 },

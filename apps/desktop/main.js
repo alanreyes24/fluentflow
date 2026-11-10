@@ -492,13 +492,13 @@ function missingBuildPage() {
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>FluentFlow</title>
 <style>
-  body { font: 15px/1.6 system-ui, sans-serif; background: #f4f7f5; color: #0f1c17;
+  body { font: 15px/1.6 system-ui, sans-serif; background: #f6f6f7; color: #18181b;
          display: grid; place-items: center; height: 100vh; margin: 0; }
   main { max-width: 34rem; padding: 2rem; }
-  code { background: #eef2f0; padding: .15em .4em; border-radius: 4px; }
+  code { background: #f0f0f2; padding: .15em .4em; border-radius: 4px; }
   @media (prefers-color-scheme: dark) {
-    body { background: #0b1512; color: #e8f0ec; }
-    code { background: #16271f; }
+    body { background: #101012; color: #f4f4f5; }
+    code { background: #1e1e22; }
   }
 </style></head>
 <body><main>

@@ -23,6 +23,7 @@ import {
   SegmentedControl,
   Spacer,
   Surface,
+  PageHeader,
   useContentStyle,
 } from '../../src/ui/components';
 import { useTheme, useThemeContext, type ThemePreference } from '../../src/ui/theme';
@@ -52,6 +53,7 @@ export default function SettingsScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={content}>
+        <PageHeader title={t('settings')} subtitle={t('settingsSubtitle')} />
         <Section title={t('interfaceLanguage')}>
           <SegmentedControl
             options={SUPPORTED_LANGUAGES.map((code: LanguageCode) => ({

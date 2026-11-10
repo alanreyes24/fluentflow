@@ -27,6 +27,7 @@ import {
   SegmentedControl,
   Spacer,
   Surface,
+  PageHeader,
   useContentStyle,
 } from '../../src/ui/components';
 import { useTheme } from '../../src/ui/theme';
@@ -365,13 +366,11 @@ export default function TextImportScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={content} keyboardShouldPersistTaps="handled">
-        {deck ? (
-          <Surface>
-            <Label variant="caption" tone="faint">
-              {deck.name} · {LANGUAGE_NAMES[deck.language]}
-            </Label>
-          </Surface>
-        ) : null}
+        <PageHeader
+          overline={deck ? `${deck.name} · ${LANGUAGE_NAMES[deck.language]}` : undefined}
+          title={t('pasteText')}
+          subtitle={t('pasteSubtitle')}
+        />
 
         <Spacer size={theme.spacing.md} />
 

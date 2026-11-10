@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ASSETS = join(ROOT, 'apps', 'mobile', 'assets');
+const PUBLIC = join(ROOT, 'apps', 'mobile', 'public');
 const DESKTOP_BUILD = join(ROOT, 'apps', 'desktop', 'build');
 const DESKTOP_ICON_SCRIPT = join(ROOT, 'apps', 'desktop', 'scripts', 'make-icon.mjs');
 
@@ -43,9 +44,9 @@ const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256];
  * These four are the only ones an icon needs, and duplicating them here beats
  * importing a React module into a build script.
  */
-const ACCENT = [0x05, 0x96, 0x69]; // light `accent`
-const ACCENT_DARK_THEME = [0x34, 0xd3, 0x99]; // dark `accent`
-const CREAM = [0xf4, 0xf7, 0xf5]; // light `background`
+const ACCENT = [0x4f, 0x46, 0xe5]; // light `accent`
+const ACCENT_DARK_THEME = [0x81, 0x8c, 0xf8]; // dark `accent`
+const CREAM = [0xf6, 0xf6, 0xf7]; // light `background`
 const STANDARD_ICON = { background: ACCENT, ink: CREAM, scale: 0.8 };
 
 /**
@@ -103,6 +104,22 @@ async function main() {
   }
 
   console.log(`\nWritten to ${ASSETS}`);
+
+  // The installable web app: the iPhone home-screen icon and the manifest's
+  // icons. Full bleed like the iOS icon, since iOS and Android's maskable
+  // icons both apply their own shape, and the inset mark stays inside the
+  // maskable safe zone (the middle 80%).
+  const webIcons = [
+    { file: 'apple-touch-icon.png', size: 180 },
+    { file: 'icon-192.png', size: 192 },
+    { file: 'icon-512.png', size: 512 },
+  ];
+  for (const { file, size } of webIcons) {
+    const pixels = render({ size, background: ACCENT, ink: CREAM, scale: 0.78 });
+    await writeFile(join(PUBLIC, file), encodePng(size, size, pixels));
+    console.log(`  ${file} — ${size}x${size}`);
+  }
+  console.log(`Written to ${PUBLIC}\n`);
 
   // Keep the desktop source at the same design scale as the favicon. The
   // macOS iconset is built from this high-resolution copy below, while the

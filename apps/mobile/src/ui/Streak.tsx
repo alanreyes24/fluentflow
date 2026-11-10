@@ -1,7 +1,8 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { dayKey, dayToDate, type StreakSummary, type StudyDay } from '@fluentflow/core';
 import { useI18n } from '../i18n';
 import { Chip, Label, Row } from './components';
+import { Icon } from './Icon';
 import { useTheme } from './theme';
 import type { ViewStyleProp } from './styles';
 
@@ -48,7 +49,16 @@ export function StreakCard({
             },
           ]}
         >
-          <Text style={styles.flameGlyph}>{streak.current > 0 ? FLAME : SEED}</Text>
+          {streak.current > 0 ? (
+            <Icon
+              name="flame"
+              size={28}
+              filled={!streak.atRisk}
+              color={streak.atRisk ? theme.colors.streak : theme.colors.accent}
+            />
+          ) : (
+            <Icon name="sprout" size={28} color={theme.colors.textFaint} />
+          )}
         </View>
 
         <View style={styles.grow}>
@@ -154,20 +164,11 @@ function ActivityCalendar({ days, today }: { days: readonly StudyDay[]; today: s
   );
 }
 
-/**
- * Text glyphs rather than an icon font or an image asset: the app ships no
- * icon set, and a second one would have to be bundled, licensed and sized for
- * four platforms to draw two shapes.
- */
-const FLAME = '\u{1F525}';
-const SEED = '\u{1F331}';
-
 const styles = StyleSheet.create({
   // The streak status is allowed to shrink inside the side rail instead of
   // becoming the flex row's implicit minimum width.
   grow: { flex: 1, minWidth: 0 },
   flame: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
-  flameGlyph: { fontSize: 26 },
   calendar: { marginTop: 16, gap: 8 },
   weekdayRow: { flexDirection: 'row' },
   calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 8 },

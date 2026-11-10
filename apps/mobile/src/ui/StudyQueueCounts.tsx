@@ -16,10 +16,13 @@ export function StudyQueueCounts({
   counts,
   labels,
   compact = false,
+  inline = false,
 }: {
   counts: QueueCounts;
   labels: { new: string; learning: string; review: string };
   compact?: boolean;
+  /** One line of keyed counts — "● 8 New  ● 0 Learn" — for a header strip. */
+  inline?: boolean;
 }) {
   const theme = useTheme();
   const entries = [
@@ -27,6 +30,29 @@ export function StudyQueueCounts({
     { key: 'learning', value: counts.learning, label: labels.learning, color: theme.colors.again },
     { key: 'review', value: counts.review, label: labels.review, color: theme.colors.good },
   ] as const;
+
+  if (inline) {
+    return (
+      <Row gap={theme.spacing.md} wrap>
+        {entries.map((entry) => (
+          <View
+            key={entry.key}
+            accessible
+            accessibilityLabel={`${entry.label}: ${entry.value}`}
+            style={styles.inline}
+          >
+            <View style={[styles.dot, { backgroundColor: entry.color }]} />
+            <Label variant="caption" style={[styles.inlineValue, { color: entry.color }]}>
+              {entry.value}
+            </Label>
+            <Label variant="caption" tone="faint">
+              {entry.label}
+            </Label>
+          </View>
+        ))}
+      </Row>
+    );
+  }
 
   return (
     <Row gap={theme.spacing.sm} justify="space-between" style={styles.row}>
@@ -56,4 +82,7 @@ export function StudyQueueCounts({
 const styles = StyleSheet.create({
   row: { width: '100%' },
   counter: { flex: 1, alignItems: 'center' },
+  inline: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  inlineValue: { fontWeight: '700' },
+  dot: { width: 7, height: 7, borderRadius: 4 },
 });

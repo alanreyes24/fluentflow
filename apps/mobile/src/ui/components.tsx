@@ -14,6 +14,7 @@ import {
 import type { CardStatus, DeckProgress } from '@fluentflow/core';
 import { layout, useLayout, useTheme, type ElevationLevel, type Theme } from './theme';
 import type { TextStyleProp, ViewStyleProp } from './styles';
+import { Icon, type IconName } from './Icon';
 
 /**
  * Shared primitives.
@@ -22,7 +23,7 @@ import type { TextStyleProp, ViewStyleProp } from './styles';
  * its palette from the theme, which is what makes dark mode a single switch
  * rather than an audit.
  *
- * The look is a quiet emerald system — one accent, a neutral surface ramp, and
+ * The look is a quiet neutral system — one indigo accent, a grey surface ramp, and
  * soft shadows that lift a card off the page without a hard edge. Motion and
  * focus rings are web-only style props, guarded so the native test preset never
  * sees a style key it does not know.
@@ -118,6 +119,12 @@ interface ButtonProps {
   color?: string;
   /** Tonal override: a soft wash of this colour with the colour as the label. */
   tone?: string;
+  /** An icon ahead of the label, drawn in the label's colour. */
+  icon?: IconName;
+  /** A smaller button, for a row of secondary actions. */
+  size?: 'regular' | 'small';
+  /** Draw only the icon; the label stays as the accessible name. */
+  iconOnly?: boolean;
   style?: ViewStyleProp;
   accessibilityHint?: string;
 }
@@ -130,6 +137,9 @@ export function Button({
   loading,
   color,
   tone,
+  icon,
+  size = 'regular',
+  iconOnly = false,
   style,
   accessibilityHint,
 }: ButtonProps) {
@@ -186,6 +196,17 @@ export function Button({
     }
   }
 
+  // Disabled reads as switched off, not as a faded version of itself: a
+  // translucent accent on a dark ground turns into a murky tint that still
+  // looks pressable. A neutral groove with faint text says "not yet".
+  const switchedOff = disabled && !loading;
+  if (switchedOff) {
+    const filled = variant === 'primary' || variant === 'secondary' || variant === 'danger' || color || tone;
+    background = filled ? theme.colors.surfaceSunken : 'transparent';
+    hoverBackground = background;
+    textColor = theme.colors.textFaint;
+  }
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -204,10 +225,15 @@ export function Button({
         { borderRadius: theme.radius.md },
         // A 48pt target is sized for a thumb. With a mouse it reads as
         // oversized, and macOS controls are nowhere near it.
-        { minHeight: wide ? 38 : 48, paddingHorizontal: wide ? 18 : 22 },
+        size === 'small'
+          ? { minHeight: wide ? 32 : 40, paddingHorizontal: 12, borderRadius: theme.radius.sm }
+          : { minHeight: wide ? 40 : 48, paddingHorizontal: wide ? 18 : 22 },
+        iconOnly && icon ? { paddingHorizontal: 0, minWidth: size === 'small' ? 36 : 44 } : null,
         {
           backgroundColor: (pressed || hovered) && !inactive ? hoverBackground : background,
-          opacity: disabled && !loading ? 0.4 : pressed ? 0.9 : 1,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: switchedOff && background !== 'transparent' ? theme.colors.border : 'transparent',
+          opacity: pressed && !inactive ? 0.9 : 1,
           boxShadow: inactive ? theme.elevation.none : shadow,
           transform: pressed && !inactive ? [{ translateY: 1 }] : [{ translateY: 0 }],
         },
@@ -218,7 +244,14 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={textColor} />
       ) : (
-        <Text style={[theme.typography.label, { color: textColor }]}>{label}</Text>
+        <>
+          {icon ? <Icon name={icon} size={size === 'small' ? 15 : 17} strokeWidth={2.25} color={textColor} /> : null}
+          {iconOnly && icon ? null : (
+            <Text style={[theme.typography.label, size === 'small' ? styles.smallLabel : null, { color: textColor }]}>
+              {label}
+            </Text>
+          )}
+        </>
       )}
     </Pressable>
   );
@@ -286,6 +319,51 @@ export function Page({
 }) {
   const content = useContentStyle({ full, maxWidth });
   return <View style={[styles.page, content, style]}>{children}</View>;
+}
+
+/**
+ * The title block at the top of a screen.
+ *
+ * Every top-level screen opens the same way — an optional overline (a date, a
+ * section), the title, a sentence of context, and at most one action on the
+ * trailing edge — so moving between them feels like one app, and the eye
+ * always knows where a screen starts.
+ */
+export function PageHeader({
+  title,
+  overline,
+  subtitle,
+  action,
+  style,
+}: {
+  title: string;
+  overline?: string;
+  subtitle?: string;
+  action?: ReactNode;
+  style?: ViewStyleProp;
+}) {
+  const theme = useTheme();
+  const { wide } = useLayout();
+  return (
+    <View style={[styles.pageHeader, { marginBottom: wide ? theme.spacing.lg : theme.spacing.md }, style]}>
+      <View style={styles.pageHeaderText}>
+        {overline ? (
+          <Label variant="overline" tone="accent" style={styles.pageOverline}>
+            {overline}
+          </Label>
+        ) : null}
+        <Label variant="title" style={wide ? styles.pageTitleWide : null}>
+          {title}
+        </Label>
+        {subtitle ? (
+          <Label variant="body" tone="muted" style={styles.pageSubtitle}>
+            {subtitle}
+          </Label>
+        ) : null}
+      </View>
+      {action ? <View style={styles.pageAction}>{action}</View> : null}
+    </View>
+  );
 }
 
 /**
@@ -516,30 +594,42 @@ export function Spacer({ size = 16 }: { size?: number }) {
 export function Badge({
   children,
   tone = 'accent',
+  icon,
+  iconFilled,
+  accessibilityLabel,
 }: {
-  children: ReactNode;
+  children?: ReactNode;
   tone?: 'accent' | 'plain';
+  /** An icon ahead of the text, or on its own. Drawn in the badge's text colour. */
+  icon?: IconName;
+  /** Fill the icon's outline — a starred star rather than an empty one. */
+  iconFilled?: boolean;
+  /** Needed whenever the badge is an icon alone, which has no text to read. */
+  accessibilityLabel?: string;
 }) {
   const theme = useTheme();
   const accent = tone === 'accent';
+  const textColor = accent ? theme.colors.accentText : theme.colors.textMuted;
+  const hasText = children !== undefined && children !== null && children !== '';
   return (
     <View
+      accessible={Boolean(accessibilityLabel)}
+      accessibilityLabel={accessibilityLabel}
       style={[
         styles.badge,
         {
           backgroundColor: accent ? theme.colors.accent : theme.colors.surfaceSunken,
           borderRadius: theme.radius.pill,
         },
+        !hasText ? styles.badgeIconOnly : null,
       ]}
     >
-      <Text
-        style={[
-          theme.typography.caption,
-          { color: accent ? theme.colors.accentText : theme.colors.textMuted, fontWeight: '700' },
-        ]}
-      >
-        {children}
-      </Text>
+      {icon ? <Icon name={icon} size={13} strokeWidth={2.5} filled={iconFilled} color={textColor} /> : null}
+      {hasText ? (
+        <Text style={[theme.typography.caption, { color: textColor, fontWeight: '700' }]}>
+          {children}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -627,7 +717,9 @@ function Segment({
           backgroundColor: background,
           borderRadius: theme.radius.md - 3,
           borderWidth: selected ? StyleSheet.hairlineWidth : 0,
-          borderColor: theme.colors.border,
+          // On a dark ground the raised fill is only a shade off the groove;
+          // the stronger border is what makes the selection read.
+          borderColor: theme.name === 'dark' ? theme.colors.borderStrong : theme.colors.border,
           boxShadow: selected ? theme.elevation.sm : theme.elevation.none,
         },
         web({ transitionProperty: 'background-color, box-shadow', transitionDuration: '120ms' }),
@@ -838,6 +930,13 @@ export function Loading({ label, fullScreen = false }: { label?: string; fullScr
 }
 
 const styles = StyleSheet.create({
+  pageHeader: { flexDirection: 'row', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' },
+  pageHeaderText: { flex: 1, minWidth: 220 },
+  pageOverline: { marginBottom: 6 },
+  pageTitleWide: { fontSize: 32, lineHeight: 38, letterSpacing: -0.6 },
+  pageSubtitle: { marginTop: 4 },
+  pageAction: { flexDirection: 'row', gap: 8 },
+  smallLabel: { fontSize: 14 },
   emptyIcon: { fontSize: 40, textAlign: 'center' },
   wrap: { flexWrap: 'wrap' },
   overline: { textTransform: 'uppercase' },
@@ -869,9 +968,14 @@ const styles = StyleSheet.create({
     minWidth: 24,
     paddingHorizontal: 9,
     paddingVertical: 3,
+    flexDirection: 'row',
+    gap: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Square up an icon-only badge so it reads as a dot with a mark in it, the
+  // same height as a badge carrying a number.
+  badgeIconOnly: { paddingHorizontal: 0, width: 24, height: 24 },
   segmented: {
     flexDirection: 'row',
     padding: 3,

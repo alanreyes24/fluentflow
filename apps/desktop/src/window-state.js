@@ -47,7 +47,7 @@ const GRABBABLE = { width: 120, height: 60 };
  * `apps/mobile/src/ui/theme.tsx`; they are duplicated because the shell needs
  * them before any bundle has loaded.
  */
-const BACKGROUNDS = { light: '#f4f7f5', dark: '#0b1512' };
+const BACKGROUNDS = { light: '#f6f6f7', dark: '#101012' };
 
 /** What `nativeTheme.themeSource` accepts, and what the app's setting offers. */
 const THEME_SOURCES = ['system', 'light', 'dark'];

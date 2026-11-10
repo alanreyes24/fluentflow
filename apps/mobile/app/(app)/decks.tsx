@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
   LANGUAGE_NAMES,
@@ -19,13 +19,14 @@ import {
   Button,
   EmptyState,
   Label,
+  PageHeader,
   ProgressBar,
   Row,
   Screen,
-  Spacer,
   Surface,
   useContentStyle,
 } from '../../src/ui/components';
+import { Icon, type IconName } from '../../src/ui/Icon';
 import { StreakCard } from '../../src/ui/Streak';
 import { useLayout, useTheme } from '../../src/ui/theme';
 
@@ -35,19 +36,16 @@ import { useLayout, useTheme } from '../../src/ui/theme';
  * The due count is the only number that drives a decision here, so it gets the
  * accent treatment while totals stay muted.
  *
- * On a wide window the activity calendar and deck collection are two useful
- * panes: the calendar anchors the left side and the decks stay together on
- * the right. Narrow windows stack those panes so neither becomes cramped.
+ * Top to bottom: what is due and one button to start on it, a strip of the
+ * numbers that say how it is going, then the decks. The study calendar takes
+ * a rail beside the decks when the window is wide enough to spare one, and
+ * follows them down the page when it is not.
  */
 export default function DecksScreen() {
   const { t } = useI18n();
   const theme = useTheme();
-  const { width, wide } = useLayout();
-  // Keep study actions first. On smaller windows the calendar shares the
-  // deck list's scroll area, below the decks, instead of taking fixed height.
-  const calendarSideRail = width >= 840;
-  const deckColumns = width >= 1180 ? 2 : 1;
-  const content = useContentStyle({ full: calendarSideRail });
+  const { wide, paneWidth } = useLayout();
+  const content = useContentStyle({ maxWidth: 1180 });
   const { decks, repository, user, refreshDecks } = useApp();
 
   const [progress, setProgress] = useState<Record<string, DeckStudyProgress>>({});
@@ -135,266 +133,304 @@ export default function DecksScreen() {
     return () => clearTimeout(timer);
   }, [nextLearningAt, loadProgress]);
 
+  // The deck with the most waiting is where "Start studying" goes: one press
+  // from opening the app to the first card.
+  const busiest = decks
+    .map((deck) => ({ deck, due: progress[deck.id]?.due ?? 0 }))
+    .filter((entry) => entry.due > 0)
+    .sort((a, b) => b.due - a.due)[0]?.deck;
+
+  // The calendar earns a rail of its own only when the decks beside it still
+  // get two columns; otherwise it follows them down the page.
+  const rail = paneWidth >= 1000 && Boolean(streakData) && decks.length > 0;
+  const mainWidth = Math.min(paneWidth, 1180) - (wide ? 48 : 32) - (rail ? RAIL_WIDTH + theme.spacing.lg : 0);
+  const deckColumns = mainWidth >= 620 ? 2 : 1;
+  const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
   return (
     <Screen>
-      <View style={[styles.split, calendarSideRail ? styles.splitSideRail : null, wide ? styles.splitWide : null]}>
-        {streakData && calendarSideRail && decks.length > 0 ? (
-          <ScrollView
-            style={[
-              styles.calendarPane,
-              styles.calendarPaneSideRail,
-              deckColumns === 2 ? styles.calendarPaneWide : null,
-            ]}
-            contentContainerStyle={styles.calendarContent}
-          >
-            <Surface raised elevation="md">
-              <StreakCard
-                streak={streakData.streak}
+      <ScrollView contentContainerStyle={content}>
+        <PageHeader overline={dateLabel} title={t('today')} />
+
+        {decks.length === 0 ? (
+          <EmptyState
+            title={t('noDecksYet')}
+            hint={t('noDecksHint')}
+            action={<Button label={t('newDeck')} icon="plus" onPress={() => router.push('/(app)/new-deck')} />}
+          />
+        ) : (
+          <>
+            {progressReady ? (
+              <Hero
+                due={totals.due}
+                pendingLearning={totals.pendingLearning}
+                cards={totals.cards}
+                onStart={busiest ? () => router.push({
+                  pathname: '/(app)/study/[deckId]',
+                  params: { deckId: busiest.id, ahead: '0' },
+                }) : undefined}
+              />
+            ) : null}
+
+            {streakData ? (
+              <StatStrip
+                streak={streakData.streak.current}
                 days={streakData.days}
+                forecast={streakData.forecast}
                 today={streakData.today}
               />
-            </Surface>
-          </ScrollView>
-        ) : null}
-
-        <View style={styles.decksPane}>
-          <FlatList
-            data={decks}
-            // FlatList does not support changing numColumns on an existing
-            // instance. Split View can cross this breakpoint while the deck
-            // screen stays mounted, so force a fresh list for each layout.
-            key={deckColumns}
-            keyExtractor={(deck) => deck.id}
-            numColumns={deckColumns}
-            columnWrapperStyle={deckColumns === 2 ? styles.deckRow : undefined}
-            contentContainerStyle={content}
-            ListHeaderComponent={
-              progressReady ? (
-                <View style={styles.summaryWrap}>
-                  <Summary
-                    due={totals.due}
-                    pendingLearning={totals.pendingLearning}
-                    cards={totals.cards}
-                  />
-                  <Spacer size={theme.spacing.xl} />
-                  <Label variant="heading">{t('yourDecks')}</Label>
-                  <Spacer size={theme.spacing.sm} />
-                </View>
-              ) : null
-            }
-            ListFooterComponent={streakData && decks.length > 0 ? (
-              <View style={styles.activityFooter}>
-                <View style={[styles.insights, calendarSideRail ? styles.insightsWide : null]}>
-                  <UpcomingWorkload forecast={streakData.forecast} />
-                  <RecentActivity days={streakData.days} today={streakData.today} />
-                </View>
-                {!calendarSideRail ? (
-                  <Surface raised elevation="sm">
-                    <StreakCard streak={streakData.streak} days={streakData.days} today={streakData.today} />
-                  </Surface>
-                ) : null}
-              </View>
             ) : null}
-            ListEmptyComponent={
-              <EmptyState
-                title={t('noDecksYet')}
-                hint={t('noDecksHint')}
-                action={<Button label={t('newDeck')} onPress={() => router.push('/(app)/new-deck')} />}
-              />
-            }
-            renderItem={({ item }) => (
-              <View style={deckColumns === 2 ? styles.deckGridItem : null}>
-                <DeckRow deck={item} progress={progress[item.id]} />
+
+            <View style={[styles.body, rail ? styles.bodyRail : null]}>
+              <View style={styles.main}>
+                <View style={styles.sectionHead}>
+                  <Row gap={theme.spacing.sm} style={styles.grow}>
+                    <Label variant="heading">{t('yourDecks')}</Label>
+                    <Badge tone="plain">{decks.length}</Badge>
+                  </Row>
+                  <Button
+                    label={t('newDeck')}
+                    icon="plus"
+                    variant="ghost"
+                    size="small"
+                    onPress={() => router.push('/(app)/new-deck')}
+                  />
+                </View>
+                <View style={styles.grid}>
+                  {decks.map((deck) => (
+                    <View key={deck.id} style={deckColumns === 2 ? styles.gridHalf : styles.gridFull}>
+                      <DeckCard deck={deck} progress={progress[deck.id]} />
+                    </View>
+                  ))}
+                </View>
               </View>
-            )}
-            ItemSeparatorComponent={() => <Spacer size={theme.spacing.md} />}
-          />
-        </View>
-      </View>
+
+              {streakData ? (
+                <View style={rail ? styles.rail : styles.below}>
+                  <Surface style={styles.calendarCard}>
+                    <StreakCard
+                      streak={streakData.streak}
+                      days={streakData.days}
+                      today={streakData.today}
+                    />
+                  </Surface>
+                </View>
+              ) : null}
+            </View>
+          </>
+        )}
+      </ScrollView>
     </Screen>
   );
 }
 
-function UpcomingWorkload({ forecast }: { forecast: { day: string; count: number }[] }) {
-  const { t } = useI18n();
-  const theme = useTheme();
-  const tomorrow = forecast[1]?.count ?? 0;
-  const thisWeek = forecast.slice(0, 7).reduce((total, day) => total + day.count, 0);
-
-  return (
-    <Surface raised elevation="sm" style={styles.insightCard}>
-      <Label variant="overline" tone="muted">{t('upcomingWorkload')}</Label>
-      <Spacer size={theme.spacing.sm} />
-      <Row justify="space-between" gap={theme.spacing.md}>
-        <View style={styles.insightMetric}>
-          <Label variant="title" tone={tomorrow > 0 ? 'accent' : 'default'}>{tomorrow}</Label>
-          <Label variant="caption" tone="faint">{t('dueTomorrow')}</Label>
-        </View>
-        <View style={styles.insightMetric}>
-          <Label variant="title">{thisWeek}</Label>
-          <Label variant="caption" tone="faint">{t('dueThisWeek')}</Label>
-        </View>
-      </Row>
-    </Surface>
-  );
-}
-
-function RecentActivity({ days, today }: { days: StudyDay[]; today: string }) {
-  const { t } = useI18n();
-  const theme = useTheme();
-  const byDay = new Map(days.map((day) => [day.day, day.reviews]));
-  const todayReviews = byDay.get(today) ?? 0;
-  const weekReviews = days.filter((day) => day.day >= addDays(today, -6) && day.day <= today)
-    .reduce((total, day) => total + day.reviews, 0);
-  const lastSession = [...days].filter((day) => day.reviews > 0)
-    .sort((a, b) => b.day.localeCompare(a.day))[0];
-  const lastSessionLabel = lastSession
-    ? new Date(`${lastSession.day}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-    : t('noActivityYet');
-
-  return (
-    <Surface raised elevation="sm" style={styles.insightCard}>
-      <Label variant="overline" tone="muted">{t('recentActivity')}</Label>
-      <Spacer size={theme.spacing.sm} />
-      <Row justify="space-between" gap={theme.spacing.md}>
-        <View style={styles.insightMetric}>
-          <Label variant="title">{todayReviews}</Label>
-          <Label variant="caption" tone="faint">{t('reviewedTodayLabel')}</Label>
-        </View>
-        <View style={styles.insightMetric}>
-          <Label variant="title">{weekReviews}</Label>
-          <Label variant="caption" tone="faint">{t('lastSevenDays')}</Label>
-        </View>
-      </Row>
-      <Spacer size={theme.spacing.sm} />
-      <Label variant="caption" tone="faint">{t('lastSession', { date: lastSessionLabel })}</Label>
-    </Surface>
-  );
-}
+const RAIL_WIDTH = 300;
 
 /**
- * What is waiting, across every deck.
+ * What is waiting, across every deck, and the one button that starts on it.
  *
  * The one number worth putting at the top of a window: not how much has been
  * collected, but how much is owed right now. When nothing is owed it says so
  * plainly rather than showing a zero, which reads as an error.
  */
-function Summary({ due, pendingLearning, cards }: { due: number; pendingLearning: number; cards: number }) {
+function Hero({
+  due,
+  pendingLearning,
+  cards,
+  onStart,
+}: {
+  due: number;
+  pendingLearning: number;
+  cards: number;
+  onStart?: () => void;
+}) {
   const { t } = useI18n();
   const theme = useTheme();
+  const { compact } = useLayout();
+  const active = due > 0;
+  // A review averages a few seconds; a rough minute count makes "20 due"
+  // feel like a decision about time rather than a pile.
+  const minutes = Math.max(1, Math.round((due * 8) / 60));
 
   return (
-    <Surface
-      raised
-      elevation="sm"
+    <View
       style={[
-        styles.summary,
-        due > 0
-          ? { backgroundColor: theme.colors.accentSoft, borderColor: 'transparent' }
-          : null,
-    ]}
-  >
-    <Row justify="space-between" align="center" gap={theme.spacing.lg}>
-      <View style={styles.summaryLead}>
-        <Label variant="overline" tone="muted">
-          {t('today')}
-        </Label>
-        <Spacer size={theme.spacing.xs} />
-        <Label variant="title" tone={due > 0 ? 'accent' : 'default'}>
+        styles.hero,
+        {
+          backgroundColor: active ? theme.colors.accentSoft : theme.colors.surface,
+          borderColor: active ? 'transparent' : theme.colors.border,
+          borderRadius: theme.radius.lg,
+        },
+      ]}
+    >
+      <View style={styles.heroText}>
+        <Label variant="display" tone={active ? 'accent' : 'default'} style={!active ? styles.heroQuiet : null}>
           {cards === 0
             ? t('readyForCards')
             : due > 0
-            ? t('dueCount', { count: due })
-            : pendingLearning > 0
-              ? t('learningPending', { count: pendingLearning })
-              : t('allCaughtUp')}
+              ? t('dueCount', { count: due })
+              : pendingLearning > 0
+                ? t('learningPending', { count: pendingLearning })
+                : t('allCaughtUp')}
         </Label>
-        <Label variant="caption" tone="faint">
+        <Label variant="body" tone="muted">
           {cards === 0
             ? t('readyForCardsHint')
             : due > 0
-            ? t('cardCount', { count: cards })
-            : pendingLearning > 0
-              ? t('learningPendingHint')
-              : t('allCaughtUpHint')}
+              ? `${t('cardCount', { count: cards })} · ${t('estimatedMinutes', { count: minutes })}`
+              : pendingLearning > 0
+                ? t('learningPendingHint')
+                : t('allCaughtUpHint')}
         </Label>
       </View>
-      <View style={styles.summaryMetric} accessible accessibilityLabel={t('cardCount', { count: cards })}>
-        <Label variant="metric" tone="default">
-          {cards}
-        </Label>
-        <Label variant="caption" tone="faint">
-          {t('cards')}
-        </Label>
-      </View>
-    </Row>
-  </Surface>
+      {onStart ? (
+        <Button
+          label={t('startStudying')}
+          icon="play"
+          onPress={onStart}
+          style={compact ? styles.heroButtonFull : styles.heroButton}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * Four numbers in one strip: the streak, today's reviews, and what is coming.
+ * One row of equal cells rather than two cards of two, so the eye reads it
+ * left to right as a single status line.
+ */
+function StatStrip({
+  streak,
+  days,
+  forecast,
+  today,
+}: {
+  streak: number;
+  days: StudyDay[];
+  forecast: { day: string; count: number }[];
+  today: string;
+}) {
+  const { t } = useI18n();
+  const theme = useTheme();
+  const { compact } = useLayout();
+  const reviewedToday = days.find((day) => day.day === today)?.reviews ?? 0;
+  const weekReviews = days
+    .filter((day) => day.day >= addDays(today, -6) && day.day <= today)
+    .reduce((total, day) => total + day.reviews, 0);
+  const tomorrow = forecast[1]?.count ?? 0;
+
+  const cells: { icon: IconName; label: string; value: number; color?: string }[] = [
+    { icon: 'flame', label: t('dayStreak'), value: streak, color: streak > 0 ? theme.colors.streak : undefined },
+    { icon: 'check', label: t('reviewedTodayLabel'), value: reviewedToday },
+    { icon: 'barChart', label: t('lastSevenDays'), value: weekReviews },
+    { icon: 'calendar', label: t('dueTomorrow'), value: tomorrow },
+  ];
+
+  return (
+    <View
+      style={[
+        styles.strip,
+        compact ? styles.stripCompact : null,
+        { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg },
+      ]}
+    >
+      {cells.map((cell, index) => (
+        <View
+          key={cell.label}
+          accessible
+          accessibilityLabel={`${cell.label}: ${cell.value}`}
+          style={[
+            styles.stripCell,
+            compact ? styles.stripCellCompact : null,
+            index > 0 && !compact ? { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.colors.divider } : null,
+          ]}
+        >
+          <Row gap={6}>
+            <Icon name={cell.icon} size={14} color={cell.color ?? theme.colors.textFaint} />
+            <Label variant="caption" tone="faint" numberOfLines={1} style={styles.grow}>
+              {cell.label}
+            </Label>
+          </Row>
+          <Label variant="metric">{cell.value}</Label>
+        </View>
+      ))}
+    </View>
   );
 }
 
 type DeckStudyProgress = DeckProgress & Pick<StudyQueue, 'pendingLearning' | 'nextLearningAt'>;
 
-function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress }) {
+function DeckCard({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress }) {
   const { t } = useI18n();
   const theme = useTheme();
   const due = progress?.due ?? 0;
   const [hovered, setHovered] = useState(false);
+  const open = () => router.push({ pathname: '/(app)/deck/[id]', params: { id: deck.id } });
 
   return (
     <View
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
+      style={styles.deckWrap}
     >
       <Surface
-        elevation={hovered ? 'md' : 'sm'}
+        elevation={hovered ? 'md' : 'none'}
         style={[
           styles.deck,
+          { borderRadius: theme.radius.lg },
+          hovered ? { borderColor: theme.colors.borderStrong } : null,
           Platform.OS === 'web' && hovered ? styles.lifted : null,
         ]}
       >
-        <View>
-          <View style={styles.deckHeader}>
-            <View style={styles.grow}>
-              <Label variant="heading" numberOfLines={2}>
-                {deck.name}
-              </Label>
-              <Label variant="caption" tone="faint">
-                {LANGUAGE_NAMES[deck.language]} · {t('cardCount', { count: deck.cardCount })}
-              </Label>
-            </View>
-            {progress && deck.cardCount > 0 ? (
-              progress.due > 0
-                ? <Badge>{progress.due}</Badge>
-                : progress.pendingLearning > 0
-                  ? <Badge tone="plain">⏱ {progress.pendingLearning}</Badge>
-                  : <Badge tone="plain">✓</Badge>
-            ) : null}
+        <View style={styles.deckHeader}>
+          <View style={[styles.avatar, { backgroundColor: theme.colors.accentSoft, borderRadius: theme.radius.sm }]}>
+            <Label variant="label" tone="accent" style={styles.avatarText}>
+              {deck.language.toUpperCase()}
+            </Label>
           </View>
-
-          {progress && progress.total > 0 ? (
-            <>
-              <Spacer size={theme.spacing.sm} />
-              <ProgressBar progress={progress} />
-              <Spacer size={theme.spacing.xs} />
-              <Row gap={theme.spacing.md} wrap>
-                <Label variant="caption" tone="faint">
-                  {t('statusNew')} {progress.new}
-                </Label>
-                <Label variant="caption" tone="faint">
-                  {t('statusLearning')} {progress.learning}
-                </Label>
-                <Label variant="caption" tone="faint">
-                  {t('statusMastered')} {progress.mastered}
-                </Label>
-              </Row>
-            </>
+          <View style={styles.grow}>
+            <Label variant="heading" numberOfLines={2}>
+              {deck.name}
+            </Label>
+            <Label variant="caption" tone="faint">
+              {LANGUAGE_NAMES[deck.language]} · {t('cardCount', { count: deck.cardCount })}
+            </Label>
+          </View>
+          {progress && deck.cardCount > 0 ? (
+            progress.due > 0
+              ? <Badge>{progress.due}</Badge>
+              : progress.pendingLearning > 0
+                ? (
+                  <Badge
+                    tone="plain"
+                    icon="timer"
+                    accessibilityLabel={t('learningPending', { count: progress.pendingLearning })}
+                  >
+                    {progress.pendingLearning}
+                  </Badge>
+                )
+                : <Badge tone="plain" icon="check" accessibilityLabel={t('allCaughtUp')} />
           ) : null}
         </View>
 
-        <Spacer size={theme.spacing.md} />
-        <Row gap={theme.spacing.sm}>
+        {progress && progress.total > 0 ? (
+          <View style={styles.deckProgress}>
+            <ProgressBar progress={progress} height={6} />
+            <Row gap={theme.spacing.md} wrap>
+              <Legend color={theme.colors.statusNew}>{t('statusNew')} {progress.new}</Legend>
+              <Legend color={theme.colors.statusLearning}>{t('statusLearning')} {progress.learning}</Legend>
+              <Legend color={theme.colors.statusMastered}>{t('statusMastered')} {progress.mastered}</Legend>
+            </Row>
+          </View>
+        ) : null}
+
+        <View style={[styles.deckFooter, { borderTopColor: theme.colors.divider }]}>
           <Button
             label={deck.cardCount === 0 ? t('addCards') : due > 0 ? t('study') : t('studyAhead')}
+            icon={deck.cardCount === 0 ? 'plus' : 'play'}
+            variant={due > 0 || deck.cardCount === 0 ? 'primary' : 'secondary'}
+            size="small"
             onPress={() =>
               deck.cardCount === 0 ? router.push({
                 pathname: '/(app)/text-import',
@@ -404,56 +440,68 @@ function DeckRow({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress 
                 params: { deckId: deck.id, ahead: due > 0 ? '0' : '1' },
               })
             }
-            style={styles.deckAction}
+            style={styles.grow}
           />
-          <Button
-            label={t('manageDeck')}
-            variant="secondary"
-            onPress={() => router.push({ pathname: '/(app)/deck/[id]', params: { id: deck.id } })}
-            style={styles.deckAction}
-          />
-        </Row>
+          <Button label={t('manageDeck')} variant="ghost" size="small" onPress={open} />
+        </View>
       </Surface>
     </View>
   );
 }
 
+/** A status count with its colour key, so the bar above it can be read. */
+function Legend({ color, children }: { color: string; children: ReactNode }) {
+  return (
+    <Row gap={6}>
+      <View style={[styles.legendDot, { backgroundColor: color }]} />
+      <Label variant="caption" tone="muted">
+        {children}
+      </Label>
+    </Row>
+  );
+}
+
 const styles = StyleSheet.create({
-  split: { flex: 1, width: '100%' },
-  splitSideRail: {
+  grow: { flex: 1, minWidth: 0 },
+  hero: {
     flexDirection: 'row',
-    alignSelf: 'center',
-    width: '100%',
-    gap: 16,
-    paddingHorizontal: 16,
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 20,
+    padding: 24,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  splitWide: {
+  heroText: { flex: 1, minWidth: 240, gap: 6 },
+  heroQuiet: { fontSize: 30, lineHeight: 36 },
+  heroButton: { minWidth: 180 },
+  heroButtonFull: { width: '100%' },
+  strip: { flexDirection: 'row', marginTop: 16, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  stripCompact: { flexWrap: 'wrap' },
+  stripCell: { flex: 1, minWidth: 0, paddingVertical: 14, paddingHorizontal: 16, gap: 6 },
+  stripCellCompact: { flexBasis: '50%' },
+  body: { marginTop: 32, gap: 24 },
+  bodyRail: { flexDirection: 'row', alignItems: 'flex-start' },
+  main: { flex: 1, minWidth: 0 },
+  rail: { width: RAIL_WIDTH },
+  below: {},
+  calendarCard: { padding: 20 },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -8 },
+  gridHalf: { width: '50%', paddingHorizontal: 8, paddingBottom: 16 },
+  gridFull: { width: '100%', paddingHorizontal: 8, paddingBottom: 16 },
+  deckWrap: { flex: 1 },
+  deck: { flex: 1, padding: 0 },
+  deckHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, paddingBottom: 12 },
+  avatar: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontSize: 13, letterSpacing: 0.6 },
+  deckProgress: { gap: 8, paddingHorizontal: 16, paddingBottom: 14 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  deckFooter: {
     flexDirection: 'row',
-    alignSelf: 'center',
-    width: '100%',
-    maxWidth: 1380,
-    gap: 24,
-    paddingHorizontal: 24,
+    gap: 8,
+    marginTop: 'auto',
+    padding: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  calendarPane: { flexGrow: 0 },
-  calendarContent: { paddingBottom: 24 },
-  calendarPaneSideRail: { width: 280, paddingHorizontal: 0, paddingTop: 16 },
-  calendarPaneWide: { width: 300, paddingHorizontal: 0, paddingTop: 24 },
-  decksPane: { flex: 1, minWidth: 0 },
-  summaryWrap: { marginBottom: 0 },
-  summary: { paddingVertical: 18 },
-  summaryLead: { flex: 1, minWidth: 0 },
-  summaryMetric: { alignItems: 'flex-end', minWidth: 72 },
-  activityFooter: { gap: 16, marginTop: 24 },
-  insights: { gap: 12 },
-  insightsWide: { flexDirection: 'row' },
-  insightCard: { flex: 1, minWidth: 0 },
-  insightMetric: { flex: 1 },
-  grow: { flex: 1 },
-  deck: {},
-  deckHeader: { alignItems: 'flex-start', gap: 12 },
-  deckRow: { gap: 16 },
-  deckGridItem: { flex: 1, minWidth: 0 },
-  deckAction: { flex: 1 },
-  lifted: { transform: [{ translateY: -1 }] },
+  lifted: { transform: [{ translateY: -2 }] },
 });

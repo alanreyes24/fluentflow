@@ -132,7 +132,7 @@ describe('DecksScreen', () => {
     expect(await screen.findByText('Learning steps pending: 1')).toBeTruthy();
     expect(screen.queryByText('All caught up')).toBeNull();
     expect(screen.getByRole('button', { name: 'Study ahead' })).toBeTruthy();
-    expect(screen.getByText('⏱ 1')).toBeTruthy();
+    expect(screen.getByLabelText('Learning steps pending: 1')).toBeTruthy();
   });
 
   it('shows the streak at the top of the deck screen', async () => {

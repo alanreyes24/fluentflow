@@ -17,8 +17,10 @@ import {
   SegmentedControl,
   Spacer,
   Surface,
+  PageHeader,
   useContentStyle,
 } from '../../src/ui/components';
+import { Icon } from '../../src/ui/Icon';
 import { useTheme } from '../../src/ui/theme';
 
 type Filter = 'all' | 'active' | 'suspended' | 'starred';
@@ -101,8 +103,7 @@ export default function CardsScreen() {
         contentContainerStyle={content}
         ListHeaderComponent={
           <View>
-            <Label variant="title">{t('cardLibrary')}</Label>
-            <Spacer size={theme.spacing.md} />
+            <PageHeader title={t('cardLibrary')} subtitle={t('librarySubtitle')} />
             <Field
               label={t('searchCards')}
               hint={t('searchCardsHint')}
@@ -249,7 +250,7 @@ function CardLibraryRow({
       <Surface style={[styles.card, selected ? { borderColor: theme.colors.accent } : null]}>
         <Row gap={theme.spacing.sm} align="center">
           <View style={[styles.checkbox, { borderColor: selected ? theme.colors.accent : theme.colors.border, backgroundColor: selected ? theme.colors.accent : 'transparent' }]}>
-            {selected ? <Label variant="caption" tone="inverse">✓</Label> : null}
+            {selected ? <Icon name="check" size={14} strokeWidth={3} color={theme.colors.accentText} /> : null}
           </View>
           <View style={styles.grow}>
             <Label variant="label" numberOfLines={1}>{card.front}</Label>
@@ -258,7 +259,7 @@ function CardLibraryRow({
           </View>
           <View style={styles.badges}>
             {card.suspended ? <Badge tone="plain">{t('suspendedCards')}</Badge> : null}
-            {card.starred ? <Badge tone="plain">★</Badge> : null}
+            {card.starred ? <Badge tone="plain" icon="star" iconFilled accessibilityLabel={t('starredCards')} /> : null}
             {(card.tags ?? []).slice(0, 2).map((tag) => <Badge key={tag} tone="plain">#{tag}</Badge>)}
           </View>
         </Row>

@@ -7,12 +7,12 @@ import type { ViewStyleProp } from './styles';
 /**
  * Charts, drawn with plain views.
  *
- * No charting library and no SVG: the app renders to iOS, Android, the browser
- * and an Electron window, and a bar is a rectangle in all four. `react-native-svg`
- * would add a native module to a project whose whole desktop story depends on
- * not having one, to draw shapes that flexbox already draws. The cost is that
- * these are bar charts and grids rather than curves, which is the right shape
- * for counts-per-day anyway.
+ * No charting library: the app renders to iOS, Android, the browser and an
+ * Electron window, and a bar is a rectangle in all four, so flexbox already
+ * draws everything a chart here needs. `react-native-svg` is in the project for
+ * the icons (see `Icon.tsx`), but a bar chart drawn in views stays accessible,
+ * themeable and cheap without it. The cost is that these are bar charts and
+ * grids rather than curves, which is the right shape for counts-per-day anyway.
  */
 
 export interface Bar {

@@ -21,6 +21,7 @@ import { BarChart, BreakdownBars, StudyCalendar, type Bar } from '../../src/ui/c
 import {
   Button,
   Chip,
+  PageHeader,
   useContentStyle,
   Divider,
   EmptyState,
@@ -101,7 +102,6 @@ export default function StatsScreen() {
     return (
       <Screen>
         <EmptyState
-          icon="📊"
           title={t('noStatsYet')}
           hint={t('noStatsHint')}
           action={<Button label={t('decks')} onPress={() => router.back()} />}
@@ -120,6 +120,7 @@ export default function StatsScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={[styles.content, content]}>
+        <PageHeader title={t('statistics')} subtitle={t('statsSubtitle')} />
         <SegmentedControl<string>
           options={[
             { value: '7', label: t('range7') },
