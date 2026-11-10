@@ -16,7 +16,7 @@
       "package": "com.fluentflow.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#4f46e5"
+        "backgroundColor": "#27272a"
       }
     },
     "web": {

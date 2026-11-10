@@ -44,8 +44,8 @@ const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256];
  * These four are the only ones an icon needs, and duplicating them here beats
  * importing a React module into a build script.
  */
-const ACCENT = [0x4f, 0x46, 0xe5]; // light `accent`
-const ACCENT_DARK_THEME = [0x81, 0x8c, 0xf8]; // dark `accent`
+const ACCENT = [0x27, 0x27, 0x2a]; // light `accent` — near-black zinc
+const ACCENT_DARK_THEME = [0xd4, 0xd4, 0xd8]; // dark `accent` — light grey
 const CREAM = [0xf6, 0xf6, 0xf7]; // light `background`
 const STANDARD_ICON = { background: ACCENT, ink: CREAM, scale: 0.8 };
 
