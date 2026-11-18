@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
-    "electron": "^44.1.1",
+    "electron": "^45.1.0",
     "electron-builder": "^25.1.8",
     "resedit": "^1.7.2"
   },
