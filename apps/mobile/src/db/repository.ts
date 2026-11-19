@@ -91,8 +91,10 @@ export class Repository {
   // --- decks ---------------------------------------------------------------
 
   async listDecks(userId: string): Promise<Deck[]> {
+    // Spanish decks come first, then Bosnian, each group alphabetical.
     const rows = await this.db.getAllAsync<DeckRow>(
-      'SELECT * FROM decks WHERE userId = ? AND deleted = 0 ORDER BY name COLLATE NOCASE',
+      `SELECT * FROM decks WHERE userId = ? AND deleted = 0
+       ORDER BY CASE language WHEN 'es' THEN 0 WHEN 'bs' THEN 1 ELSE 2 END, name COLLATE NOCASE`,
       userId,
     );
     return rows.map(toDeck);

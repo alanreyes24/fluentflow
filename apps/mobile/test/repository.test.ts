@@ -44,6 +44,17 @@ describe('Repository', () => {
     expect(cards.map((card) => card.front)).toEqual(['hablar', 'comer']);
   });
 
+  it('lists Spanish decks before Bosnian ones, each alphabetical', async () => {
+    const { repository } = context;
+    await repository.createDeck('u1', 'Bosnian', 'bs');
+    await repository.createDeck('u1', 'Spanish Verbs', 'es');
+    await repository.createDeck('u1', 'Animals', 'bs');
+    await repository.createDeck('u1', 'Spanish', 'es');
+
+    const decks = await repository.listDecks('u1');
+    expect(decks.map((deck) => deck.name)).toEqual(['Spanish', 'Spanish Verbs', 'Animals', 'Bosnian']);
+  });
+
   it('searches tags and persists bulk card changes', async () => {
     const { repository } = context;
     const deck = await repository.createDeck('u1', 'Spanish Verbs', 'es');
