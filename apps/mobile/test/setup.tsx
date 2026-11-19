@@ -1,8 +1,8 @@
-import type { ReactElement, ReactNode } from 'react';
+import { useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { render, type RenderOptions } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import type { Deck } from '@fluentflow/core';
+import type { Deck, SettingValues } from '@fluentflow/core';
 import { AppContext, type AppState, type AuthUser } from '../src/state/app';
 import { PreferencesProvider } from '../src/state/preferences';
 import { I18nProvider } from '../src/i18n';
@@ -189,6 +189,9 @@ export function createAppState(options: HarnessOptions = {}): AppState {
     cloudAvailable: options.cloudAvailable ?? true,
     sync: options.sync ?? IDLE_SYNC,
     decks: options.decks ?? [],
+    remoteChanges: 0,
+    settings: {},
+    updateSettings: jest.fn(),
     refreshDecks: jest.fn(async () => {}),
     syncNow: jest.fn(async () => {}),
     signIn: jest.fn(async () => {}),
@@ -211,22 +214,49 @@ export function createAppState(options: HarnessOptions = {}): AppState {
 export async function renderScreen(ui: ReactElement, options: HarnessOptions = {}) {
   const { repository, examples, user, decks, sync, cloudAvailable, ready, error, overrides, ...renderOptions } =
     options;
-  const state = createAppState(options);
+  const holder = { state: createAppState(options) };
+
+  /**
+   * The app context, outermost as in `app/_layout.tsx`. Settings are real
+   * state here, so choosing a theme or language re-renders like the app does;
+   * `state.updateSettings` still records every choice.
+   */
+  function HarnessApp({ children }: { children: ReactNode }) {
+    const [settings, setSettings] = useState<Partial<SettingValues>>(holder.state.settings);
+    const base = holder.state;
+    const value = useMemo<AppState>(
+      () => ({
+        ...base,
+        settings,
+        updateSettings: (changes) => {
+          base.updateSettings(changes);
+          setSettings((current) => ({ ...current, ...changes }));
+        },
+      }),
+      [base, settings],
+    );
+    return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+  }
 
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <SafeAreaProvider initialMetrics={TEST_METRICS}>
-        <I18nProvider>
-          <ThemeProvider>
-            <PreferencesProvider>
-              <AppContext.Provider value={state}>{children}</AppContext.Provider>
-            </PreferencesProvider>
-          </ThemeProvider>
-        </I18nProvider>
+        <HarnessApp>
+          <I18nProvider>
+            <ThemeProvider>
+              <PreferencesProvider>{children}</PreferencesProvider>
+            </ThemeProvider>
+          </I18nProvider>
+        </HarnessApp>
       </SafeAreaProvider>
     );
   }
 
   const result = await render(ui, { wrapper: Wrapper, ...renderOptions });
-  return { ...result, state };
+  /** Re-render with part of the app state changed, as the provider would. */
+  async function updateState(patch: Partial<AppState>) {
+    holder.state = { ...holder.state, ...patch };
+    await result.rerender(ui);
+  }
+  return { ...result, state: holder.state, updateState };
 }

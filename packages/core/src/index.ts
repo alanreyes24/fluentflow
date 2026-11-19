@@ -21,3 +21,4 @@ export * from './anki/collation.js';
 export * from './text/parse.js';
 
 export * from './sync/merge.js';
+export * from './sync/settings.js';

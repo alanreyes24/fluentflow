@@ -23,6 +23,7 @@ import {
   parseCards,
   parseDecks,
   parseReviewEvents,
+  parseSettings,
 } from './validate.ts';
 import { EpochError, StoreUnavailableError, type Store } from './store/types.ts';
 import { desktopBundleManifest, type DesktopBundleManifest } from './desktop-bundle.ts';
@@ -206,6 +207,33 @@ export function createApp({ config, store }: AppDeps): express.Express {
   app.get('/api/sync/pull', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     try {
       res.json(await store.pull(req.userId!, epochOf(queryString(req, 'epoch')), queryString(req, 'since')));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * Account settings (daily goal, theme, interface language).
+   *
+   *   GET /api/settings  → { settings }
+   *   PUT /api/settings  { settings } → { settings }, merged with what is stored
+   *
+   * Each setting carries the time it was chosen and the newer one wins, so a
+   * device can send just what it changed. Not tied to the collection's epoch.
+   */
+  app.get('/api/settings', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      res.json({ settings: await store.getSettings(req.userId!) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.put('/api/settings', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const settings = parseSettings(body.settings);
+      res.json({ settings: await store.mergeSettings(req.userId!, settings) });
     } catch (error) {
       next(error);
     }

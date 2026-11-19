@@ -1,6 +1,8 @@
 import {
   RATING_NAMES,
+  SETTING_KEYS,
   TARGET_LANGUAGES,
+  isSettingValue,
   normalizeCard,
   type RatingName,
   type ReviewEvent,
@@ -8,6 +10,7 @@ import {
   type CardPhase,
   type Deck,
   type TargetLanguage,
+  type UserSettings,
 } from '@fluentflow/core';
 
 /**
@@ -54,6 +57,32 @@ export function parseReviewEvents(input: unknown, userId: string, max = MAX_BATC
     (value, path) => parseReviewEvent(value, userId, path),
     max,
   );
+}
+
+/**
+ * Account settings. Each setting is optional; an unknown one is dropped and a
+ * bad value is refused, so one device cannot store a theme no other device
+ * understands.
+ */
+export function parseSettings(input: unknown): UserSettings {
+  const raw = asObject(input ?? {}, 'settings');
+  const parsed: Record<string, { value: unknown; updatedAt: string }> = {};
+  const errors: string[] = [];
+  for (const key of SETTING_KEYS) {
+    if (raw[key] === undefined || raw[key] === null) continue;
+    const path = `settings.${key}`;
+    try {
+      const entry = asObject(raw[key], path);
+      if (!isSettingValue(key, entry.value)) {
+        throw new ValidationError([`${path}.value is not a valid ${key}.`]);
+      }
+      parsed[key] = { value: entry.value, updatedAt: isoDate(entry.updatedAt, `${path}.updatedAt`) };
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (errors.length > 0) throw new ValidationError(errors);
+  return parsed as UserSettings;
 }
 
 function parseReviewEvent(value: unknown, userId: string, path: string): ReviewEvent {

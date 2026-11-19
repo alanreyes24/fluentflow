@@ -216,6 +216,17 @@ const migrations: Migration[] = [
       ALTER TABLE sync_meta ADD COLUMN cursor TEXT;
     `);
   },
+  // 16 — account settings (daily goal, theme, interface language), synced
+  // like cards instead of kept in per-device storage.
+  async (db) => {
+    await db.execAsync(`
+      CREATE TABLE user_settings (
+        userId   TEXT PRIMARY KEY,
+        data     TEXT NOT NULL DEFAULT '{}',
+        pending  INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+  },
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

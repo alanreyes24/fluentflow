@@ -1,4 +1,4 @@
-import { normalizeCard, type Card, type Deck, type ReviewEvent } from '@fluentflow/core';
+import { normalizeCard, type Card, type Deck, type ReviewEvent, type UserSettings } from '@fluentflow/core';
 import { appConfig } from '../firebase/config';
 import { authApi } from '../firebase/client';
 import { desktopBridge } from '../desktop';
@@ -41,6 +41,18 @@ export interface SyncRemote {
   seed(records: SyncRecords, replaceEpoch?: string | null): Promise<{ epoch: string; cursor: string }>;
   push(epoch: string, records: SyncRecords): Promise<PushResult>;
   pull(epoch: string, since?: string): Promise<SyncChanges>;
+  /** The account's settings as the server holds them. */
+  getSettings(): Promise<UserSettings>;
+  /** Send settings; the server merges them and answers with the result. */
+  putSettings(settings: UserSettings): Promise<UserSettings>;
+}
+
+/** The server predates an endpoint this build uses. */
+export class EndpointMissingError extends Error {
+  constructor(path: string) {
+    super(`The sync server does not support ${path} yet.`);
+    this.name = 'EndpointMissingError';
+  }
 }
 
 /**
@@ -89,6 +101,7 @@ export function createSyncRemote(baseUrl: string): SyncRemote {
     if (response.status === 409 && body?.error === 'epoch_mismatch') {
       throw new EpochMismatchError(body.epoch ?? null);
     }
+    if (response.status === 404) throw new EndpointMissingError(path);
     throw new Error(body?.message ?? `Sync failed (HTTP ${response.status}).`);
   }
 
@@ -125,6 +138,18 @@ export function createSyncRemote(baseUrl: string): SyncRemote {
       const query = new URLSearchParams({ epoch, ...(since ? { since } : {}) });
       const changes = await request<SyncChanges>(`/api/sync/pull?${query}`);
       return { ...changes, cards: changes.cards.map(normalizeCard) };
+    },
+
+    async getSettings() {
+      return (await request<{ settings: UserSettings }>('/api/settings')).settings ?? {};
+    },
+
+    async putSettings(settings) {
+      const result = await request<{ settings: UserSettings }>('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ settings }),
+      });
+      return result.settings ?? {};
     },
   };
 }

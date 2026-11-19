@@ -1,5 +1,6 @@
+import type { UserSettings } from '@fluentflow/core';
 import type { Repository } from '../db/repository';
-import { EpochMismatchError, type SyncRemote } from './remote';
+import { EndpointMissingError, EpochMismatchError, type SyncRemote } from './remote';
 
 /**
  * The sync engine.
@@ -17,7 +18,10 @@ import { EpochMismatchError, type SyncRemote } from './remote';
  *     and pushed; the server keeps the newer of its copy and ours and hands
  *     back its copy when ours lost. Then everything that changed on the server
  *     since the last pull is applied over the local copy.
- *  3. **One cycle at a time.** Triggers overlap — launch, a review, the app
+ *  3. **Settings ride along.** The account's settings (daily goal, theme,
+ *     interface language) are exchanged on every cycle too, through their own
+ *     endpoint: send them if changed here, otherwise fetch the server's.
+ *  4. **One cycle at a time.** Triggers overlap — launch, a review, the app
  *     coming back to the foreground, the poll — so a running cycle coalesces
  *     them into a single re-run. `markSynced` is conditional on
  *     `lastModified`, so a review made during the round trip stays queued.
@@ -47,6 +51,8 @@ export interface SyncEngineOptions {
   onStatus: (status: SyncStatus) => void;
   /** Called after server cards have been written locally. */
   onRemoteCardsApplied?: () => Promise<void> | void;
+  /** Called when the server's settings changed this device's copy. */
+  onRemoteSettingsApplied?: (settings: UserSettings) => void;
   /** How often to look for local changes to push. */
   pushIntervalMs?: number;
   /** How often to pull when nothing local has changed. */
@@ -64,6 +70,9 @@ export class SyncEngine {
   private readonly canSeed: boolean;
   private readonly onStatus: (status: SyncStatus) => void;
   private readonly onRemoteCardsApplied?: () => Promise<void> | void;
+  private readonly onRemoteSettingsApplied?: (settings: UserSettings) => void;
+  /** Set once the server turns out not to have the settings endpoint. */
+  private settingsUnsupported = false;
   private readonly pushIntervalMs: number;
   private readonly pullIntervalMs: number;
 
@@ -85,6 +94,7 @@ export class SyncEngine {
     this.canSeed = options.canSeed;
     this.onStatus = options.onStatus;
     this.onRemoteCardsApplied = options.onRemoteCardsApplied;
+    this.onRemoteSettingsApplied = options.onRemoteSettingsApplied;
     this.pushIntervalMs = options.pushIntervalMs ?? DEFAULT_PUSH_INTERVAL_MS;
     this.pullIntervalMs = options.pullIntervalMs ?? DEFAULT_PULL_INTERVAL_MS;
   }
@@ -156,6 +166,7 @@ export class SyncEngine {
         waiting = outcome.waiting;
         if (outcome.cardsApplied) await this.onRemoteCardsApplied?.();
       } while (this.rerunRequested && !this.disposed);
+      await this.exchangeSettings(this.remote);
 
       await this.refreshPendingCount();
       if (waiting) return this.emit({ state: 'waiting', error: null });
@@ -250,6 +261,29 @@ export class SyncEngine {
     await this.repository.replaceWithServerCopy(this.userId, everything);
     await this.repository.setSyncMeta(this.userId, { epoch: serverEpoch, cursor: everything.cursor });
     return { cardsApplied: true, waiting: false };
+  }
+
+  /**
+   * Send this device's settings if it changed any, otherwise fetch the
+   * server's. Either way the answer is the server's merged copy, which is
+   * folded into ours.
+   */
+  private async exchangeSettings(remote: SyncRemote): Promise<void> {
+    if (this.settingsUnsupported || this.disposed) return;
+    try {
+      const pending = await this.repository.pendingSettings(this.userId);
+      const server = pending ? await remote.putSettings(pending) : await remote.getSettings();
+      const applied = await this.repository.applyServerSettings(this.userId, server);
+      if (applied.changed && !this.disposed) this.onRemoteSettingsApplied?.(applied.settings);
+    } catch (error) {
+      // A server that has not been updated yet must not stop cards syncing;
+      // settings stay queued here until it has the endpoint.
+      if (error instanceof EndpointMissingError) {
+        this.settingsUnsupported = true;
+        return;
+      }
+      throw error;
+    }
   }
 
   private async refreshPendingCount(): Promise<void> {

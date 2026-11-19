@@ -81,6 +81,14 @@ class LazyPostgresStore implements Store {
     return (await this.resolve()).pull(...args);
   }
 
+  async getSettings(...args: Parameters<Store['getSettings']>) {
+    return (await this.resolve()).getSettings(...args);
+  }
+
+  async mergeSettings(...args: Parameters<Store['mergeSettings']>) {
+    return (await this.resolve()).mergeSettings(...args);
+  }
+
   async check() {
     return (await this.resolve()).check();
   }
@@ -102,6 +110,12 @@ class UnavailableStore implements Store {
     throw new StoreUnavailableError();
   }
   async pull(): Promise<never> {
+    throw new StoreUnavailableError();
+  }
+  async getSettings(): Promise<never> {
+    throw new StoreUnavailableError();
+  }
+  async mergeSettings(): Promise<never> {
     throw new StoreUnavailableError();
   }
   async check(): Promise<never> {

@@ -377,6 +377,52 @@ describe('Repository', () => {
     expect(await repository.listDecks('real-user')).toHaveLength(1);
   });
 
+  it('brings settings chosen before sign-in along, unless the account has its own', async () => {
+    const { repository } = context;
+    await repository.saveSettings('local', { theme: 'dark' });
+    await repository.claimLocalData('local', 'real-user');
+    expect(await repository.getSettings('real-user')).toMatchObject({ theme: { value: 'dark' } });
+    expect(await repository.getSettings('local')).toEqual({});
+
+    await repository.saveSettings('local', { theme: 'light' });
+    await repository.claimLocalData('local', 'real-user');
+    expect(await repository.getSettings('real-user')).toMatchObject({ theme: { value: 'dark' } });
+  });
+
+  it('keeps settings queued until the server has every choice made here', async () => {
+    const { repository } = context;
+    const at = (minute: number) => new Date(Date.UTC(2026, 10, 18, 10, minute));
+    expect(await repository.getSettings('u1')).toEqual({});
+    await repository.saveSettings('u1', { dailyGoal: 40 }, at(0));
+    await repository.saveSettings('u1', { theme: 'dark' }, at(1));
+    expect(await repository.countPending('u1')).toBe(1);
+    const sent = await repository.pendingSettings('u1');
+    expect(sent).toEqual({
+      dailyGoal: { value: 40, updatedAt: at(0).toISOString() },
+      theme: { value: 'dark', updatedAt: at(1).toISOString() },
+    });
+
+    // The server answers with an older goal from elsewhere and our theme
+    // missing (sent before the theme was chosen): the theme stays queued.
+    const partial = await repository.applyServerSettings('u1', {
+      dailyGoal: { value: 10, updatedAt: at(-5).toISOString() },
+      uiLanguage: { value: 'bs', updatedAt: at(-5).toISOString() },
+    });
+    expect(partial.changed).toBe(true);
+    expect(await repository.getSettings('u1')).toMatchObject({
+      dailyGoal: { value: 40 },
+      theme: { value: 'dark' },
+      uiLanguage: { value: 'bs' },
+    });
+    expect(await repository.countPending('u1')).toBe(1);
+
+    // Once the server holds everything, nothing is pending.
+    const merged = await repository.getSettings('u1');
+    const done = await repository.applyServerSettings('u1', merged);
+    expect(done.changed).toBe(false);
+    expect(await repository.countPending('u1')).toBe(0);
+  });
+
   /**
    * The statistics queries.
    *

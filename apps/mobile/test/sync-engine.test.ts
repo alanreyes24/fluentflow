@@ -1,6 +1,6 @@
-import { resolveConflict, type Card, type Deck, type ReviewEvent } from '@fluentflow/core';
+import { mergeSettings, resolveConflict, type Card, type Deck, type ReviewEvent, type UserSettings } from '@fluentflow/core';
 import { SyncEngine, type SyncStatus } from '../src/sync/engine';
-import { EpochMismatchError, type SyncRecords, type SyncRemote } from '../src/sync/remote';
+import { EndpointMissingError, EpochMismatchError, type SyncRecords, type SyncRemote } from '../src/sync/remote';
 import type { Repository } from '../src/db/repository';
 import { createTestRepository } from './fakes/database';
 
@@ -17,6 +17,9 @@ class FakeServer {
   decks = new Map<string, { record: Deck; version: number }>();
   cards = new Map<string, { record: Card; version: number }>();
   events = new Map<string, { record: ReviewEvent; version: number }>();
+  settings: UserSettings = {};
+  /** An older server, deployed before the settings endpoint existed. */
+  settingsMissing = false;
 
   reseed(records: SyncRecords): string {
     this.seeds++;
@@ -88,6 +91,15 @@ class FakeServer {
           cursor: String(this.version),
         };
       },
+      getSettings: async () => {
+        if (this.settingsMissing) throw new EndpointMissingError('/api/settings');
+        return this.settings;
+      },
+      putSettings: async (settings) => {
+        if (this.settingsMissing) throw new EndpointMissingError('/api/settings');
+        this.settings = mergeSettings(this.settings, settings);
+        return this.settings;
+      },
     };
   }
 }
@@ -101,6 +113,7 @@ const USER = 'u1';
 async function setup(server: FakeServer, canSeed: boolean) {
   const { repository, close } = await createTestRepository();
   const statuses: SyncStatus[] = [];
+  const settingsApplied: UserSettings[] = [];
   const engine = new SyncEngine({
     repository,
     userId: USER,
@@ -108,12 +121,14 @@ async function setup(server: FakeServer, canSeed: boolean) {
     remote: async () => server.remote(),
     canSeed,
     onStatus: (status) => statuses.push(status),
+    onRemoteSettingsApplied: (settings) => settingsApplied.push(settings),
     pushIntervalMs: 60_000_000,
   });
   return {
     repository,
     engine,
     statuses,
+    settingsApplied,
     close: async () => {
       engine.dispose();
       await close();
@@ -271,6 +286,55 @@ describe('sync engine', () => {
       expect((await phone.repository.listDecks(USER)).map((d) => d.name)).toEqual(['New']);
     } finally {
       await phone.close();
+    }
+  });
+
+  it('settings chosen on one device reach the other, one setting at a time', async () => {
+    const server = new FakeServer();
+    const desktop = await setup(server, true);
+    const phone = await setup(server, false);
+    try {
+      await desktop.engine.start();
+      await phone.engine.start();
+
+      await desktop.repository.saveSettings(USER, { theme: 'dark' }, new Date('2026-11-18T10:00:00Z'));
+      await phone.repository.saveSettings(USER, { dailyGoal: 40 }, new Date('2026-11-18T10:05:00Z'));
+      expect(await phone.repository.countPending(USER)).toBe(1);
+
+      await desktop.engine.sync();
+      await phone.engine.sync();
+      await desktop.engine.sync();
+
+      const expected = {
+        theme: { value: 'dark', updatedAt: '2026-11-18T10:00:00.000Z' },
+        dailyGoal: { value: 40, updatedAt: '2026-11-18T10:05:00.000Z' },
+      };
+      expect(server.settings).toEqual(expected);
+      expect(await desktop.repository.getSettings(USER)).toEqual(expected);
+      expect(await phone.repository.getSettings(USER)).toEqual(expected);
+      expect(await phone.repository.countPending(USER)).toBe(0);
+      expect(phone.settingsApplied.at(-1)).toEqual(expected);
+      expect(desktop.settingsApplied.at(-1)).toEqual(expected);
+    } finally {
+      await desktop.close();
+      await phone.close();
+    }
+  });
+
+  it('a server without the settings endpoint still syncs cards, and keeps settings queued', async () => {
+    const server = new FakeServer();
+    server.settingsMissing = true;
+    const desktop = await setup(server, true);
+    try {
+      await desktop.repository.saveSettings(USER, { uiLanguage: 'bs' });
+      await studied(desktop.repository);
+      await desktop.engine.start();
+
+      expect(server.cards.size).toBe(2);
+      expect(desktop.statuses.at(-1)).toMatchObject({ state: 'idle', pending: 1 });
+      expect(await desktop.repository.pendingSettings(USER)).toMatchObject({ uiLanguage: { value: 'bs' } });
+    } finally {
+      await desktop.close();
     }
   });
 });

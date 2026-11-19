@@ -153,8 +153,8 @@ describe('SettingsScreen', () => {
     });
   });
 
-  it('changes the appearance preference', async () => {
-    await renderScreen(<SettingsScreen />, { repository });
+  it('changes the appearance preference, saving it with the account', async () => {
+    const { state } = await renderScreen(<SettingsScreen />, { repository });
 
     // All three options are offered, and "System" is the default.
     for (const label of ['System', 'Light', 'Dark']) {
@@ -162,5 +162,12 @@ describe('SettingsScreen', () => {
     }
     await fireEvent.press(screen.getByRole('button', { name: 'Dark' }));
     expect(screen.getByRole('button', { name: 'Dark' })).toBeTruthy();
+    // Synced like cards, not kept in this device's storage.
+    expect(state.updateSettings).toHaveBeenCalledWith({ theme: 'dark' });
+  });
+
+  it('shows the theme the account chose on another device', async () => {
+    await renderScreen(<SettingsScreen />, { repository, overrides: { settings: { theme: 'dark' } } });
+    expect(screen.getByRole('button', { name: 'Dark', selected: true })).toBeTruthy();
   });
 });

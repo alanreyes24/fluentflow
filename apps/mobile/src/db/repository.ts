@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import {
   EMPTY_RATING_COUNTS,
   RATING_NAMES,
+  SETTING_KEYS,
   addCollectionDays,
   buildStudyQueue,
   collectionDayKey,
@@ -13,8 +14,11 @@ import {
   dueCards,
   forecast,
   isInterdayLearningCard,
+  isSettingValue,
+  mergeSettings,
   recomputeCardCounts,
   reviewCard,
+  sameSettings,
   schedulingStateFor,
   softDelete,
   touch,
@@ -28,9 +32,13 @@ import {
   type RatingCounts,
   type RatingName,
   type ReviewEvent,
+  type SettingEntry,
+  type SettingKey,
+  type SettingValues,
   type StudyQueue,
   type StudyDay,
   type TargetLanguage,
+  type UserSettings,
 } from '@fluentflow/core';
 
 /**
@@ -718,7 +726,8 @@ export class Repository {
       `SELECT
          (SELECT COUNT(*) FROM decks WHERE userId = ?1 AND syncStatus = 'pending') +
          (SELECT COUNT(*) FROM cards WHERE userId = ?1 AND syncStatus = 'pending') +
-         (SELECT COUNT(*) FROM review_log WHERE userId = ?1 AND syncStatus = 'pending') AS count`,
+         (SELECT COUNT(*) FROM review_log WHERE userId = ?1 AND syncStatus = 'pending') +
+         (SELECT COUNT(*) FROM user_settings WHERE userId = ?1 AND pending = 1) AS count`,
       userId,
     );
     return row?.count ?? 0;
@@ -829,6 +838,76 @@ export class Repository {
     });
   }
 
+  // --- account settings ----------------------------------------------------
+
+  /** This device's copy of the account's settings; only chosen ones are present. */
+  async getSettings(userId: string): Promise<UserSettings> {
+    const row = await this.db.getFirstAsync<{ data: string }>(
+      'SELECT data FROM user_settings WHERE userId = ?',
+      userId,
+    );
+    return row ? parseSettingsJson(row.data) : {};
+  }
+
+  /** Record settings chosen on this device, to be pushed on the next sync. */
+  async saveSettings(
+    userId: string,
+    changes: Partial<SettingValues>,
+    now: Date = new Date(),
+  ): Promise<UserSettings> {
+    const updatedAt = now.toISOString();
+    let saved: UserSettings = {};
+    await this.transaction(async () => {
+      const current = await this.getSettings(userId);
+      const patch: Partial<Record<SettingKey, SettingEntry<unknown>>> = {};
+      for (const key of SETTING_KEYS) {
+        if (changes[key] !== undefined) patch[key] = { value: changes[key], updatedAt };
+      }
+      saved = { ...current, ...(patch as UserSettings) };
+      await this.db.runAsync(
+        `INSERT INTO user_settings (userId, data, pending) VALUES (?1, ?2, 1)
+         ON CONFLICT (userId) DO UPDATE SET data = ?2, pending = 1`,
+        userId,
+        JSON.stringify(saved),
+      );
+    });
+    return saved;
+  }
+
+  /** The settings waiting to upload, or null when the server has them all. */
+  async pendingSettings(userId: string): Promise<UserSettings | null> {
+    const row = await this.db.getFirstAsync<{ data: string }>(
+      'SELECT data FROM user_settings WHERE userId = ? AND pending = 1',
+      userId,
+    );
+    return row ? parseSettingsJson(row.data) : null;
+  }
+
+  /**
+   * Merge the server's settings into this device's copy.
+   *
+   * Still pending afterwards only if this device holds a choice the server
+   * does not — one made while the request was in flight, say.
+   */
+  async applyServerSettings(userId: string, server: UserSettings): Promise<{ changed: boolean; settings: UserSettings }> {
+    let changed = false;
+    let merged: UserSettings = {};
+    await this.transaction(async () => {
+      const local = await this.getSettings(userId);
+      merged = mergeSettings(local, server);
+      changed = !sameSettings(local, merged);
+      const pending = sameSettings(merged, server) ? 0 : 1;
+      await this.db.runAsync(
+        `INSERT INTO user_settings (userId, data, pending) VALUES (?1, ?2, ?3)
+         ON CONFLICT (userId) DO UPDATE SET data = ?2, pending = ?3`,
+        userId,
+        JSON.stringify(merged),
+        pending,
+      );
+    });
+    return { changed, settings: merged };
+  }
+
   async getSyncMeta(userId: string): Promise<SyncMeta> {
     const row = await this.db.getFirstAsync<{
       lastPulledAt: string | null;
@@ -886,6 +965,15 @@ export class Repository {
         toUserId,
         fromUserId,
       );
+      // Settings chosen before sign-in come along, unless the account already
+      // has its own on this device.
+      await this.db.runAsync(
+        `INSERT OR IGNORE INTO user_settings (userId, data, pending)
+         SELECT ?, data, 1 FROM user_settings WHERE userId = ?`,
+        toUserId,
+        fromUserId,
+      );
+      await this.db.runAsync('DELETE FROM user_settings WHERE userId = ?', fromUserId);
       moved = decks.changes + cards.changes + reviews.changes;
     });
     return moved;
@@ -1186,6 +1274,23 @@ function toReviewEvent(row: ReviewEventRow): ReviewEvent {
     reviewedAt: row.reviewedAt,
     syncStatus: row.syncStatus as ReviewEvent['syncStatus'],
   };
+}
+
+/** Stored settings, keeping only entries that are still valid. */
+function parseSettingsJson(value: string): UserSettings {
+  try {
+    const parsed = JSON.parse(value) as Record<string, { value?: unknown; updatedAt?: unknown }> | null;
+    const settings: Partial<Record<SettingKey, SettingEntry<unknown>>> = {};
+    for (const key of SETTING_KEYS) {
+      const entry = parsed?.[key];
+      if (entry && typeof entry.updatedAt === 'string' && isSettingValue(key, entry.value)) {
+        settings[key] = { value: entry.value, updatedAt: entry.updatedAt };
+      }
+    }
+    return settings as UserSettings;
+  } catch {
+    return {};
+  }
 }
 
 function parseJsonArray(value: string): string[] {

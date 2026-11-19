@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { Card, Deck, ReviewEvent } from '@fluentflow/core';
-import { resolveConflict } from '@fluentflow/core';
+import type { Card, Deck, ReviewEvent, UserSettings } from '@fluentflow/core';
+import { mergeSettings, resolveConflict } from '@fluentflow/core';
 import {
   EpochError,
   parseCursor,
@@ -31,6 +31,7 @@ interface UserData {
 
 export class MemoryStore implements Store {
   private readonly users = new Map<string, UserData>();
+  private readonly settings = new Map<string, UserSettings>();
 
   async getEpoch(userId: string): Promise<string | null> {
     return this.users.get(userId)?.epoch ?? null;
@@ -84,10 +85,21 @@ export class MemoryStore implements Store {
     };
   }
 
+  async getSettings(userId: string): Promise<UserSettings> {
+    return this.settings.get(userId) ?? {};
+  }
+
+  async mergeSettings(userId: string, incoming: UserSettings): Promise<UserSettings> {
+    const merged = mergeSettings(this.settings.get(userId) ?? {}, incoming);
+    this.settings.set(userId, merged);
+    return merged;
+  }
+
   async check(): Promise<void> {}
 
   async close(): Promise<void> {
     this.users.clear();
+    this.settings.clear();
   }
 
   private current(userId: string, epoch: string): UserData {

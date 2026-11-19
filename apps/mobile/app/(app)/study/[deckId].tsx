@@ -1,12 +1,10 @@
 import { StudyChat } from '../../../src/ui/StudyChat';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Animated, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   RATING_NAMES,
   RATINGS,
-  collectionDayKey,
   fuzzRandomForCard,
   review,
   schedulingStateFor,
@@ -17,7 +15,7 @@ import {
 import { useI18n } from '../../../src/i18n';
 import { normalizeCardFront, normalizedFrontFrom } from '../../../src/ai/card-fronts';
 import { useApp } from '../../../src/state/app';
-import type { Repository } from '../../../src/db/repository';
+import { reconcileStudyQueue } from '../../../src/state/study-session';
 import type { ExampleResult } from '../../../src/ai/service';
 import { lookUpMeanings, lookupSources } from '../../../src/ai/desktop';
 import {
@@ -40,20 +38,6 @@ import { useCardGestures } from '../../../src/ui/useCardGestures';
 import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 import { Icon } from '../../../src/ui/Icon';
 import { useLayout, useTheme } from '../../../src/ui/theme';
-
-const STUDY_SESSION_KEY = 'fluentflow.studySession';
-
-interface SavedStudySession {
-  deckId: string;
-  studyAhead: boolean;
-  /** Collection day the session was saved on; a new day starts a new queue. */
-  day: string;
-  cardIds: string[];
-  index: number;
-  reviewed: number;
-  lapses: number;
-  revealed: boolean;
-}
 
 /**
  * The study session.
@@ -83,7 +67,7 @@ export default function StudyScreen() {
   const { t } = useI18n();
   const theme = useTheme();
   const { wide, compact } = useLayout();
-  const { repository, examples: exampleService, refreshDecks, user } = useApp();
+  const { repository, examples: exampleService, refreshDecks, user, remoteChanges } = useApp();
 
   const [deck, setDeck] = useState<Deck | null>(null);
   const [queue, setQueue] = useState<Card[]>([]);
@@ -120,8 +104,11 @@ export default function StudyScreen() {
 
     (async () => {
       const loadedDeck = await repository.getDeck(deckId);
-      const saved = await restoreStudySession(repository, deckId, studyAhead);
-      const due = saved?.queue ?? (studyAhead
+      // The queue always comes from the cards themselves, which sync keeps
+      // equal to the server's. Nothing about a session is kept on the device:
+      // a snapshot saved here would not know about reviews made on another
+      // device and would replay cards already done today.
+      const due = studyAhead
         ? await repository.upcomingCards(deckId)
         : await repository.dueCards(
             deckId,
@@ -129,14 +116,14 @@ export default function StudyScreen() {
             200,
             loadedDeck ? loadedDeck.newCardsPerDay : 20,
             loadedDeck ? loadedDeck.maxReviewsPerDay : 50,
-          ));
+          );
       if (cancelled) return;
       setDeck(loadedDeck);
       setQueue(due);
-      setIndex(saved?.index ?? 0);
-      setReviewed(saved?.reviewed ?? 0);
-      setLapses(saved?.lapses ?? 0);
-      setRevealed(saved?.revealed ?? false);
+      setIndex(0);
+      setReviewed(0);
+      setLapses(0);
+      setRevealed(false);
       setLoading(false);
     })();
 
@@ -145,28 +132,51 @@ export default function StudyScreen() {
     };
   }, [repository, deckId, studyAhead]);
 
-  // A route change, browser refresh, or Electron restart should not make the
-  // learner hunt for their place. Store only ids and reload current rows when
-  // resuming, so an answer synced from another device is never overwritten by
-  // an old in-memory card snapshot.
+  // Another device's reviews can land while this screen is open (the desktop
+  // window left on a deck, a tab in the background). Drop the cards they
+  // answered from what is left of the queue, and take the fresh rows for the
+  // rest, so a rating here never starts from a stale copy.
+  const sessionRef = useRef({ queue, index, revealed });
   useEffect(() => {
-    if (loading || !deckId) return;
-    if (!card) {
-      void AsyncStorage.removeItem(STUDY_SESSION_KEY);
-      return;
-    }
-    const snapshot: SavedStudySession = {
-      deckId,
-      studyAhead,
-      day: collectionDayKey(),
-      cardIds: queue.map((item) => item.id),
-      index,
-      reviewed,
-      lapses,
-      revealed,
-    };
-    void AsyncStorage.setItem(STUDY_SESSION_KEY, JSON.stringify(snapshot));
-  }, [loading, deckId, studyAhead, queue, index, reviewed, lapses, revealed, card]);
+    sessionRef.current = { queue, index, revealed };
+  }, [queue, index, revealed]);
+  const seenRemoteChanges = useRef(remoteChanges);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => {
+    if (seenRemoteChanges.current === remoteChanges) return;
+    // Until the first queue is in, there is nothing to reconcile; the load
+    // reads SQLite after this change anyway or the next effect run catches it.
+    if (loading || !repository || !deck) return;
+    seenRemoteChanges.current = remoteChanges;
+    if (studyAhead) return;
+    const cancelled = () => !mounted.current;
+    void (async () => {
+      // A rating can advance the queue during the reads; start again from the
+      // new position rather than apply an answer computed for the old one.
+      for (let attempt = 0; attempt < 3 && !cancelled(); attempt += 1) {
+        const before = sessionRef.current;
+        const next = await reconcileStudyQueue(repository, deck, before.queue, before.index, {
+          keepCurrent: before.revealed,
+        });
+        if (cancelled()) return;
+        const now = sessionRef.current;
+        if (now.queue !== before.queue || now.index !== before.index) continue;
+        if (!next) return;
+        const currentId = before.queue[before.index]?.id;
+        if (next[before.index]?.id !== currentId) {
+          setRevealed(false);
+          setExamples(null);
+          setToolsOpen(false);
+          setEditing(false);
+        }
+        setQueue(next);
+        return;
+      }
+    })().catch((error) => {
+      if (!cancelled()) setToast(error instanceof Error ? error.message : String(error));
+    });
+  }, [remoteChanges, loading, studyAhead, repository, deck]);
 
   // Keep the model working a few cards ahead of the user. The window is
   // re-primed on every advance rather than set up once, so it follows a queue
@@ -1206,46 +1216,6 @@ interface UndoState {
   index: number;
   reviewed: number;
   lapses: number;
-}
-
-async function restoreStudySession(
-  repository: Repository,
-  deckId: string,
-  studyAhead: boolean,
-): Promise<{ queue: Card[]; index: number; reviewed: number; lapses: number; revealed: boolean } | null> {
-  try {
-    const raw = await AsyncStorage.getItem(STUDY_SESSION_KEY);
-    if (!raw) return null;
-    const saved = JSON.parse(raw) as Partial<SavedStudySession>;
-    const savedIndex = saved.index;
-    // A session left unfinished yesterday is not today's queue: its leftover
-    // cards were chosen under yesterday's limits, and resuming it would hide
-    // today's new-card and review allowances until those leftovers are done.
-    if (
-      saved.deckId !== deckId ||
-      saved.studyAhead !== studyAhead ||
-      saved.day !== collectionDayKey() ||
-      !Array.isArray(saved.cardIds) ||
-      typeof savedIndex !== 'number' ||
-      !Number.isInteger(savedIndex) ||
-      savedIndex < 0
-    ) return null;
-
-    const rows = await Promise.all(saved.cardIds.map((id) => repository.getCard(id)));
-    const queue = rows.filter((card): card is Card => Boolean(card && !card.deleted && !card.suspended));
-    if (queue.length === 0 || savedIndex >= queue.length) return null;
-    return {
-      queue,
-      index: savedIndex,
-      reviewed: Math.max(0, Number(saved.reviewed) || 0),
-      lapses: Math.max(0, Number(saved.lapses) || 0),
-      revealed: saved.revealed === true,
-    };
-  } catch {
-    // A malformed or interrupted storage write is never a reason to block a
-    // normal study queue. The next state update replaces it with a clean one.
-    return null;
-  }
 }
 
 const styles = StyleSheet.create({

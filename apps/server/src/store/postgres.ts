@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { Card, Deck, ReviewEvent } from '@fluentflow/core';
-import { normalizeCard, resolveConflict } from '@fluentflow/core';
+import type { Card, Deck, ReviewEvent, UserSettings } from '@fluentflow/core';
+import { mergeSettings, normalizeCard, resolveConflict } from '@fluentflow/core';
 import {
   EpochError,
   parseCursor,
@@ -80,6 +80,12 @@ const SCHEMA = `
     PRIMARY KEY (user_id, event_id)
   );
   CREATE INDEX IF NOT EXISTS review_events_user_version ON review_events (user_id, version);
+
+  CREATE TABLE IF NOT EXISTS user_settings (
+    user_id     text PRIMARY KEY,
+    data        jsonb NOT NULL,
+    updated_at  timestamptz NOT NULL DEFAULT now()
+  );
 `;
 
 export class PostgresStore implements Store {
@@ -192,6 +198,38 @@ export class PostgresStore implements Store {
         reviewEvents: await read<ReviewEvent>('review_events'),
         cursor: String(Number(user.version)),
       };
+    });
+  }
+
+  async getSettings(userId: string): Promise<UserSettings> {
+    await this.migrate();
+    const { rows } = await this.db.query<{ data: UserSettings }>(
+      'SELECT data FROM user_settings WHERE user_id = $1',
+      [userId],
+    );
+    return rows[0]?.data ?? {};
+  }
+
+  async mergeSettings(userId: string, incoming: UserSettings): Promise<UserSettings> {
+    await this.migrate();
+    return this.db.transaction(async (tx) => {
+      // Make sure the row exists, then lock it, so two devices saving at once
+      // merge one after the other instead of one overwriting the other.
+      await tx.query(
+        `INSERT INTO user_settings (user_id, data) VALUES ($1, '{}'::jsonb)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [userId],
+      );
+      const { rows } = await tx.query<{ data: UserSettings }>(
+        'SELECT data FROM user_settings WHERE user_id = $1 FOR UPDATE',
+        [userId],
+      );
+      const merged = mergeSettings(rows[0]?.data ?? {}, incoming);
+      await tx.query(
+        'UPDATE user_settings SET data = $2::jsonb, updated_at = now() WHERE user_id = $1',
+        [userId, JSON.stringify(merged)],
+      );
+      return merged;
     });
   }
 

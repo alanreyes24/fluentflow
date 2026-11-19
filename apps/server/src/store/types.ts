@@ -1,4 +1,4 @@
-import type { Card, Deck, ReviewEvent } from '@fluentflow/core';
+import type { Card, Deck, ReviewEvent, UserSettings } from '@fluentflow/core';
 
 /**
  * Persistence contract for the sync API.
@@ -53,6 +53,13 @@ export interface Store {
    * Throws {@link EpochError} unless `epoch` is the current one.
    */
   pull(userId: string, epoch: string, since?: string): Promise<SyncChanges>;
+  /**
+   * The user's account settings. Kept apart from the collection: they need no
+   * seed, and re-seeding the collection does not reset them.
+   */
+  getSettings(userId: string): Promise<UserSettings>;
+  /** Merge `incoming` into the stored settings (newest per setting) and return the result. */
+  mergeSettings(userId: string, incoming: UserSettings): Promise<UserSettings>;
   /** Resolves when the store can serve requests; rejects with why it cannot. */
   check(): Promise<void>;
   close(): Promise<void>;

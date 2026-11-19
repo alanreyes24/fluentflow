@@ -11,7 +11,13 @@ import type { ReactNode } from 'react';
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite';
 import NetInfo from '@react-native-community/netinfo';
 import { AppState as NativeAppState } from 'react-native';
-import type { Deck } from '@fluentflow/core';
+import {
+  SETTING_KEYS,
+  type Deck,
+  type SettingKey,
+  type SettingValues,
+  type UserSettings,
+} from '@fluentflow/core';
 import { DATABASE_NAME, migrate } from '../db/schema';
 import { Repository } from '../db/repository';
 import { normalizeExistingCards } from '../ai/card-fronts';
@@ -47,6 +53,19 @@ export interface AppState {
   cloudAvailable: boolean;
   sync: SyncStatus;
   decks: Deck[];
+  /**
+   * Bumped each time sync writes another device's cards into SQLite, so a
+   * screen holding cards in memory (the study queue) knows to re-read them.
+   */
+  remoteChanges: number;
+  /**
+   * The account's settings — daily goal, theme, interface language — as far
+   * as anyone has chosen them; a missing one means "use the default". They
+   * are synced like cards, so every device shows the same choices.
+   */
+  settings: Partial<SettingValues>;
+  /** Choose settings. Saved with the account and pushed on the next sync. */
+  updateSettings: (changes: Partial<SettingValues>) => void;
   /** Re-read decks from SQLite. Called after any mutation. */
   refreshDecks: () => Promise<void>;
   syncNow: () => Promise<void>;
@@ -71,6 +90,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [authResolved, setAuthResolved] = useState(!isCloudEnabled);
   const [sync, setSync] = useState<SyncStatus>(IDLE_SYNC);
   const [decks, setDecks] = useState<Deck[]>([]);
+  const [remoteChanges, setRemoteChanges] = useState(0);
+  // The signed-in account's settings, and whose they are. Before anyone has
+  // signed in, choices (the sign-in screen's language, say) are held in
+  // memory and saved to the account once there is one.
+  const [accountSettings, setAccountSettings] = useState<{
+    userId: string;
+    values: Partial<SettingValues>;
+  } | null>(null);
+  const [unsavedSettings, setUnsavedSettings] = useState<Partial<SettingValues>>({});
   const [error, setError] = useState<string | null>(null);
 
   const engineRef = useRef<SyncEngine | null>(null);
@@ -157,6 +185,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDecks(await repository.listDecks(user.id));
   }, [repository, user]);
 
+  // Load the account's settings from this device's copy. Choices made before
+  // sign-in fill only what the account has not chosen itself.
+  useEffect(() => {
+    if (!repository || !user) return;
+    let cancelled = false;
+    void (async () => {
+      const stored = settingValues(await repository.getSettings(user.id));
+      const carried = Object.fromEntries(
+        Object.entries(unsavedSettings).filter(([key]) => stored[key as SettingKey] === undefined),
+      ) as Partial<SettingValues>;
+      const values = Object.keys(carried).length > 0
+        ? settingValues(await repository.saveSettings(user.id, carried))
+        : stored;
+      if (!cancelled) setAccountSettings({ userId: user.id, values });
+    })().catch((cause) => {
+      console.warn('[fluentflow] settings could not be loaded:', cause);
+      if (!cancelled) setAccountSettings({ userId: user.id, values: {} });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Unsaved choices are read once, when the account arrives; including them
+    // would re-run this on every choice made afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repository, user]);
+
   // 3. Start a sync engine for whoever is signed in, and stop it when they
   //    change. Anonymous users get an engine too — it keeps the pending count
   //    accurate so the UI can say what would upload once they sign in.
@@ -176,7 +230,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // other device adopts what the server has.
       canSeed: isInstalledDesktopApp(),
       onStatus: setSync,
+      onRemoteSettingsApplied: (settings) => {
+        setAccountSettings({ userId: user.id, values: settingValues(settings) });
+      },
       onRemoteCardsApplied: async () => {
+        setRemoteChanges((count) => count + 1);
         try {
           const normalized = await normalizeExistingCards(repository, user.id);
           if (normalized.frontsChanged > 0 || normalized.meaningsChanged > 0) {
@@ -245,6 +303,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDecks([]);
   }, [auth]);
 
+  const settingsLoaded = !user || accountSettings?.userId === user.id;
+  // At launch the splash waits for settings too, so the first screen already
+  // has the right theme and language. After that it never waits again:
+  // switching accounts must not unmount the navigator mid-navigation (that
+  // remounted this provider and closed the database under the new screen).
+  const readyNow = Boolean(repository) && authResolved && settingsLoaded;
+  const [booted, setBooted] = useState(false);
+  if (readyNow && !booted) setBooted(true);
+  const settings = useMemo<Partial<SettingValues>>(
+    () => (user && accountSettings?.userId === user.id ? accountSettings.values : unsavedSettings),
+    [user, accountSettings, unsavedSettings],
+  );
+
+  const updateSettings = useCallback(
+    (changes: Partial<SettingValues>) => {
+      if (!repository || !user || accountSettings?.userId !== user.id) {
+        setUnsavedSettings((current) => ({ ...current, ...changes }));
+        return;
+      }
+      // Show the choice at once; the write and the push follow.
+      setAccountSettings((current) =>
+        current && current.userId === user.id
+          ? { userId: user.id, values: { ...current.values, ...changes } }
+          : current,
+      );
+      void repository
+        .saveSettings(user.id, changes)
+        .then(() => engineRef.current?.sync())
+        .catch((cause) => console.warn('[fluentflow] settings could not be saved:', cause));
+    },
+    [repository, user, accountSettings],
+  );
+
   const syncNow = useCallback(async () => {
     await engineRef.current?.sync();
     await refreshDecks();
@@ -252,7 +343,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppState>(
     () => ({
-      ready: Boolean(repository) && authResolved,
+      ready: readyNow || (booted && Boolean(repository)),
       error,
       repository,
       examples,
@@ -260,6 +351,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       cloudAvailable: isCloudEnabled,
       sync,
       decks,
+      remoteChanges,
+      settings,
+      updateSettings,
       refreshDecks,
       syncNow,
       signIn,
@@ -269,12 +363,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       repository,
-      authResolved,
+      readyNow,
+      booted,
+      settings,
+      updateSettings,
       error,
       examples,
       user,
       sync,
       decks,
+      remoteChanges,
       refreshDecks,
       syncNow,
       signIn,
@@ -401,6 +499,16 @@ function clearReloadMarker(): void {
   } catch {
     // Nothing to clean up if storage is unavailable.
   }
+}
+
+/** The chosen values, without the times they were chosen. */
+function settingValues(settings: UserSettings): Partial<SettingValues> {
+  const values: Partial<Record<SettingKey, unknown>> = {};
+  for (const key of SETTING_KEYS) {
+    const entry = settings[key];
+    if (entry) values[key] = entry.value;
+  }
+  return values as Partial<SettingValues>;
 }
 
 function delay(ms: number): Promise<void> {

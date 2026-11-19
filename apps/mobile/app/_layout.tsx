@@ -23,17 +23,19 @@ installWindowDragRegions();
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <ThemeProvider>
-        <DesktopChromeProvider>
-          <I18nProvider>
-            <PreferencesProvider>
-              <AppProvider>
+      {/* Outermost, because theme, language and daily goal are account
+          settings it loads and syncs. */}
+      <AppProvider>
+        <ThemeProvider>
+          <DesktopChromeProvider>
+            <I18nProvider>
+              <PreferencesProvider>
                 <Gate />
-              </AppProvider>
-            </PreferencesProvider>
-          </I18nProvider>
-        </DesktopChromeProvider>
-      </ThemeProvider>
+              </PreferencesProvider>
+            </I18nProvider>
+          </DesktopChromeProvider>
+        </ThemeProvider>
+      </AppProvider>
     </SafeAreaProvider>
   );
 }

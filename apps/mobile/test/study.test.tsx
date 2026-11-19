@@ -1,5 +1,4 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { collectionDayKey, type Card, type Deck } from '@fluentflow/core';
 import StudyScreen from '../app/(app)/study/[deckId]';
 import { ExampleService } from '../src/ai/service';
@@ -55,7 +54,6 @@ describe('StudyScreen', () => {
 
   afterEach(async () => {
     await context.close();
-    await AsyncStorage.removeItem('fluentflow.studySession');
     delete (globalThis as Record<string, unknown>).fluentflowDesktop;
   });
 
@@ -105,10 +103,6 @@ describe('StudyScreen', () => {
     expect(screen.getByRole('button', { name: 'Star card' })).toBeTruthy();
     expect((await repository.getCard(first!.id))?.starred).toBe(true);
     await view.unmount();
-    // This assertion starts a deliberately new session. Resume behavior is
-    // covered below; ordinary entry from a deck should still be able to start
-    // from the current queue rather than a session the user explicitly left.
-    await AsyncStorage.removeItem('fluentflow.studySession');
     // Make the reviewed card due so reopening selects it again.
     await repository.updateCard(first!, { nextReview: new Date(Date.now() - 1000).toISOString() });
     await show();
@@ -118,7 +112,28 @@ describe('StudyScreen', () => {
     expect((await repository.getCard(first!.id))?.starred).toBe(false);
   });
 
-  it('resumes the current card after the study screen is reopened', async () => {
+  /** What a review made on another device looks like once sync applies it. */
+  async function answerElsewhere(card: Card) {
+    // The card reached the server before the other device studied it; a card
+    // still waiting to upload here would (rightly) keep its local copy.
+    await repository.markSynced([], [card]);
+    const now = Date.now();
+    await repository.applyServerChanges(TEST_USER.id, {
+      decks: [],
+      cards: [{
+        ...card,
+        phase: 'review',
+        status: 'learning',
+        interval: 3,
+        introducedAt: new Date(now).toISOString(),
+        nextReview: new Date(now + 3 * 86_400_000).toISOString(),
+        lastModified: new Date(now).toISOString(),
+      }],
+      reviewEvents: [],
+    });
+  }
+
+  it('picks up where the cards are after the study screen is reopened', async () => {
     await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
     const view = await show();
     await screen.findByText('hablar');
@@ -131,41 +146,59 @@ describe('StudyScreen', () => {
     await screen.findByText('comer');
   });
 
-  it('starts a fresh queue instead of resuming a session from an earlier day', async () => {
-    const [, second, third] = await seed([
+  it('does not show cards already answered on another device', async () => {
+    const [first, second] = await seed([
       ['hablar', 'to speak'],
       ['comer', 'to eat'],
       ['vivir', 'to live'],
     ]);
-    // Yesterday's session stopped on its last card, a review card that has
-    // since come due again. Resuming it would show that card alone and hide
-    // today's new cards.
-    await repository.updateCard(third!, {
-      phase: 'review',
-      status: 'learning',
-      interval: 1,
-      introducedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
-      nextReview: new Date(Date.now() - 1000).toISOString(),
-    });
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    await AsyncStorage.setItem('fluentflow.studySession', JSON.stringify({
-      deckId: deck.id,
-      studyAhead: false,
-      day: collectionDayKey(yesterday),
-      cardIds: [second!.id, third!.id],
-      index: 1,
-      reviewed: 1,
-      lapses: 0,
-      revealed: false,
-    }));
+    const view = await show();
+    await screen.findByText('hablar');
+    await view.unmount();
+
+    // The learner carried on on their phone, and sync brought it here.
+    await answerElsewhere(first!);
+    await answerElsewhere(second!);
 
     await show();
-    // Today's queue: the due review, then both new cards. The stale session
-    // would have shown "2 / 2" with no new cards left.
-    await screen.findByText('1 / 3');
-    expect(screen.queryByText('2 / 2')).toBeNull();
-    expect(screen.getByLabelText('New: 2')).toBeTruthy();
+    await screen.findByText('vivir');
+    expect(screen.queryByText('hablar')).toBeNull();
+    expect(screen.getByText('1 / 1')).toBeTruthy();
+  });
+
+  it('drops cards another device answers while the session is open', async () => {
+    const [first, second] = await seed([
+      ['hablar', 'to speak'],
+      ['comer', 'to eat'],
+      ['vivir', 'to live'],
+    ]);
+    const view = await show();
+    await screen.findByText('hablar');
+    expect(screen.getByText('1 / 3')).toBeTruthy();
+
+    await answerElsewhere(first!);
+    await answerElsewhere(second!);
+    await view.updateState({ remoteChanges: 1 });
+
+    await screen.findByText('vivir');
+    expect(screen.queryByText('hablar')).toBeNull();
+    expect(screen.getByText('1 / 1')).toBeTruthy();
+  });
+
+  it('keeps a revealed card on screen when another device answers it', async () => {
+    const [first] = await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
+    const view = await show();
+    await screen.findByText('hablar');
+    await reveal();
+    await screen.findByText('to speak');
+
+    await answerElsewhere(first!);
+    await view.updateState({ remoteChanges: 1 });
+
+    // The answer being read stays put; the rest of the queue is still there.
+    await waitFor(() => expect(screen.getByText('1 / 2')).toBeTruthy());
+    expect(screen.getByText('hablar')).toBeTruthy();
+    expect(screen.getByText('to speak')).toBeTruthy();
   });
 
   it('starts no more than the deck limit of untouched new cards', async () => {

@@ -440,3 +440,32 @@ test('imported records come back as synced, not as pending uploads', async () =>
   );
   assert.ok(pulled.decks.every((d: { syncStatus: string }) => d.syncStatus === 'synced'));
 });
+
+test('settings round-trip per account, merged per setting, with bad values refused', async () => {
+  const put = (user: string, settings: unknown) =>
+    call('/api/settings', {
+      user,
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ settings }),
+    });
+  const T1 = '2026-11-18T10:00:00.000Z';
+  const T2 = '2026-11-18T11:00:00.000Z';
+
+  assert.equal((await call('/api/settings', { user: '' })).status, 401);
+  assert.deepEqual(await (await call('/api/settings', { user: 'sam' })).json(), { settings: {} });
+
+  const first = await put('sam', { theme: { value: 'dark', updatedAt: T1 }, unknown: { value: 1, updatedAt: T1 } });
+  assert.equal(first.status, 200);
+  assert.deepEqual((await first.json()).settings, { theme: { value: 'dark', updatedAt: T1 } });
+
+  const second = await put('sam', { uiLanguage: { value: 'bs', updatedAt: T2 } });
+  assert.deepEqual((await second.json()).settings, {
+    theme: { value: 'dark', updatedAt: T1 },
+    uiLanguage: { value: 'bs', updatedAt: T2 },
+  });
+
+  assert.equal((await put('sam', { theme: { value: 'purple', updatedAt: T2 } })).status, 400);
+  assert.equal((await put('sam', { dailyGoal: { value: 0, updatedAt: T2 } })).status, 400);
+  assert.deepEqual(await (await call('/api/settings', { user: 'tia' })).json(), { settings: {} });
+});

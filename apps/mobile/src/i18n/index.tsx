@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppContext } from '../state/app';
 import { getLocales } from 'expo-localization';
 import { SUPPORTED_LANGUAGES, isLanguageCode, type LanguageCode } from '@fluentflow/core';
 import { LANGUAGE_PACKS, type StringKey, type Strings } from './strings';
@@ -12,8 +12,6 @@ import { LANGUAGE_PACKS, type StringKey, type Strings } from './strings';
  * Bosnian while you study Spanish. Only the UI language lives here; the target
  * language belongs to the deck.
  */
-
-const STORAGE_KEY = 'fluentflow.uiLanguage';
 
 export type TranslateValues = Record<string, string | number>;
 
@@ -29,31 +27,24 @@ export interface I18nValue {
 const I18nContext = createContext<I18nValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<LanguageCode>(deviceLanguage);
-  const [ready, setReady] = useState(false);
+  // The interface language is an account setting, synced like cards; until
+  // one is chosen the device's locale stands. Outside the app provider (some
+  // tests) it is held in memory only.
+  const app = useContext(AppContext);
+  const [localLanguage, setLocalLanguage] = useState<LanguageCode>(deviceLanguage);
+  const chosen = app?.settings.uiLanguage;
+  const language: LanguageCode = app ? (isLanguageCode(chosen) ? chosen : deviceLanguage()) : localLanguage;
+  // Nothing to load: the app provider is not ready until settings are.
+  const ready = true;
+  const updateSettings = app?.updateSettings;
 
-  useEffect(() => {
-    let cancelled = false;
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((stored) => {
-        if (cancelled) return;
-        if (isLanguageCode(stored)) setLanguageState(stored);
-      })
-      .catch(() => {
-        // A missing preference is not an error; the device locale stands.
-      })
-      .finally(() => {
-        if (!cancelled) setReady(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const setLanguage = useCallback((next: LanguageCode) => {
-    setLanguageState(next);
-    void AsyncStorage.setItem(STORAGE_KEY, next);
-  }, []);
+  const setLanguage = useCallback(
+    (next: LanguageCode) => {
+      if (updateSettings) updateSettings({ uiLanguage: next });
+      else setLocalLanguage(next);
+    },
+    [updateSettings],
+  );
 
   const value = useMemo<I18nValue>(() => {
     const strings = LANGUAGE_PACKS[language] ?? LANGUAGE_PACKS.en;

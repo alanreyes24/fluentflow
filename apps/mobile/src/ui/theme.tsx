@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Platform, useColorScheme, useWindowDimensions, type TextStyle } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppContext } from '../state/app';
 import { syncDesktopTheme } from './shell';
 
 /**
@@ -244,24 +244,16 @@ interface ThemeContextValue {
   setPreference: (preference: ThemePreference) => void;
 }
 
-const STORAGE_KEY = 'fluentflow.theme';
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const system = useColorScheme();
-  const [preference, setPreferenceState] = useState<ThemePreference>('system');
-
-  useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((stored) => {
-        if (stored === 'light' || stored === 'dark' || stored === 'system') {
-          setPreferenceState(stored);
-        }
-      })
-      .catch(() => {
-        // Fall back to following the system.
-      });
-  }, []);
+  // The theme is an account setting, synced like cards. Outside the app
+  // provider (some tests) it is held in memory only.
+  const app = useContext(AppContext);
+  const [localPreference, setLocalPreference] = useState<ThemePreference>('system');
+  const preference: ThemePreference = app ? app.settings.theme ?? 'system' : localPreference;
+  const updateSettings = app?.updateSettings;
 
   // Keep the desktop window chrome (traffic lights, window vibrancy) in step
   // with the in-app choice. A no-op in a browser tab.
@@ -281,8 +273,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return {
       preference,
       setPreference: (next) => {
-        setPreferenceState(next);
-        void AsyncStorage.setItem(STORAGE_KEY, next);
+        if (updateSettings) updateSettings({ theme: next });
+        else setLocalPreference(next);
       },
       theme: {
         name,
@@ -293,7 +285,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         typography,
       },
     };
-  }, [preference, name]);
+  }, [preference, name, updateSettings]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

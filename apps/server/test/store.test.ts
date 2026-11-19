@@ -180,5 +180,26 @@ for (const [name, create] of implementations) {
       assert.equal((await store.pull('f2', two.epoch)).cards[0]?.front, 'otro');
       await assert.rejects(store.pull('f2', one.epoch), EpochError);
     });
+
+    test('settings merge one at a time, need no seed, and stay per user', async () => {
+      const T1 = '2026-11-18T10:00:00.000Z';
+      const T2 = '2026-11-18T11:00:00.000Z';
+      assert.deepEqual(await store.getSettings('s1'), {});
+
+      await store.mergeSettings('s1', { theme: { value: 'dark', updatedAt: T2 }, dailyGoal: { value: 20, updatedAt: T1 } });
+      // Another device changed only the goal, later; and an older theme.
+      const merged = await store.mergeSettings('s1', {
+        dailyGoal: { value: 40, updatedAt: T2 },
+        theme: { value: 'light', updatedAt: T1 },
+      });
+      const expected = { dailyGoal: { value: 40, updatedAt: T2 }, theme: { value: 'dark', updatedAt: T2 } };
+      assert.deepEqual(merged, expected);
+      assert.deepEqual(await store.getSettings('s1'), expected);
+      assert.deepEqual(await store.getSettings('s2'), {});
+
+      // Re-seeding the collection leaves settings alone.
+      await store.seed('s1', empty);
+      assert.deepEqual(await store.getSettings('s1'), expected);
+    });
   });
 }
