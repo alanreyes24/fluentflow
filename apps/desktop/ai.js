@@ -98,36 +98,29 @@ function remoteInference(core, responseSchema, onUsage) {
 /**
  * Find a meaning for every word.
  *
- * The dictionary answers what it can and the hosted model is asked only about
- * the leftovers, which means a list of ordinary words costs nothing and makes
- * no network request at all.
+ * Every definition comes from the hosted model. Without an API key, nothing
+ * is defined: the dictionary is never a silent fallback for card backs.
  *
- * `useModel` is how the import screen keeps that promise visible. It runs this
- * once with the flag off — free, offline, instant, and it covers most word
- * lists outright — and only offers to spend the user's key on what is left
- * over, behind one button naming the words it will send. Defaulting to true
- * keeps every other caller behaving as it did.
+ * `useModel: false` is the other mode: a free, offline dictionary lookup that
+ * callers use only to turn a conjugated front into its infinitive.
  *
  * @param words     the words, in the deck's language
  * @param language  'es' or 'bs'
  * @param onProgress called as words are resolved, for the progress bar
- * @param useModel  false to answer from the dictionary alone and bill nothing
- * @param modelOnly skip the dictionary and ask the hosted model for a fresh answer
+ * @param useModel  false for the dictionary-only infinitive check, which bills nothing
  * @returns meanings plus measured Gemini usage when the model was called
  */
-async function resolve(words, language, onProgress, useModel = true, modelOnly = false) {
+async function resolve(words, language, onProgress, useModel = true) {
   const core = await loadCore();
   const usages = [];
 
-  const lookup = !modelOnly && dictionary.status().languages[language]
-    ? (word) => dictionary.lookup(language, word)
-    : null;
-
-  // Peek: if the dictionary covers everything, nothing is sent anywhere.
-  const missing = lookup ? words.filter((word) => lookup(word).length === 0) : words;
-
-  const infer = useModel && missing.length > 0
+  // With a model, every definition is the model's. The dictionary is only for
+  // the free infinitive check a caller asks for with useModel=false.
+  const infer = useModel
     ? remoteInference(core, undefined, (usage) => usages.push(usage))
+    : null;
+  const lookup = !useModel && dictionary.status().languages[language]
+    ? (word) => dictionary.lookup(language, word)
     : null;
 
   const meanings = await core.resolveMeanings(words, language, { dictionary: lookup, infer, onProgress });

@@ -97,7 +97,6 @@ export function createApp({ config, store }: AppDeps): express.Express {
         words?: unknown;
         language?: unknown;
         useModel?: unknown;
-        modelOnly?: unknown;
       };
       if (!Array.isArray(body.words) || body.words.some((word) => typeof word !== 'string')) {
         res.status(400).json({ error: 'invalid_request', message: 'words must be an array of strings.' });
@@ -112,7 +111,6 @@ export function createApp({ config, store }: AppDeps): express.Express {
         body.words as string[],
         body.language,
         body.useModel !== false,
-        body.modelOnly === true,
       );
       res.json(result);
     } catch (error) {

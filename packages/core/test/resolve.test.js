@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { resolveMeanings, meaningsFromResolved } from '../dist/index.js';
 
 /**
- * Dictionary first, model for the leftovers.
+ * The model answers every definition; the dictionary only answers when there
+ * is no model, for infinitive normalization.
  *
  * The fixture is real data: these are the glosses the distilled Wiktionary
  * dictionaries actually return, and the model answers are ones Qwen2.5-1.5B
@@ -38,18 +39,33 @@ const ENTRIES = {
 
 const dictionary = (word) => ENTRIES[word] ?? [];
 
-test('a word the dictionary knows never reaches the model', async () => {
-  let asked = 0;
-  const resolved = await resolveMeanings(['nido', 'anguila'], 'es', {
+test('with a model, every word is asked, even ones the dictionary knows', async () => {
+  const asked = [];
+  const resolved = await resolveMeanings(['nido', 'repelar', 'anguila'], 'es', {
     dictionary,
-    infer: async () => { asked++; return 'something'; },
+    infer: async ({ prompt }) => {
+      asked.push(prompt);
+      return JSON.stringify([
+        { word: 'nido', meaning: 'nest' },
+        { word: 'repelar', meaning: 'to grumble' },
+        { word: 'anguila', meaning: 'eel' },
+      ]);
+    },
   });
 
-  assert.equal(asked, 0);
-  assert.deepEqual(resolved.map((r) => r.meaning), ['nest', 'eel']);
-  assert.deepEqual(resolved.map((r) => r.source), ['dictionary', 'dictionary']);
-  // The dictionary is trusted; only the model's answers need checking.
-  assert.deepEqual(resolved.map((r) => r.needsReview), [false, false]);
+  assert.equal(asked.length, 1, 'one batch for the whole list');
+  assert.match(asked[0], /nido/);
+  assert.match(asked[0], /anguila/);
+  assert.deepEqual(resolved.map((r) => r.meaning), ['nest', 'to grumble', 'eel']);
+  assert.deepEqual(resolved.map((r) => r.source), ['model', 'model', 'model']);
+  assert.deepEqual(resolved.map((r) => r.needsReview), [true, true, true]);
+});
+
+test('without a model, the dictionary still answers for infinitive normalization', async () => {
+  const [resolved] = await resolveMeanings(['nido'], 'es', { dictionary });
+
+  assert.equal(resolved.source, 'dictionary');
+  assert.equal(resolved.needsReview, false);
 });
 
 test('an inflected form is followed to the word it inflects', async () => {
@@ -106,24 +122,6 @@ test('several senses become one card back, capped', async () => {
   assert.equal(zdravo.meaning, 'hello! hi!, bye! farewell!, healthily');
 });
 
-test('the model is asked only for what the dictionary missed', async () => {
-  const asked = [];
-  const resolved = await resolveMeanings(['nido', 'chapurrear', 'anguila'], 'es', {
-    dictionary,
-    infer: async ({ prompt }) => {
-      asked.push(prompt);
-      return JSON.stringify([{ word: 'chapurrear', meaning: 'to speak badly' }]);
-    },
-  });
-
-  assert.equal(asked.length, 1, 'one word missed, one request');
-  assert.match(asked[0], /chapurrear/);
-  assert.deepEqual(resolved.map((r) => r.source), ['dictionary', 'model', 'dictionary']);
-  assert.equal(resolved[1].meaning, 'to speak badly');
-  // The model's answer is the one flagged for a human.
-  assert.deepEqual(resolved.map((r) => r.needsReview), [false, true, false]);
-});
-
 test('a model answer that fails validation is thrown out, not guessed at', async () => {
   const resolved = await resolveMeanings(['almadura'], 'es', {
     dictionary,
@@ -172,9 +170,9 @@ test('with neither, every word says so', async () => {
   assert.equal(resolved[0].rejected, 'nothing-to-ask');
 });
 
-test('the model budget is checked before each batch, and dictionary work is kept', async () => {
+test('the model budget is checked before each batch', async () => {
   let clock = 0;
-  const resolved = await resolveMeanings(['nido', 'aaa', 'bbb', 'ccc'], 'es', {
+  const resolved = await resolveMeanings(['aaa', 'bbb', 'ccc'], 'es', {
     dictionary,
     infer: async () => {
       clock += 400;
@@ -188,8 +186,7 @@ test('the model budget is checked before each batch, and dictionary work is kept
     now: () => clock,
   });
 
-  assert.equal(resolved[0].meaning, 'nest', 'the dictionary hit survives the deadline');
-  assert.deepEqual(resolved.map((r) => Boolean(r.meaning)), [true, true, true, true]);
+  assert.deepEqual(resolved.map((r) => Boolean(r.meaning)), [true, true, true]);
 });
 
 test('a model request failure is retryable', async () => {
@@ -350,7 +347,7 @@ test('results preserve the exact pasted identity and carry spelling corrections 
   assert.equal(resolved.meaning, 'armor');
 });
 
-test('progress counts every word, dictionary hits included', async () => {
+test('progress counts every word once the model has answered', async () => {
   const seen = [];
   await resolveMeanings(['nido', 'aaa'], 'es', {
     dictionary,
@@ -358,5 +355,5 @@ test('progress counts every word, dictionary hits included', async () => {
     onProgress: (done, total) => seen.push(`${done}/${total}`),
   });
 
-  assert.deepEqual(seen, ['1/2', '2/2', '2/2']);
+  assert.deepEqual(seen, ['2/2']);
 });

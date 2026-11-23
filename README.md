@@ -13,8 +13,10 @@ be wrong, so check anything that looks off.
 
 - Vocabulary decks with spaced repetition, review limits, and study statistics.
 - Cards from pasted word lists or Anki `.apkg` files.
-- Optional local dictionaries for Spanish and Bosnian.
-- Optional Gemini examples, translations, and study chat using your own API key.
+- Optional local dictionaries for Spanish and Bosnian, used only to turn
+  conjugated words into infinitives.
+- Optional Gemini definitions, examples, and study chat using your own API key.
+  Every definition the app fills in comes from Gemini.
 - Local SQLite storage, with optional account sync through the hosted server's
   Postgres database (Firebase is used only to sign in).
 - An Electron desktop app and an Expo UI shared with the browser and mobile targets.
@@ -63,8 +65,10 @@ own cards live in SQLite. Do not expose the development API to the internet.
 
 **Dictionaries:** run `npm run fetch-dictionaries`. This streams large extracts
 from Wiktionary via Kaikki and builds local lookup databases. The Bosnian data
-comes from Wiktionary's Serbo-Croatian entries. Paired `word - meaning` lists
-can be imported without a dictionary or API key.
+comes from Wiktionary's Serbo-Croatian entries. The dictionaries only convert
+conjugated card fronts to infinitives (`comieron` → `comer`); they never supply
+definitions. Paired `word - meaning` lists can be imported without a dictionary
+or API key.
 
 **Gemini:** add your own key in the desktop app's **Settings → Cloud examples**.
 For browser development, copy `.env.example` to `.env`, set `GEMINI_API_KEY`,

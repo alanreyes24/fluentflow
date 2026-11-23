@@ -88,6 +88,7 @@ const SHAPES = {
     ],
   },
   play: { paths: ['M6 3l14 9-14 9V3z'] },
+  pauseCircle: { paths: ['M10 15V9', 'M14 15V9'], circles: [{ cx: 12, cy: 12, r: 10 }] },
   barChart: { paths: ['M3 3v16a2 2 0 0 0 2 2h16', 'M18 17V9', 'M13 17V5', 'M8 17v-3'] },
   bookOpen: {
     paths: [

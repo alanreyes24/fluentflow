@@ -318,6 +318,21 @@ describe('Repository', () => {
     expect(reviewed.phase).toBe('review');
   });
 
+  it('undoes a review even after it has synced', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const card = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    await repository.rateCard(card, 'easy');
+    // The background push runs every few seconds; undo must still work after it.
+    await repository.markSynced([], [], await repository.pendingReviewEvents('u1'));
+
+    const restored = await repository.undoLastReview('u1');
+    expect(restored?.id).toBe(card.id);
+    expect(await repository.getCard(card.id)).toMatchObject({ phase: 'new', interval: 0, syncStatus: 'pending' });
+    // The server already holds that event, so it stays — but cannot be undone twice.
+    expect(await repository.undoLastReview('u1')).toBeNull();
+  });
+
   it('drops the ease factor on lapses but never below the floor', async () => {
     const { repository } = context;
     const deck = await repository.createDeck('u1', 'Spanish', 'es');

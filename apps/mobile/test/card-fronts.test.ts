@@ -74,7 +74,7 @@ describe('card-front normalization', () => {
     await expect(normalizeCardFront('tablas', 'es', 'boards')).resolves.toBe('tablas');
   });
 
-  it('audits existing fronts and repairs pointer meanings', async () => {
+  it('audits existing fronts and never rewrites a definition', async () => {
     const spanish = await context.repository.createDeck(TEST_USER.id, 'Spanish', 'es');
     const bosnian = await context.repository.createDeck(TEST_USER.id, 'Bosnian', 'bs');
     await context.repository.addCard(TEST_USER.id, spanish, 'comieron', 'they ate');
@@ -89,11 +89,11 @@ describe('card-front normalization', () => {
     const [spanishCard] = await context.repository.listCards(spanish.id);
     const [bosnianCard] = await context.repository.listCards(bosnian.id);
 
-    expect(summary).toEqual({ scanned: 2, frontsChanged: 1, meaningsChanged: 1 });
+    expect(summary).toEqual({ scanned: 2, frontsChanged: 1 });
     expect(spanishCard?.front).toBe('comer');
     expect(spanishCard?.back).toBe('they ate');
     expect(bosnianCard?.front).toBe('stići');
-    expect(bosnianCard?.back).toBe('to arrive, reach');
+    expect(bosnianCard?.back).toBe('alternative form of stȉgnuti');
   });
 
   it('keeps the front as typed when the source check fails', async () => {

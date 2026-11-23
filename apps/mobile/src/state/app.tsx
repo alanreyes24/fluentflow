@@ -117,11 +117,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const repo = new Repository(opened);
         try {
           const normalized = await normalizeExistingCards(repo);
-          if (normalized.frontsChanged > 0 || normalized.meaningsChanged > 0) {
-            console.info(
-              `[fluentflow] normalized ${normalized.frontsChanged} card front(s) and ` +
-              `${normalized.meaningsChanged} pointer meaning(s)`,
-            );
+          if (normalized.frontsChanged > 0) {
+            console.info(`[fluentflow] normalized ${normalized.frontsChanged} card front(s)`);
           }
         } catch (cause) {
           // A missing or temporarily unavailable dictionary must not keep the
@@ -237,7 +234,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setRemoteChanges((count) => count + 1);
         try {
           const normalized = await normalizeExistingCards(repository, user.id);
-          if (normalized.frontsChanged > 0 || normalized.meaningsChanged > 0) {
+          if (normalized.frontsChanged > 0) {
             void engineRef.current?.sync();
           }
         } catch (cause) {

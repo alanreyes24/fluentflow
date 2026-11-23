@@ -74,7 +74,6 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
         words,
         language,
         useModel: options?.useModel,
-        modelOnly: options?.modelOnly,
       }),
 
     /**

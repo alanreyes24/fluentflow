@@ -458,7 +458,16 @@ export class Repository {
     return updated;
   }
 
-  /** Undo the latest review while its upload is still pending. */
+  /**
+   * Undo the latest review, whether or not it has been uploaded yet.
+   *
+   * Sync pushes every few seconds, so refusing once a review had synced made
+   * undo work only when pressed quickly. The card itself is restored either
+   * way: the restored copy is newer than the rated one, so it wins on the
+   * server too. A review event the server already holds is immutable, so a
+   * synced log row is kept (matching the server) and only stops being
+   * undoable; a pending one is deleted before it is ever sent.
+   */
   async undoLastReview(userId: string, now: Date = new Date()): Promise<Card | null> {
     const row = await this.db.getFirstAsync<UndoRow>(
       `SELECT id, cardId, syncStatus, previousState FROM review_log
@@ -466,14 +475,18 @@ export class Repository {
        ORDER BY id DESC LIMIT 1`,
       userId,
     );
-    if (!row || row.syncStatus !== 'pending') return null;
+    if (!row) return null;
     const previous = parseCardSnapshot(row.previousState);
     if (!previous) return null;
     const current = await this.getCard(previous.id);
     const restored = touch({ ...previous, starred: current?.starred ?? false, suspended: previous.suspended ?? false }, now);
     await this.transaction(async () => {
       await this.writeCards([restored]);
-      await this.db.runAsync("DELETE FROM review_log WHERE id = ? AND syncStatus = 'pending'", row.id);
+      if (row.syncStatus === 'pending') {
+        await this.db.runAsync('DELETE FROM review_log WHERE id = ?', row.id);
+      } else {
+        await this.db.runAsync('UPDATE review_log SET previousState = NULL WHERE id = ?', row.id);
+      }
     });
     return restored;
   }

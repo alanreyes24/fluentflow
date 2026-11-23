@@ -136,6 +136,7 @@ export const en = {
   bury: 'Bury until tomorrow',
   suspend: 'Suspend card',
   undo: 'Undo',
+  undoUnavailable: 'That can no longer be undone.',
 
   // Progress
   statusNew: 'New',
@@ -189,8 +190,7 @@ export const en = {
   pasteNewDeck: 'New deck',
   aiTranslate: 'Look up the meanings',
   aiTranslating: 'Looking up meanings…',
-  aiDictionaryAutomatic: 'Checking the {dictionary} dictionary automatically…',
-  aiModelEstimate: '{model} can fill the remaining {count}. Estimated maximum cost: {cost}.',
+  aiModelEstimate: '{model} can define these {count}. Estimated maximum cost: {cost}.',
   aiModelUsage:
     'Measured Gemini usage — requests: {requests} · input tokens: {input} · output tokens: {output} · list-price cost: {cost}.',
   aiModelUsageBilling: 'The billed amount may be lower on the free tier or with credits.',
@@ -203,29 +203,17 @@ export const en = {
   aiSkipApproved: 'Skipping {count} unresolved words — approved.',
   aiNoMoreAttempts: 'Gemini already tried these words. You can approve skipping them below.',
   aiUnavailableNoManual: 'Gemini is not connected. Add a key or approve skipping unresolved words.',
-  aiSourceDictionary:
-    'The {dictionary} dictionary on this Mac, offline and free. Nothing is sent anywhere and nothing is billed — whatever it does not have comes back blank for you to fill in.',
-  aiSourceModelOnly:
-    'No {dictionary} dictionary is installed, so this sends every word to {model} and bills your API key. Read its answers before importing.',
-  aiAskModel: 'Ask {model} about the remaining {count}',
+  aiAskModel: 'Ask {model} to define {count} word(s)',
   aiAskModelHint:
     'The only step that sends anything to Google, and it sends only those words. Billed to your API key.',
   aiAskModelNoKey:
     'Type the rest in yourself. Adding an API key in Settings lets the app write them for you instead.',
   aiReviewTitle: 'Check these before importing',
-  aiReviewHint:
-    'The rows marked "model" are guesses and some will be wrong — edit anything that is off, and clear anything you do not want. Dictionary rows only need a skim.',
-  aiReviewHintDictionary:
-    'Dictionary entries only need a skim. Type a meaning for anything still blank, or leave it blank — a word with no meaning is skipped, never guessed at.',
   aiNoAnswer: 'no meaning found — type one',
-  aiUnavailable:
-    'Nothing here to look them up with: no dictionary for this language and no API key. You can still type the meanings in yourself.',
   aiWordsNeedMeanings: '{count} words with no meaning yet',
-  aiFromDictionary: 'dictionary',
   aiFromModel: 'model — check this',
   aiFromNothing: 'not found',
   aiFromModelNothing: 'the model had no answer — type one',
-  aiSummaryDictionary: '{count} from the dictionary',
   aiSummaryModel: '{count} from {model}',
   aiSummaryMissing: '{count} with no answer',
 
@@ -482,6 +470,7 @@ const es: Strings = {
   bury: 'Enterrar hasta mañana',
   suspend: 'Suspender tarjeta',
   undo: 'Deshacer',
+  undoUnavailable: 'Eso ya no se puede deshacer.',
 
   statusNew: 'Nuevas',
   statusLearning: 'Aprendiendo',
@@ -532,8 +521,7 @@ const es: Strings = {
   pasteNewDeck: 'Mazo nuevo',
   aiTranslate: 'Buscar los significados',
   aiTranslating: 'Buscando significados…',
-  aiDictionaryAutomatic: 'Comprobando automáticamente el diccionario de {dictionary}…',
-  aiModelEstimate: '{model} puede completar las {count} restantes. Coste máximo estimado: {cost}.',
+  aiModelEstimate: '{model} puede definir estas {count}. Coste máximo estimado: {cost}.',
   aiModelUsage:
     'Uso medido de Gemini — solicitudes: {requests} · tokens de entrada: {input} · tokens de salida: {output} · coste de lista: {cost}.',
   aiModelUsageBilling: 'El importe facturado puede ser menor con el nivel gratuito o con créditos.',
@@ -546,29 +534,17 @@ const es: Strings = {
   aiSkipApproved: 'Se omitirán {count} palabras sin resolver — aprobado.',
   aiNoMoreAttempts: 'Gemini ya probó estas palabras. Puedes aprobar omitirlas abajo.',
   aiUnavailableNoManual: 'Gemini no está conectado. Añade una clave o aprueba omitir las palabras sin resolver.',
-  aiSourceDictionary:
-    'El diccionario de {dictionary} de este Mac, sin conexión y gratis. No se envía nada a ninguna parte ni se cobra nada: lo que no tenga vuelve en blanco para que lo escribas tú.',
-  aiSourceModelOnly:
-    'No hay diccionario de {dictionary} instalado, así que esto envía cada palabra a {model} y cobra a tu clave de API. Lee sus respuestas antes de importar.',
-  aiAskModel: 'Preguntar a {model} por las {count} restantes',
+  aiAskModel: 'Pedir a {model} que defina {count} palabra(s)',
   aiAskModelHint:
     'El único paso que envía algo a Google, y solo envía esas palabras. Con cargo a tu clave de API.',
   aiAskModelNoKey:
     'Escribe tú el resto. Si añades una clave de API en Ajustes, la app puede escribirlas por ti.',
   aiReviewTitle: 'Revisa esto antes de importar',
-  aiReviewHint:
-    'Las filas marcadas «modelo» son conjeturas y algunas estarán mal: corrige lo que no cuadre y borra lo que no quieras. Las del diccionario solo necesitan un vistazo.',
-  aiReviewHintDictionary:
-    'Las del diccionario solo necesitan un vistazo. Escribe un significado para lo que siga en blanco, o déjalo así: una palabra sin significado se omite, nunca se inventa.',
   aiNoAnswer: 'sin significado — escribe uno',
-  aiUnavailable:
-    'Aquí no hay con qué buscarlas: ni diccionario para este idioma ni clave de API. Aun así puedes escribir los significados tú.',
   aiWordsNeedMeanings: '{count} palabras todavía sin significado',
-  aiFromDictionary: 'diccionario',
   aiFromModel: 'modelo — revísalo',
   aiFromNothing: 'no encontrado',
   aiFromModelNothing: 'el modelo no tuvo respuesta — escribe una',
-  aiSummaryDictionary: '{count} del diccionario',
   aiSummaryModel: '{count} de {model}',
   aiSummaryMissing: '{count} sin respuesta',
 
@@ -809,6 +785,7 @@ const bs: Strings = {
   bury: 'Zakopaj do sutra',
   suspend: 'Suspenduj karticu',
   undo: 'Poništi',
+  undoUnavailable: 'To se više ne može poništiti.',
 
   statusNew: 'Nove',
   statusLearning: 'Učenje',
@@ -859,8 +836,7 @@ const bs: Strings = {
   pasteNewDeck: 'Novi špil',
   aiTranslate: 'Potraži značenja',
   aiTranslating: 'Tražim značenja…',
-  aiDictionaryAutomatic: 'Automatski provjeravam rječnik ({dictionary})…',
-  aiModelEstimate: '{model} može popuniti preostalih {count}. Procijenjeni najveći trošak: {cost}.',
+  aiModelEstimate: '{model} može definirati ovih {count}. Procijenjeni najveći trošak: {cost}.',
   aiModelUsage:
     'Izmjerena upotreba Geminija — zahtjevi: {requests} · ulazni tokeni: {input} · izlazni tokeni: {output} · kataloška cijena: {cost}.',
   aiModelUsageBilling: 'Naplaćeni iznos može biti niži na besplatnom nivou ili uz kredite.',
@@ -873,29 +849,17 @@ const bs: Strings = {
   aiSkipApproved: 'Neriješene riječi će biti preskočene — odobreno ({count}).',
   aiNoMoreAttempts: 'Gemini je već pokušao s ovim riječima. Ispod možeš odobriti njihovo preskakanje.',
   aiUnavailableNoManual: 'Gemini nije povezan. Dodaj ključ ili odobri preskakanje neriješenih riječi.',
-  aiSourceDictionary:
-    'Rječnik ({dictionary}) na ovom Macu, bez interneta i besplatno. Ništa se nigdje ne šalje i ništa se ne naplaćuje — što nema, vraća se prazno da sam upišeš.',
-  aiSourceModelOnly:
-    'Rječnik ({dictionary}) nije instaliran, pa ovo šalje svaku riječ na {model} i tereti tvoj API ključ. Pročitaj odgovore prije uvoza.',
-  aiAskModel: 'Pitaj {model} za preostalih {count}',
+  aiAskModel: 'Traži od {model} da definira {count} riječ(i)',
   aiAskModelHint:
     'Jedini korak koji išta šalje Googleu, i šalje samo te riječi. Na teret tvog API ključa.',
   aiAskModelNoKey:
     'Ostalo upiši sam. Ako dodaš API ključ u postavkama, aplikacija ih može napisati umjesto tebe.',
   aiReviewTitle: 'Provjeri ovo prije uvoza',
-  aiReviewHint:
-    'Redovi označeni s „model“ su nagađanja i neka će biti pogrešna — ispravi što ne valja i obriši što ne želiš. Oni iz rječnika trebaju samo pregled.',
-  aiReviewHintDictionary:
-    'Oni iz rječnika trebaju samo pregled. Upiši značenje za ono što je još prazno ili ostavi prazno — riječ bez značenja se preskače, nikad ne nagađa.',
   aiNoAnswer: 'nema značenja — upiši ga',
-  aiUnavailable:
-    'Nema se čime tražiti: ni rječnika za ovaj jezik ni API ključa. Značenja i dalje možeš upisati sam.',
   aiWordsNeedMeanings: '{count} riječi još bez značenja',
-  aiFromDictionary: 'rječnik',
   aiFromModel: 'model — provjeri',
   aiFromNothing: 'nije nađeno',
   aiFromModelNothing: 'model nije imao odgovor — upiši ga',
-  aiSummaryDictionary: '{count} iz rječnika',
   aiSummaryModel: '{count} sa {model}',
   aiSummaryMissing: '{count} bez odgovora',
 

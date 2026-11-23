@@ -7,7 +7,6 @@ const LOOKUP_BATCH_SIZE = 250;
 export interface CardNormalizationSummary {
   scanned: number;
   frontsChanged: number;
-  meaningsChanged: number;
 }
 
 export interface NormalizedCardsResult {
@@ -15,7 +14,12 @@ export interface NormalizedCardsResult {
   summary: CardNormalizationSummary;
 }
 
-/** Whether the free dictionary for this deck language is installed. */
+/**
+ * Whether the free dictionary for this deck language is installed.
+ *
+ * The dictionary only turns conjugated fronts into infinitives. It never
+ * supplies a card's definition; those always come from the AI model.
+ */
 export function dictionaryAvailableFor(
   dictionary: DictionaryStatus,
   language: TargetLanguage,
@@ -56,7 +60,6 @@ export async function normalizeCards(cards: Card[]): Promise<NormalizedCardsResu
   const sources = await lookupSources();
   const normalized = [...cards];
   let frontsChanged = 0;
-  let meaningsChanged = 0;
 
   for (const language of ['es', 'bs'] as const) {
     if (!dictionaryAvailableFor(sources.dictionary, language)) continue;
@@ -81,21 +84,17 @@ export async function normalizeCards(cards: Card[]): Promise<NormalizedCardsResu
         if (!card || !resolved) continue;
 
         const front = normalizedFrontFrom(resolved, card.front, card.back);
-        const back = shouldReplacePointerMeaning(card.back, resolved)
-          ? resolved.meaning.trim()
-          : card.back;
-        if (front === card.front && back === card.back) continue;
+        if (front === card.front) continue;
 
-        if (front !== card.front) frontsChanged++;
-        if (back !== card.back) meaningsChanged++;
-        normalized[cardIndex] = touch({ ...card, front, back });
+        frontsChanged++;
+        normalized[cardIndex] = touch({ ...card, front });
       }
     }
   }
 
   return {
     cards: normalized,
-    summary: { scanned: cards.length, frontsChanged, meaningsChanged },
+    summary: { scanned: cards.length, frontsChanged },
   };
 }
 
@@ -113,12 +112,7 @@ export function normalizedFrontFrom(
     : fallback;
 }
 
-/**
- * Audit every live card for one user and repair conjugated fronts in one write.
- * Pointer text such as "alternative form of ..." is also replaced with the
- * dereferenced English meaning, which fixes older imports without overwriting
- * meanings the learner entered themselves.
- */
+/** Audit every live card for one user and repair conjugated fronts in one write. */
 export async function normalizeExistingCards(
   repository: Repository,
   userId?: string,
@@ -127,19 +121,12 @@ export async function normalizeExistingCards(
   const result = await normalizeCards(cards);
   const updates = result.cards.filter((card, index) => {
     const original = cards[index];
-    return original && (card.front !== original.front || card.back !== original.back);
+    return original && card.front !== original.front;
   });
   for (const card of updates) {
-    await repository.updateCard(card, { front: card.front, back: card.back });
+    await repository.updateCard(card, { front: card.front });
   }
   return result.summary;
-}
-
-function shouldReplacePointerMeaning(back: string, resolved: ResolvedMeaning): boolean {
-  return Boolean(
-    resolved.meaning.trim() &&
-    isPointerMeaning(back),
-  );
 }
 
 function isPointerMeaning(value: string): boolean {

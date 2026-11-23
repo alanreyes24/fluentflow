@@ -66,12 +66,13 @@ export async function resolveWithAi(
   words: string[],
   language: string,
   useModel: boolean,
-  modelOnly = false,
 ): Promise<{ meanings: ResolvedMeaning[]; usage?: ModelUsage }> {
   if (!isTargetLanguage(language)) throw new Error('Unsupported target language.');
   const usages: ModelUsage[] = [];
   const infer = useModel ? remoteInference(config, undefined, (usage) => usages.push(usage)) : null;
-  const dictionary = modelOnly ? null : dictionaryLookup(language as TargetLanguage);
+  // With a model, every definition is the model's. The dictionary is only for
+  // the free infinitive check a caller asks for with useModel=false.
+  const dictionary = useModel ? null : dictionaryLookup(language as TargetLanguage);
   const meanings = await resolveMeanings(words, language as TargetLanguage, {
     dictionary,
     infer,

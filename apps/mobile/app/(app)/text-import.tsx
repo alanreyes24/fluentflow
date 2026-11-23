@@ -53,10 +53,11 @@ type Translate = ReturnType<typeof useI18n>['t'];
  * seeds the parser with that deck's words so pasting a longer version of the
  * same list adds only what is new.
  *
- * A list with no meanings on it — just words — is filled in automatically by
- * the dictionary. Only words the dictionary misses are offered to Gemini, with
- * an estimate shown before anything is sent. Meanings are never entered by
- * hand on this screen.
+ * A list with no meanings on it — just words — is defined by Gemini, with an
+ * estimate shown before anything is sent. Every definition comes from the
+ * model; the local dictionary only turns conjugated fronts into infinitives
+ * when the cards are written. Meanings are never entered by hand on this
+ * screen.
  */
 export default function TextImportScreen() {
   const { deckId } = useLocalSearchParams<{ deckId?: string }>();
@@ -77,7 +78,7 @@ export default function TextImportScreen() {
   const [importedDeckId, setImportedDeckId] = useState<string | null>(null);
   const [sources, setSources] = useState<LookupSources | null>(null);
   const [translating, setTranslating] = useState(false);
-  /** Word -> meaning, filled by the dictionary or Gemini. */
+  /** Word -> meaning, filled by Gemini. */
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   /** Word -> where its meaning came from, for the automatic-results summary. */
   const [origins, setOrigins] = useState<Record<string, ResolvedMeaning>>({});
@@ -135,15 +136,7 @@ export default function TextImportScreen() {
   );
 
   const targetLanguage = deck?.language ?? language ?? 'es';
-  const hasDictionary = Boolean(sources?.dictionary.languages?.[targetLanguage]);
   const hasModel = Boolean(sources?.cloud?.available);
-
-  // The two names that go into the sentence explaining the lookup. The
-  // dictionary's own name matters for Bosnian, which is served by the
-  // Serbo-Croatian Wiktionary and should say so rather than quietly answering
-  // as something else.
-  const dictionaryName =
-    sources?.dictionary.source?.[targetLanguage] ?? LANGUAGE_NAMES[targetLanguage];
   const modelName = sources?.cloud?.model ?? '';
 
   const meaninglessWords = useMemo(
@@ -182,17 +175,12 @@ export default function TextImportScreen() {
   );
 
   /**
-   * Fill in the meanings, in one of the two passes this screen offers.
-   *
-   * The free pass asks the dictionary about every missing word and bills
-   * nothing. The paid pass asks the model about the handful left over, and is
-   * only ever reached by pressing a button that names the model and the count.
-   *
-   * @param useModel whether this pass may spend the user's API key
+   * Ask the model for every missing meaning. Only ever reached by pressing a
+   * button that names the model and the count, because it bills the API key.
    */
   const runLookup = useCallback(
-    async (useModel: boolean) => {
-      const words = useModel ? unasked : meaninglessWords;
+    async () => {
+      const words = unasked;
       if (words.length === 0) return;
       const generation = inputGeneration.current;
       setTranslating(true);
@@ -202,7 +190,7 @@ export default function TextImportScreen() {
         // picked. Detection cannot help here: it reads the words, and a model
         // asked to translate Spanish as Bosnian answers confidently either way.
         const target = deck?.language ?? language ?? 'es';
-        const lookup = await lookUpMeanings(words, target, undefined, { useModel });
+        const lookup = await lookUpMeanings(words, target);
         const results = lookup.meanings;
         // A meaning already in the box wins. The second pass exists to fill
         // blanks, not to overwrite a correction someone has just typed.
@@ -218,7 +206,7 @@ export default function TextImportScreen() {
           ...current,
           ...Object.fromEntries(results.map((entry) => [entry.word, entry])),
         }));
-        if (useModel && lookup.usage) {
+        if (lookup.usage) {
           setModelUsage((current) => mergeModelUsage(current, lookup.usage!));
         }
         setReviewing(true);
@@ -232,20 +220,8 @@ export default function TextImportScreen() {
         }
       }
     },
-    [meaninglessWords, unasked, deck, language],
+    [unasked, deck, language],
   );
-
-  /**
-   * Words the automatic pass has already been spent on.
-   *
-   * A failed lookup leaves `origins` empty, which is indistinguishable from
-   * never having asked — so without this the effect re-fires on the same words
-   * for as long as the failure lasts, hammering the shell and never showing the
-   * error long enough to read. Recording the attempt rather than the outcome is
-   * what makes it run once. Editing the paste changes the words, which is a new
-   * attempt and gets one of its own.
-   */
-  const attempted = useRef(new Set<string>());
 
   /** Clear every result whose meaning depends on the paste or target language. */
   const resetLookup = useCallback(() => {
@@ -257,20 +233,7 @@ export default function TextImportScreen() {
     setModelUsage(null);
     setSkipApproved(false);
     setError(null);
-    attempted.current.clear();
   }, []);
-
-  // The dictionary pass runs on its own: it is free and sends nothing, so
-  // asking permission for it is ceremony. The paid pass still waits to be asked.
-  useEffect(() => {
-    if (!text.trim() || meaninglessWords.length === 0 || reviewing || translating) return;
-    if (!hasDictionary) return; // Only auto-run if dictionary is available.
-    const first = meaninglessWords[0];
-    if (!first || origins[first]) return; // Nothing to do, or already looked up.
-    if (attempted.current.has(first)) return; // Asked once already, and it failed.
-    attempted.current.add(first);
-    void runLookup(false);
-  }, [text, meaninglessWords, reviewing, translating, hasDictionary, origins, runLookup]);
 
   const estimatedModelCost = estimateTranslationCost(unasked.length);
 
@@ -344,7 +307,6 @@ export default function TextImportScreen() {
       setReviewing(false);
       setModelUsage(null);
       setSkipApproved(false);
-      attempted.current.clear();
       await refreshDecks();
       void syncNow();
 
@@ -476,10 +438,6 @@ export default function TextImportScreen() {
                 <Label variant="caption" tone="faint">
                   {t('loading')}
                 </Label>
-              ) : hasDictionary && !reviewing ? (
-                <Label variant="caption" tone="faint">
-                  {t('aiDictionaryAutomatic', { dictionary: dictionaryName })}
-                </Label>
               ) : hasModel && unasked.length > 0 ? (
                 <>
                   {retryableFailures > 0 ? (
@@ -497,7 +455,7 @@ export default function TextImportScreen() {
                   <Button
                     label={t('aiAskModel', { model: modelName, count: unasked.length })}
                     variant="secondary"
-                    onPress={() => void runLookup(true)}
+                    onPress={() => void runLookup()}
                     disabled={unasked.length === 0}
                   />
                 </>
@@ -511,7 +469,7 @@ export default function TextImportScreen() {
                 </Label>
               )}
 
-              {!translating && sources !== null && (reviewing || !hasDictionary) && counts.missing > 0 ? (
+              {!translating && sources !== null && counts.missing > 0 ? (
                 <>
                   <Label variant="caption" tone="muted">
                     {t('aiNeedsSkipApproval', { count: counts.missing })}
@@ -753,7 +711,11 @@ function correctedFrontsFrom(
   return corrected;
 }
 
-/** Dictionary-recognized conjugations become infinitives for every paste format. */
+/**
+ * Dictionary-recognized conjugations become infinitives for every paste format.
+ * Only the front changes: the dictionary's own glosses are never used as
+ * definitions.
+ */
 function dictionaryInfinitivesFrom(
   origins: Record<string, ResolvedMeaning>,
   suppliedMeanings: Record<string, string>,
@@ -768,35 +730,29 @@ function dictionaryInfinitivesFrom(
   return normalized;
 }
 
-/** How many meanings came from where, for the automatic-results summary. */
+/** How many meanings the model supplied, for the automatic-results summary. */
 function tally(words: string[], origins: Record<string, ResolvedMeaning>) {
-  let dictionary = 0;
   let model = 0;
   let missing = 0;
   for (const word of words) {
-    const source = origins[word]?.source;
-    if (source === 'dictionary') dictionary++;
-    else if (source === 'model') model++;
+    if (origins[word]?.source === 'model') model++;
     else missing++;
   }
-  return { dictionary, model, missing };
+  return { model, missing };
 }
 
 /**
  * The lookup result in one line, naming only what actually happened.
  *
- * Zeros are left out on purpose. "0 from the model" reads as a claim that the
- * model was involved, and the commonest outcome by far — a list the dictionary
- * covered outright — should say that and nothing else. Naming the model rather
- * than saying "the model" is what connects the count to the thing being billed.
+ * Zeros are left out on purpose. Naming the model rather than saying "the
+ * model" is what connects the count to the thing being billed.
  */
 function summaryLine(
-  counts: { dictionary: number; model: number; missing: number },
+  counts: { model: number; missing: number },
   model: string,
   t: Translate,
 ): string {
   const parts: string[] = [];
-  if (counts.dictionary > 0) parts.push(t('aiSummaryDictionary', { count: counts.dictionary }));
   if (counts.model > 0) parts.push(t('aiSummaryModel', { count: counts.model, model }));
   if (counts.missing > 0) parts.push(t('aiSummaryMissing', { count: counts.missing }));
   return parts.join(' · ');

@@ -248,6 +248,37 @@ describe('StudyScreen', () => {
     expect(stored?.syncStatus).toBe('pending');
   });
 
+  it('undoes a rating even after it has synced', async () => {
+    const [first] = await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
+    await show();
+    await screen.findByText('hablar');
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+    await screen.findByText('comer');
+
+    // The background push runs every few seconds; undo used to stop working after it.
+    await repository.markSynced([], [], await repository.pendingReviewEvents(TEST_USER.id));
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Undo' }));
+    await screen.findByText('hablar');
+    expect((await repository.getCard(first!.id))?.phase).toBe('new');
+  });
+
+  it('suspends a card from the top bar without opening the options, and can undo it', async () => {
+    const [first] = await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
+    await show();
+    await screen.findByText('hablar');
+
+    // Available before the answer is revealed, with no options menu in the way.
+    await fireEvent.press(screen.getByRole('button', { name: 'Suspend card' }));
+    await screen.findByText('comer');
+    expect((await repository.getCard(first!.id))?.suspended).toBe(true);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Undo' }));
+    await screen.findByText('hablar');
+    expect((await repository.getCard(first!.id))?.suspended).toBeFalsy();
+  });
+
   it('accepts only one rating while the save is pending', async () => {
     await seed([['hablar', 'to speak'], ['comer', 'to eat'], ['vivir', 'to live']]);
     const original = repository.rateCard.bind(repository);
@@ -487,7 +518,7 @@ describe('StudyScreen', () => {
     expect(stored?.phase).toBe('new');
   });
 
-  it('normalizes a conjugated word captured from an example', async () => {
+  it('defines a captured word with the model and normalizes it with the dictionary', async () => {
     const [card] = await seed([['hablar', 'to speak']]);
     await repository.updateCard(card!, {
       examples: ['Ellos comieron juntos.'],
@@ -497,18 +528,17 @@ describe('StudyScreen', () => {
       ai: {
         status: async () => ({
           dictionary: { available: true, languages: { es: true } },
+          cloud: { available: true, configured: true, model: 'gemini-test' },
         }),
-        resolve: async (words: string[]) => ({
+        resolve: async (words: string[], _language: string, options?: { useModel?: boolean }) => ({
           ok: true,
-          meanings: words.map((word) => word === 'comieron'
-            ? {
-                word,
-                meaning: 'to eat',
-                source: 'dictionary',
-                correctedWord: 'comer',
-                needsReview: false,
-              }
-            : { word, meaning: '', source: 'none', needsReview: false }),
+          meanings: words.map((word) => {
+            if (word !== 'comieron') return { word, meaning: '', source: 'none', needsReview: false };
+            // The model defines; the dictionary only supplies the infinitive.
+            return options?.useModel === false
+              ? { word, meaning: 'dictionary gloss', source: 'dictionary', correctedWord: 'comer', needsReview: false }
+              : { word, meaning: 'they ate', source: 'model', needsReview: true };
+          }),
         }),
         onProgress: () => () => {},
       },
@@ -522,7 +552,8 @@ describe('StudyScreen', () => {
 
     await waitFor(async () => {
       const cards = await repository.listCards(deck.id);
-      expect(cards.some((item) => item.front === 'comer')).toBe(true);
+      const captured = cards.find((item) => item.front === 'comer');
+      expect(captured?.back).toBe('they ate');
       expect(cards.some((item) => item.front === 'comieron')).toBe(false);
     });
   });

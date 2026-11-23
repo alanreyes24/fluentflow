@@ -551,7 +551,7 @@ function registerAiHandlers() {
   });
 
   ipcMain.handle('ai:resolve', async (event, request) => {
-    const { words, language, useModel, modelOnly } = request ?? {};
+    const { words, language, useModel } = request ?? {};
     if (!Array.isArray(words) || words.length === 0) {
       return { ok: false, error: 'No words to look up.' };
     }
@@ -565,7 +565,7 @@ function registerAiHandlers() {
         if (!event.sender.isDestroyed()) {
           event.sender.send('ai:progress', { done, total });
         }
-      }, askModel, modelOnly === true);
+      }, askModel);
       return { ok: true, ...result };
     } catch (error) {
       return { ok: false, error: String(error?.message ?? error) };

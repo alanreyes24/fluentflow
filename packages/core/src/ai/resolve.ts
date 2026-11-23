@@ -9,27 +9,24 @@ import {
 } from './translate.js';
 
 /**
- * Where a word's meaning comes from: the dictionary first, the model only for
- * what the dictionary does not have.
+ * Where a word's meaning comes from: the hosted model, always.
  *
- * That order is the whole point, and it is the opposite of what this started
- * as. Measured on the same twelve Spanish words: a Wiktionary-derived
- * dictionary answered all twelve correctly in 2 ms — including saying "I don't
- * know" to a Bosnian word and a typo that had wandered into a Spanish list —
- * while Qwen2.5-1.5B answered about seven, took 21 seconds, and invented
- * confident nonsense for the rest ("lodazal" as "lodestar").
+ * This used to be dictionary first, model for the leftovers. The dictionary
+ * was fast and free, but a Wiktionary gloss list has no idea which sense a
+ * learner actually hears — `repelar` came back as "to clip; shear" next to
+ * "to grumble" with nothing to say which one matters. So every definition is
+ * now the model's, and every one is marked as needing review.
  *
- * So the model is the fallback, not the engine, and its answers are marked as
- * needing review while the dictionary's are not. It has two jobs here:
- *
- *  - **Figure it out.** A word the dictionary missed may still be a real word —
- *    a rare form, a phrase, a compound — and the model gets one attempt at it.
- *  - **Throw it out.** An answer that fails validation is dropped rather than
- *    guessed at, and the word comes back with no meaning and a reason.
+ * The dictionary is still accepted, for one job only: telling a conjugated
+ * front from its infinitive (`comieron` → `comer`) without a billed request.
+ * When a model is supplied the dictionary is not consulted at all; when none
+ * is, a lookup answers from the dictionary so callers can read
+ * `correctedWord`. Those dictionary glosses are a by-product of the lookup
+ * and must never be written to a card back.
  *
  * Neither the dictionary nor the model is imported here. The lookup is
  * injected, the same seam `parseApkg` uses for SQLite, so this file can be
- * tested without a 79 MB dictionary or a 1.2 GB model anywhere near it.
+ * tested without a 79 MB dictionary or a hosted model anywhere near it.
  */
 
 /** One row from the dictionary: a gloss for a headword. */
@@ -69,22 +66,17 @@ export interface ResolvedMeaning {
   lemma?: string;
   /** A dictionary-supplied infinitive or model-supplied spelling correction. */
   correctedWord?: string;
-  /**
-   * Whether a person should check this before it becomes a card.
-   *
-   * False for the dictionary, true for the model. This is what lets the review
-   * list point attention at the handful of rows that need it instead of
-   * spreading it evenly over answers of wildly different reliability.
-   */
+  /** Whether a person should check this before it becomes a card. True for the model. */
   needsReview: boolean;
   rejected?: MeaningRejection;
 }
 
 export interface ResolveDeps {
+  /** Only consulted when there is no `infer`; see the note at the top of this file. */
   dictionary?: DictionaryLookup | null;
   infer?: InferenceFn | null;
   maxTokens?: number;
-  /** Deadline for the model half of the work. The dictionary is never slow. */
+  /** Deadline for the model requests. */
   budgetMs?: number;
   signal?: AbortSignal;
   onProgress?: (done: number, total: number) => void;
@@ -101,9 +93,8 @@ const TRANSLATION_BATCH_MAX_TOKENS = 4096;
 /**
  * Resolve a meaning for every word.
  *
- * The dictionary pass runs first and completely: it costs a millisecond per
- * word, so there is no reason to interleave it with anything. Only what it
- * misses reaches the model, which is where the time goes.
+ * With a model, every word is sent to it. Without one, the dictionary answers
+ * what it can — for infinitive normalization, not for card backs.
  */
 export async function resolveMeanings(
   words: string[],
@@ -113,8 +104,9 @@ export async function resolveMeanings(
   const now = deps.now ?? (() => Date.now());
   const results: ResolvedMeaning[] = [];
   const unresolved: number[] = [];
+  const dictionary = deps.infer ? null : deps.dictionary ?? null;
 
-  // --- the dictionary -------------------------------------------------------
+  // --- the dictionary, only when there is no model ---------------------------
   for (const originalWord of words) {
     const word = sanitizeWord(originalWord);
     if (!word) {
@@ -124,12 +116,12 @@ export async function resolveMeanings(
         meaning: '',
         source: 'none',
         needsReview: false,
-        rejected: deps.infer ? 'model-rejected' : deps.dictionary ? 'not-found' : 'nothing-to-ask',
+        rejected: deps.infer ? 'model-rejected' : dictionary ? 'not-found' : 'nothing-to-ask',
       });
-      deps.onProgress?.(results.length, words.length);
+      if (!deps.infer) deps.onProgress?.(results.length, words.length);
       continue;
     }
-    const found = deps.dictionary ? await lookUp(deps.dictionary, word, language) : null;
+    const found = dictionary ? await lookUp(dictionary, word, language) : null;
     if (found) {
       // Sanitizing is for lookup and prompting only. The renderer keys state by
       // the exact pasted front, so changing the identity here strands results.
@@ -141,15 +133,15 @@ export async function resolveMeanings(
         meaning: '',
         source: 'none',
         needsReview: false,
-        rejected: deps.infer ? 'not-found' : deps.dictionary ? 'not-found' : 'nothing-to-ask',
+        rejected: deps.infer || dictionary ? 'not-found' : 'nothing-to-ask',
       });
     }
-    deps.onProgress?.(results.length, words.length);
+    if (!deps.infer) deps.onProgress?.(results.length, words.length);
   }
 
   if (!deps.infer || unresolved.length === 0) return results;
 
-  // --- the model, for the leftovers ----------------------------------------
+  // --- the model, for every word -------------------------------------------
   const deadline = deps.budgetMs ? now() + deps.budgetMs : Infinity;
   let modelDone = 0;
 
@@ -228,7 +220,7 @@ export async function resolveMeanings(
 }
 
 /**
- * One word, through the dictionary.
+ * One word, through the dictionary. Used for infinitive normalization only.
  *
  * Three attempts, cheapest first: the word as written, then lower-cased, then
  * the lemma an inflected form points at. The last is what makes a word list

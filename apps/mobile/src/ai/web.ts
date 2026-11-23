@@ -35,7 +35,6 @@ export async function resolveMeaningsOnWeb(
       words,
       language,
       useModel: options?.useModel !== false,
-      modelOnly: options?.modelOnly === true,
     }),
   });
   return { meanings: body.meanings, usage: body.usage };

@@ -73,16 +73,14 @@ export interface CloudSettingsInput {
 /** How much of a lookup to run. */
 export interface LookupOptions {
   /**
-   * Send the words the dictionary misses to the hosted model. Defaults to true.
+   * Ask the hosted model for definitions. Defaults to true, and every
+   * definition comes from the model.
    *
-   * The import screen passes false for its first pass, so that the dictionary —
-   * which is free, offline and covers most word lists outright — answers before
-   * anything can be billed, and reaching the model is always a second, named
-   * press rather than a side effect of asking for meanings at all.
+   * Pass false to consult only the free local dictionary, which is used for
+   * one thing: turning a conjugated front into its infinitive. Its glosses are
+   * never written to a card back.
    */
   useModel?: boolean;
-  /** Skip the dictionary and ask the hosted model for a fresh answer. */
-  modelOnly?: boolean;
 }
 
 export interface TranslationProgress {
@@ -208,9 +206,10 @@ export async function clearCloudSettings(): Promise<CloudModelStatus> {
 }
 
 /**
- * Find meanings for a list of words: dictionary first, model for the rest.
+ * Find meanings for a list of words. Every definition comes from the model.
  *
- * Pass `{ useModel: false }` to stop at the dictionary. See {@link LookupOptions}.
+ * Pass `{ useModel: false }` for a dictionary-only infinitive check. See
+ * {@link LookupOptions}.
  *
  * @throws with a message worth showing when the shell reports a failure
  */

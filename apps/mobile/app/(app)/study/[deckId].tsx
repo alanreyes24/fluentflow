@@ -255,7 +255,7 @@ export default function StudyScreen() {
         const before = { queue, index, reviewed, lapses };
         const answered = await repository.rateCard(card, rating);
         exampleRequest.current += 1;
-        setUndoState(before);
+        setUndoState({ ...before, kind: 'review' });
         setReviewed((count) => count + 1);
         if (rating === 'again') setLapses((count) => count + 1);
         setRevealed(false);
@@ -281,10 +281,32 @@ export default function StudyScreen() {
 
   const undo = useCallback(async () => {
     if (!repository || !user || !undoState) return;
-    const restored = await repository.undoLastReview(user.id);
-    if (!restored) return;
+    let restored: Card | null;
+    try {
+      if (undoState.kind === 'review') {
+        restored = await repository.undoLastReview(user.id);
+      } else {
+        // Re-read the card so an edit or star made since is not thrown away.
+        const current = await repository.getCard(undoState.cardId);
+        restored = !current
+          ? null
+          : undoState.kind === 'suspend'
+            ? await repository.unsuspendCard(current)
+            : await repository.unburyCard(current);
+      }
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (!restored) {
+      // Never fail silently: a button that does nothing reads as broken.
+      setUndoState(null);
+      setToast(t('undoUnavailable'));
+      return;
+    }
+    const card = restored;
     setQueue(undoState.queue.map((item) =>
-      item.id === restored.id ? { ...item, starred: restored.starred } : item,
+      item.id === card.id ? { ...item, starred: card.starred } : item,
     ));
     setIndex(undoState.index);
     setReviewed(undoState.reviewed);
@@ -296,15 +318,15 @@ export default function StudyScreen() {
     setEditing(false);
     setEditError(null);
     await refreshDecks();
-  }, [repository, user, undoState, refreshDecks]);
+  }, [repository, user, undoState, refreshDecks, t]);
 
   const removeFromSession = useCallback(
     async (action: 'bury' | 'suspend') => {
       if (!repository || !card) return;
       if (action === 'bury') await repository.buryCard(card);
       else await repository.suspendCard(card);
+      setUndoState({ queue, index, reviewed, lapses, kind: action, cardId: card.id });
       setQueue((current) => current.filter((item) => item.id !== card.id));
-      setUndoState(null);
       setRevealed(false);
       setExamples(null);
       setToolsOpen(false);
@@ -312,7 +334,7 @@ export default function StudyScreen() {
       setEditError(null);
       await refreshDecks();
     },
-    [repository, card, refreshDecks],
+    [repository, card, refreshDecks, queue, index, reviewed, lapses],
   );
 
   /**
@@ -453,14 +475,9 @@ export default function StudyScreen() {
     if (!repository || !card || regeneratingDefinition) return;
     setRegeneratingDefinition(true);
     try {
-      // Deliberately skip the dictionary: this action exists for a learner who
-      // thinks the stored gloss is wrong and wants a fresh model answer.
-      const lookup = await lookUpMeanings(
-        [card.front],
-        card.language,
-        undefined,
-        { useModel: true, modelOnly: true },
-      );
+      // A learner who thinks the stored definition is wrong wants a fresh
+      // model answer.
+      const lookup = await lookUpMeanings([card.front], card.language);
       const resolved = lookup.meanings[0];
       if (!resolved || resolved.source !== 'model' || !resolved.meaning.trim()) {
         throw new Error('The model returned no definition.');
@@ -490,24 +507,23 @@ export default function StudyScreen() {
 
       void (async () => {
         try {
-          // Try the free dictionary first, then use the configured AI model
-          // for words the dictionary does not know.
-          const [lookup, sources] = await Promise.all([
-            lookUpMeanings([word], card.language, undefined, { useModel: false }),
-            lookupSources(),
-          ]);
-          let meaning = lookup.meanings[0]?.meaning?.trim() ?? '';
-          let normalizedWord = normalizedFrontFrom(lookup.meanings[0], word, meaning);
-          if (!meaning && sources.cloud?.available) {
-            const modelLookup = await lookUpMeanings([word], card.language);
-            const resolved = modelLookup.meanings[0];
-            meaning = resolved?.meaning?.trim() ?? '';
-            normalizedWord = normalizedFrontFrom(resolved, word, meaning);
+          // The definition always comes from the AI model. The free
+          // dictionary only turns a conjugated word into its infinitive.
+          const sources = await lookupSources();
+          if (!sources.cloud?.available) {
+            showToast(t('wordMeaningUnavailable'));
+            return;
           }
+          const modelLookup = await lookUpMeanings([word], card.language);
+          const resolved = modelLookup.meanings[0];
+          const meaning = resolved?.meaning?.trim() ?? '';
           if (!meaning) {
             showToast(t('wordMeaningUnavailable'));
             return;
           }
+          // The model's spelling fix first, then the dictionary's infinitive.
+          const spelled = normalizedFrontFrom(resolved, word, meaning);
+          const normalizedWord = await normalizeCardFront(spelled, card.language, meaning);
 
           const existing = await repository.findCardByFront(deck.id, normalizedWord);
           if (existing) {
@@ -595,6 +611,16 @@ export default function StudyScreen() {
                 iconOnly={compact}
                 onPress={() => setChatOpen((open) => !open)}
               />
+              {!editing ? (
+                <Button
+                  label={t('suspend')}
+                  icon="pauseCircle"
+                  variant="ghost"
+                  size="small"
+                  iconOnly={compact}
+                  onPress={() => void removeFromSession('suspend')}
+                />
+              ) : null}
               {!editing ? (
                 <Pressable
                   accessibilityRole="button"
@@ -792,13 +818,6 @@ export default function StudyScreen() {
                       variant="secondary"
                       size="small"
                       onPress={() => void removeFromSession('bury')}
-                      style={styles.flex}
-                    />
-                    <Button
-                      label={t('suspend')}
-                      variant="ghostDanger"
-                      size="small"
-                      onPress={() => void removeFromSession('suspend')}
                       style={styles.flex}
                     />
                   </Row>
@@ -1211,12 +1230,13 @@ function statusKey(status: Card['status']): 'statusNew' | 'statusLearning' | 'st
  */
 const STAGE_WIDTH = 620;
 
-interface UndoState {
+/** The session as it was before the last undoable action, and what that action was. */
+type UndoState = {
   queue: Card[];
   index: number;
   reviewed: number;
   lapses: number;
-}
+} & ({ kind: 'review' } | { kind: 'bury' | 'suspend'; cardId: string });
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },

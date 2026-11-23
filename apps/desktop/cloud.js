@@ -3,8 +3,8 @@
 /**
  * The hosted model: the user's own API key, and where it is kept.
  *
- * A hosted model is now the only thing that writes example sentences, and the
- * only thing asked about a word the dictionary does not have. It needs a key
+ * A hosted model is now the only thing that writes example sentences and the
+ * only thing that writes definitions. It needs a key
  * and a network, writes better Spanish and far better Bosnian than the 1.2 GB
  * ONNX model it replaced, and answers in about a second instead of five to
  * seven. This file is what makes it available without shipping a credential.

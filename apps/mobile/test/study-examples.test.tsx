@@ -228,7 +228,7 @@ describe('StudyScreen examples', () => {
     expect(resolve).toHaveBeenCalledWith(
       ['prudente'],
       'es',
-      { useModel: true, modelOnly: true },
+      undefined,
     );
     expect((await repository.getCard(card.id))?.back).toBe('prudent, sensible');
   });

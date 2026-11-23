@@ -3,6 +3,9 @@
 /**
  * Bilingual dictionary lookup, in the main process.
  *
+ * Used only to turn conjugated card fronts into infinitives. Definitions always
+ * come from the hosted model; see `resolve` in ai.js.
+ *
  * The files are built by `npm run fetch-dictionaries` and live beside the
  * model in the user data directory. They are SQLite, read here through
  * `node:sqlite` — no native module, nothing to rebuild against Electron.

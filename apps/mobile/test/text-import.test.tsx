@@ -16,50 +16,42 @@ const LIST = 'hablar - to speak\ncasa - house\nniño - child';
 /** A pasted vocabulary list with no meanings on it — the hard case. */
 const WORDS = 'nido\nempapar\nlodazal';
 
-/** What the distilled Wiktionary file returns for these words. */
-const DICTIONARY: Record<string, string> = { nido: 'nest', empapar: 'to drench' };
-/** What a small model actually said about a word it did not know. */
-const GUESSES: Record<string, string> = { lodazal: 'lodestar' };
+/**
+ * What the distilled Wiktionary file returns. Only the free infinitive check
+ * sees these; they must never reach a card back.
+ */
+const DICTIONARY: Record<string, string> = { nido: 'nest (dictionary)', empapar: 'to drench' };
+/** What Gemini says about each word. Every definition comes from here. */
+const MODEL: Record<string, string> = { nido: 'nest', empapar: 'to soak', lodazal: 'mudhole' };
 
-/** One word's answer, from whichever source this pass is allowed to use. */
-function answer(word: string, useModel?: boolean) {
-  if (word === 'comieron') {
-    return {
-      word,
-      correctedWord: 'comer',
-      meaning: 'to eat',
-      source: 'dictionary',
-      needsReview: false,
-    };
+/** One word's answer, from whichever source this call is allowed to use. */
+function answer(word: string, useModel: boolean) {
+  if (!useModel) {
+    if (word === 'comieron') {
+      return { word, correctedWord: 'comer', meaning: 'to eat', source: 'dictionary', needsReview: false };
+    }
+    if (word === 'molim') {
+      return { word, correctedWord: 'moliti', meaning: 'I pray', source: 'dictionary', needsReview: false };
+    }
+    if (DICTIONARY[word]) {
+      return { word, meaning: DICTIONARY[word], source: 'dictionary', needsReview: false };
+    }
+    return { word, meaning: '', source: 'none', needsReview: false, rejected: 'not-found' };
   }
-  if (word === 'molim') {
-    return {
-      word,
-      correctedWord: 'moliti',
-      meaning: 'I pray',
-      source: 'dictionary',
-      needsReview: false,
-    };
+  if (MODEL[word]) {
+    return { word, meaning: MODEL[word], source: 'model', needsReview: true };
   }
-  if (DICTIONARY[word]) {
-    return { word, meaning: DICTIONARY[word], source: 'dictionary', needsReview: false };
-  }
-  if (useModel && GUESSES[word]) {
-    return { word, meaning: GUESSES[word], source: 'model', needsReview: true };
-  }
-  return { word, meaning: '', source: 'none', needsReview: false, rejected: 'not-found' };
+  return { word, meaning: '', source: 'none', needsReview: false, rejected: 'model-rejected' };
 }
 
 /**
  * The desktop shell's lookup bridge.
  *
  * Installed on `globalThis` exactly as `contextBridge` installs it, so the
- * screen's own detection runs rather than a mock of it. The answers are real:
- * the dictionary rows are what the distilled Wiktionary file returns, and the
- * model row is what Qwen2.5-1.5B actually said about a word it did not know.
+ * screen's own detection runs rather than a mock of it.
  *
- * It honours `useModel`, because the free dictionary pass must stay separate
- * from the one button that sends unresolved words to Gemini.
+ * It honours `useModel`: `false` is the free dictionary-only infinitive check,
+ * anything else is a billed Gemini request.
  */
 function installBridge(overrides = {}) {
   const bridge = {
@@ -69,22 +61,25 @@ function installBridge(overrides = {}) {
         dictionary: { available: true, languages: { es: true, bs: true }, source: { es: 'Spanish' } },
         cloud: { available: true, configured: true, model: 'gemini-3.1-flash-lite' },
       })),
-      resolve: jest.fn(async (words: string[], _language: string, options?: { useModel?: boolean }) => ({
-        ok: true,
-        meanings: words.map((word) => answer(word, options?.useModel)),
-        ...(options?.useModel
-          ? {
-              usage: {
-                model: 'gemini-3.1-flash-lite',
-                requests: 1,
-                inputTokens: 120,
-                outputTokens: 30,
-                totalTokens: 150,
-                listPriceUsd: 0.000075,
-              },
-            }
-          : {}),
-      })),
+      resolve: jest.fn(async (words: string[], _language: string, options?: { useModel?: boolean }) => {
+        const useModel = options?.useModel !== false;
+        return {
+          ok: true,
+          meanings: words.map((word) => answer(word, useModel)),
+          ...(useModel
+            ? {
+                usage: {
+                  model: 'gemini-3.1-flash-lite',
+                  requests: 1,
+                  inputTokens: 120,
+                  outputTokens: 30,
+                  totalTokens: 150,
+                  listPriceUsd: 0.000075,
+                },
+              }
+            : {}),
+        };
+      }),
       onProgress: jest.fn(() => jest.fn()),
       ...overrides,
     },
@@ -92,6 +87,8 @@ function installBridge(overrides = {}) {
   (globalThis as Record<string, unknown>).fluentflowDesktop = bridge;
   return bridge;
 }
+
+const ASK = (count: number) => `Ask gemini-3.1-flash-lite to define ${count} word(s)`;
 
 describe('TextImportScreen', () => {
   let context: Awaited<ReturnType<typeof createTestRepository>>;
@@ -300,8 +297,8 @@ describe('TextImportScreen', () => {
     expect(screen.queryByLabelText('nido')).toBeNull();
   });
 
-  it('offers the lookup when only a dictionary is installed', async () => {
-    installBridge({
+  it('never fills meanings from the dictionary, even with no API key', async () => {
+    const bridge = installBridge({
       status: jest.fn(async () => ({
         dictionary: { available: true, languages: { es: true }, source: { es: 'Spanish' } },
         cloud: { available: false, configured: false, reason: 'No API key' },
@@ -310,52 +307,36 @@ describe('TextImportScreen', () => {
     await renderScreen(<TextImportScreen />, { repository });
     await paste(WORDS);
 
-    // The dictionary alone is the good case: it answers without being asked,
-    // and with no key there is no paid step to offer.
-    await screen.findByText('Meanings assigned automatically');
-    expect(screen.getByText('nest')).toBeTruthy();
+    await screen.findByText('Gemini is not connected. Add a key or approve skipping unresolved words.');
+    expect(bridge.ai.resolve).not.toHaveBeenCalled();
+    expect(screen.queryByText('nest (dictionary)')).toBeNull();
     expect(screen.queryByRole('button', { name: /^Ask / })).toBeNull();
   });
 
-  it('answers from the dictionary first, and bills nothing to do it', async () => {
+  it('sends nothing until the Gemini button is pressed', async () => {
     const bridge = installBridge();
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
-    // The dictionary pass runs on its own — it is free and sends nothing. The
-    // paid pass still waits.
-    await screen.findByText('Meanings assigned automatically');
-
-    // The press the user cannot avoid is the one that sends nothing anywhere.
-    expect(bridge.ai.resolve).toHaveBeenCalledWith(['nido', 'empapar', 'lodazal'], 'es', {
-      useModel: false,
-    });
-    expect(screen.getByText('nest')).toBeTruthy();
-    expect(screen.getByText('to drench')).toBeTruthy();
-    expect(screen.getByText('—')).toBeTruthy();
-    expect(screen.getByText('2 from the dictionary · 1 with no answer')).toBeTruthy();
+    await screen.findByRole('button', { name: ASK(3) });
+    expect(screen.getByText(/Estimated maximum cost/)).toBeTruthy();
+    expect(bridge.ai.resolve).not.toHaveBeenCalled();
+    expect(screen.queryByText('Meanings assigned automatically')).toBeNull();
   });
 
-  it('sends only the leftovers to the model, and only when asked to', async () => {
+  it('sends every word to the model, including ones the dictionary knows', async () => {
     const bridge = installBridge();
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
 
-    // The dictionary pass runs on its own — it is free and sends nothing. The
-    // The paid pass shows its estimate, then one press sends only the leftovers.
-    await screen.findByText('Meanings assigned automatically');
-
-    expect(screen.getByText(/Estimated maximum cost/)).toBeTruthy();
-    await fireEvent.press(
-      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
-    );
+    await fireEvent.press(await screen.findByRole('button', { name: ASK(3) }));
 
     await screen.findByText('Meanings assigned automatically');
-    expect(bridge.ai.resolve).toHaveBeenLastCalledWith(['lodazal'], 'es', { useModel: true });
-    expect(screen.getByText('lodestar')).toBeTruthy();
-    expect(
-      screen.getByText('2 from the dictionary · 1 from gemini-3.1-flash-lite'),
-    ).toBeTruthy();
+    expect(bridge.ai.resolve).toHaveBeenLastCalledWith(['nido', 'empapar', 'lodazal'], 'es', undefined);
+    expect(screen.getByText('nest')).toBeTruthy();
+    expect(screen.getByText('to soak')).toBeTruthy();
+    expect(screen.queryByText('to drench')).toBeNull();
+    expect(screen.getByText('3 from gemini-3.1-flash-lite')).toBeTruthy();
     expect(
       screen.getByText(
         'Measured Gemini usage — requests: 1 · input tokens: 120 · output tokens: 30 · list-price cost: $0.00007500.',
@@ -369,47 +350,25 @@ describe('TextImportScreen', () => {
   it('shows an in-place busy indicator while the one-click Gemini request runs', async () => {
     let finishModel: (() => void) | undefined;
     installBridge({
-      resolve: jest.fn(async (
-        words: string[],
-        _language: string,
-        options?: { useModel?: boolean },
-      ) => {
-        if (!options?.useModel) {
-          return {
-            ok: true,
-            meanings: words.map((word) => ({
-              word,
-              meaning: '',
-              source: 'none',
-              needsReview: false,
-              rejected: 'not-found',
-            })),
-          };
-        }
-        return new Promise((resolve) => {
-          finishModel = () => resolve({
-            ok: true,
-            meanings: words.map((word) => ({
-              word,
-              meaning: 'mudflat',
-              source: 'model',
-              needsReview: true,
-            })),
-          });
+      resolve: jest.fn(async (words: string[]) => new Promise((resolve) => {
+        finishModel = () => resolve({
+          ok: true,
+          meanings: words.map((word) => ({
+            word,
+            meaning: 'mudflat',
+            source: 'model',
+            needsReview: true,
+          })),
         });
-      }),
+      })),
     });
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste('lodazal');
-    await screen.findByText('Meanings assigned automatically');
 
-    await fireEvent.press(
-      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
-    );
+    await fireEvent.press(await screen.findByRole('button', { name: ASK(1) }));
 
     const loading = screen.getByRole('button', { name: 'Looking up meanings…' });
     expect(loading.props.accessibilityState).toEqual({ disabled: true, busy: true });
-    expect(screen.queryByRole('button', { name: 'Send to Gemini' })).toBeNull();
 
     finishModel?.();
     await screen.findByText('mudflat');
@@ -431,18 +390,13 @@ describe('TextImportScreen', () => {
     expect(await repository.listDecks(TEST_USER.id)).toHaveLength(0);
   });
 
-  it('imports the corrected meanings, not the ones the model gave', async () => {
+  it('imports the model\'s definitions, not the dictionary\'s', async () => {
     installBridge();
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
-    await screen.findByText('Meanings assigned automatically');
-    await fireEvent.press(
-      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
-    );
+    await fireEvent.press(await screen.findByRole('button', { name: ASK(3) }));
     await screen.findByText('Meanings assigned automatically');
 
-    // The meanings are assigned by the dictionary/model; there is no manual
-    // meaning field to edit.
     await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');
     await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));
 
@@ -454,30 +408,27 @@ describe('TextImportScreen', () => {
     const [deck] = await repository.listDecks(TEST_USER.id);
     const cards = await repository.listCards(deck!.id);
     expect(cards.map((card) => `${card.front}=${card.back}`).sort()).toEqual([
-      'empapar=to drench',
-      'lodazal=lodestar',
+      'empapar=to soak',
+      'lodazal=mudhole',
       'nido=nest',
     ]);
   });
 
-  it('a word left blank in review is not written as a card', async () => {
+  it('a word the model could not define is not written as a card', async () => {
     installBridge({
-      resolve: jest.fn(async () => ({
+      resolve: jest.fn(async (words: string[]) => ({
         ok: true,
-        meanings: [
-          { word: 'nido', meaning: 'nest', source: 'dictionary', needsReview: false },
-          { word: 'empapar', meaning: 'to drench', source: 'dictionary', needsReview: false },
-          // Neither source had anything: an empty box, not an invented card.
-          { word: 'lodazal', meaning: '', source: 'none', needsReview: false, rejected: 'model-rejected' },
-        ],
+        meanings: words.map((word) => word === 'lodazal'
+          ? { word, meaning: '', source: 'none', needsReview: false, rejected: 'model-rejected' }
+          : { word, meaning: MODEL[word], source: 'model', needsReview: true }),
       })),
     });
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
+    await fireEvent.press(await screen.findByRole('button', { name: ASK(3) }));
     await screen.findByText('Meanings assigned automatically');
-    expect(screen.getByText('2 from the dictionary · 1 with no answer')).toBeTruthy();
+    expect(screen.getByText('2 from gemini-3.1-flash-lite · 1 with no answer')).toBeTruthy();
 
-    expect(screen.getByRole('button', { name: 'I understand — skip unresolved words' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Create cards' })).toBeDisabled();
     await fireEvent.press(screen.getByRole('button', { name: 'I understand — skip unresolved words' }));
 
@@ -489,56 +440,40 @@ describe('TextImportScreen', () => {
       expect(decks).toHaveLength(1);
     });
 
-    // "lodazal" had no answer and was left blank, so only two cards exist.
     const [deck] = await repository.listDecks(TEST_USER.id);
     const cards = await repository.listCards(deck!.id);
     expect(cards.map((card) => card.front).sort()).toEqual(['empapar', 'nido']);
   });
 
-  it('offers every unresolved word in a large paste to Gemini', async () => {
+  it('offers every word in a large paste to Gemini', async () => {
     const words = Array.from({ length: 450 }, (_, index) => `palabra${index}`).join('\n');
     installBridge();
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(words);
 
     await screen.findByText('450 words with no meaning yet');
-    expect(
-      screen.getByRole('button', {
-        name: 'Ask gemini-3.1-flash-lite about the remaining 450',
-      }),
-    ).toBeTruthy();
+    expect(await screen.findByRole('button', { name: ASK(450) })).toBeTruthy();
   });
 
   it('keeps model request failures available for retry', async () => {
     installBridge({
-      resolve: jest.fn(async (
-        words: string[],
-        _language: string,
-        options?: { useModel?: boolean },
-      ) => ({
+      resolve: jest.fn(async (words: string[]) => ({
         ok: true,
         meanings: words.map((word) => ({
           word,
           meaning: '',
           source: 'none',
           needsReview: false,
-          rejected: options?.useModel ? 'model-failed' : 'not-found',
+          rejected: 'model-failed',
         })),
       })),
     });
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
-    await screen.findByText('Meanings assigned automatically');
-    await fireEvent.press(
-      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 3' }),
-    );
+    await fireEvent.press(await screen.findByRole('button', { name: ASK(3) }));
 
     await screen.findByText('3 could not be completed and can be retried.');
-    expect(
-      screen.getByRole('button', {
-        name: 'Ask gemini-3.1-flash-lite about the remaining 3',
-      }),
-    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: ASK(3) })).toBeTruthy();
   });
 
   it('applies a model spelling correction to the imported card front', async () => {
@@ -549,29 +484,15 @@ describe('TextImportScreen', () => {
         options?: { useModel?: boolean },
       ) => ({
         ok: true,
-        meanings: words.map((word) => options?.useModel
-          ? {
-              word,
-              correctedWord: 'armadura',
-              meaning: 'armor',
-              source: 'model',
-              needsReview: true,
-            }
-          : {
-              word,
-              meaning: '',
-              source: 'none',
-              needsReview: false,
-              rejected: 'not-found',
-            }),
+        meanings: words.map((word) => options?.useModel !== false
+          ? { word, correctedWord: 'armadura', meaning: 'armor', source: 'model', needsReview: true }
+          : { word, meaning: '', source: 'none', needsReview: false, rejected: 'not-found' }),
       })),
     });
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste('almadura');
+    await fireEvent.press(await screen.findByRole('button', { name: ASK(1) }));
     await screen.findByText('Meanings assigned automatically');
-    await fireEvent.press(
-      screen.getByRole('button', { name: 'Ask gemini-3.1-flash-lite about the remaining 1' }),
-    );
     await fireEvent.changeText(screen.getByLabelText('Deck name'), 'Spanish');
     await fireEvent.press(screen.getByRole('button', { name: 'Create cards' }));
 
@@ -583,17 +504,19 @@ describe('TextImportScreen', () => {
     });
   });
 
-  it('reruns lookup when the selected language changes', async () => {
+  it('discards definitions and asks in the new language when the language changes', async () => {
     const bridge = installBridge();
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste('lodazal');
-    await screen.findByText('Meanings assigned automatically');
+    await fireEvent.press(await screen.findByRole('button', { name: ASK(1) }));
+    await screen.findByText('mudhole');
 
     await fireEvent.press(screen.getByRole('button', { name: 'Bosanski' }));
+    await waitFor(() => expect(screen.queryByText('mudhole')).toBeNull());
+
+    await fireEvent.press(await screen.findByRole('button', { name: ASK(1) }));
     await waitFor(() => {
-      expect(bridge.ai.resolve).toHaveBeenLastCalledWith(['lodazal'], 'bs', {
-        useModel: false,
-      });
+      expect(bridge.ai.resolve).toHaveBeenLastCalledWith(['lodazal'], 'bs', undefined);
     });
   });
 
@@ -601,10 +524,9 @@ describe('TextImportScreen', () => {
     installBridge({ resolve: jest.fn(async () => ({ ok: false, error: 'the runtime fell over' })) });
     await renderScreen(<TextImportScreen />, { repository, user: TEST_USER });
     await paste(WORDS);
+    await fireEvent.press(await screen.findByRole('button', { name: ASK(3) }));
 
-    // The automatic pass is the one that fails here, so the error has to
-    // surface on its own too — there is no press to hang off.
     await screen.findByText('the runtime fell over');
-    expect(screen.queryByText('Check these before importing')).toBeNull();
+    expect(screen.queryByText('Meanings assigned automatically')).toBeNull();
   });
 });
