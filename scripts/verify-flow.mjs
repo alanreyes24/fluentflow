@@ -10,6 +10,9 @@
  *
  * Each device here is a small stand-in for what the app does on device: hold
  * records locally, reconcile with `planMerge` from core, push what it owns.
+ * It speaks the same protocol as `apps/mobile/src/sync`: the first device to
+ * sync seeds the collection, which starts an epoch; after that every push and
+ * pull names that epoch, and pulls ask only for what changed since a cursor.
  *
  *   node scripts/verify-flow.mjs
  */
@@ -62,7 +65,11 @@ async function run() {
   }
 
   await desktop.push();
-  check('a deck and ten cards reach the server', desktop.lastPush.accepted.cards === 10);
+  check(
+    'a deck and ten cards reach the server',
+    desktop.lastPush.accepted?.cards === 10,
+    desktop.lastPush.accepted ? undefined : 'the first sync did not seed the collection',
+  );
 
   // --- 2. A second device picks them up ------------------------------------
   const laptop = new Device('laptop');
@@ -269,10 +276,17 @@ async function run() {
   );
 
   // --- 12. Isolation between accounts -------------------------------------
-  const intruder = await get('/api/sync', 'someone-else');
+  // Another account has no collection of its own, and borrowing this one's
+  // epoch does not let it read this one.
+  const intruderState = await get('/api/sync/state', 'someone-else');
+  const borrowed = await get(`/api/sync/pull?epoch=${encodeURIComponent(desktop.epoch)}`, 'someone-else').then(
+    () => 'answered',
+    (error) => error.status,
+  );
   check(
     'another account sees none of this data',
-    intruder.decks.length === 0 && intruder.cards.length === 0,
+    intruderState.epoch === null && borrowed === 409,
+    `epoch ${intruderState.epoch}, pull ${borrowed}`,
   );
 }
 
@@ -286,7 +300,10 @@ class Device {
     this.cards = [];
     this.online = true;
     this.lastPush = null;
-    this.lastPulledAt = undefined;
+    /** The collection this device's copy belongs to; null until its first sync. */
+    this.epoch = null;
+    /** The server version this device has pulled up to. */
+    this.cursor = undefined;
   }
 
   getCard(id) {
@@ -309,26 +326,73 @@ class Device {
   async push() {
     if (!this.online) throw new Error(`${this.name} is offline`);
     const { decks, cards } = this.pending();
-    this.lastPush = await post('/api/sync', JSON.stringify({ decks, cards }), {
-      'content-type': 'application/json',
-    });
-    // Mirrors Repository.markSynced: only clear records that did not change
-    // while the request was in flight.
-    for (const deck of decks) deck.syncStatus = 'synced';
-    for (const card of cards) card.syncStatus = 'synced';
+
+    if (!this.epoch) {
+      // The first device to sync creates the collection; any other adopts it.
+      const { epoch } = await get('/api/sync/state');
+      if (epoch) {
+        await this.pull();
+      } else {
+        const seeded = await post(
+          '/api/sync/seed',
+          JSON.stringify({ decks: this.decks, cards: this.cards, reviewEvents: [] }),
+          { 'content-type': 'application/json' },
+        );
+        this.epoch = seeded.epoch;
+        this.cursor = seeded.cursor;
+        this.lastPush = seeded;
+        this.markSynced(this.decks, this.cards);
+        return this.lastPush;
+      }
+    }
+
+    this.lastPush = await post(
+      '/api/sync/push',
+      JSON.stringify({ epoch: this.epoch, decks, cards, reviewEvents: [] }),
+      { 'content-type': 'application/json' },
+    );
+    this.markSynced(decks, cards);
+    // The server kept its own copy of anything it held a newer version of.
+    for (const deck of this.lastPush.rejected.decks) this.replaceDeck(deck);
+    for (const card of this.lastPush.rejected.cards) this.replaceCard(card);
     return this.lastPush;
   }
 
   async pull() {
     if (!this.online) throw new Error(`${this.name} is offline`);
-    const remote = await get('/api/sync');
 
-    const deckPlan = planMerge(this.decks, remote.decks);
-    const cardPlan = planMerge(this.cards, remote.cards);
+    if (!this.epoch) {
+      // A device joining an existing collection replaces its copy with the
+      // server's rather than merging into it.
+      const { epoch } = await get('/api/sync/state');
+      if (!epoch) return { decks: [], cards: [] };
+      this.epoch = epoch;
+      this.cursor = undefined;
+      this.decks = [];
+      this.cards = [];
+    }
+
+    const since = this.cursor ? `&since=${encodeURIComponent(this.cursor)}` : '';
+    const changes = await get(`/api/sync/pull?epoch=${encodeURIComponent(this.epoch)}${since}`);
+
+    const deckPlan = planMerge(this.decks, changes.decks);
+    const cardPlan = planMerge(this.cards, changes.cards);
     this.decks = deckPlan.merged;
     this.cards = cardPlan.merged;
-    this.lastPulledAt = remote.serverTime;
+    this.cursor = changes.cursor;
     return { deckPlan, cardPlan };
+  }
+
+  replaceDeck(deck) {
+    const index = this.decks.findIndex((existing) => existing.id === deck.id);
+    if (index === -1) this.decks.push(deck);
+    else this.decks[index] = deck;
+  }
+
+  /** Mirrors Repository.markSynced: what was sent is no longer pending. */
+  markSynced(decks, cards) {
+    for (const deck of decks) deck.syncStatus = 'synced';
+    for (const card of cards) card.syncStatus = 'synced';
   }
 }
 
@@ -348,7 +412,9 @@ async function get(path, user = USER) {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: { authorization: `Bearer local:${user}` },
   });
-  if (!response.ok) throw new Error(`GET ${path} -> ${response.status}`);
+  if (!response.ok) {
+    throw Object.assign(new Error(`GET ${path} -> ${response.status}`), { status: response.status });
+  }
   return response.json();
 }
 

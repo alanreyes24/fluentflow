@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { Platform, useColorScheme, useWindowDimensions, type TextStyle } from 'react-native';
 import { AppContext } from '../state/app';
@@ -346,8 +346,10 @@ export function useThemeContext(): ThemeContextValue {
  * The app runs in anything from a narrow window to a 1100pt one. Nothing
  * changes shape across that range — the chrome is a title strip above and a
  * toolbar below at every size — but content that is comfortable in a small
- * window is loose in a large one, so the wide breakpoint tightens controls and
- * opens up padding rather than rearranging the screen.
+ * window is loose in a large one, so the wide breakpoint opens up padding
+ * rather than rearranging the screen. It tightens controls only under a mouse:
+ * a tablet is as wide as a laptop window and still driven by a finger (see
+ * `touch` and `tablet` below).
  *
  * `measure` is the width text is actually set at. 680pt is roughly 75
  * characters at our body size, the long end of the classic range; past that
@@ -359,6 +361,12 @@ export const layout = {
   measure: 680,
   /** The navigation sidebar's width, on a window above `wide`. */
   sidebar: 232,
+  /**
+   * The shortest side, in points, from which a touch screen counts as a
+   * tablet. Every phone is under it held either way (the largest is ~440pt
+   * across); every iPad and most Android tablets are over it.
+   */
+  tablet: 600,
 } as const;
 
 export interface LayoutInfo {
@@ -370,10 +378,61 @@ export interface LayoutInfo {
   compact: boolean;
   /** The width left for the screen once the sidebar has taken its share. */
   paneWidth: number;
+  /**
+   * Is the main input a finger rather than a mouse? Controls keep thumb-sized
+   * targets and keyboard hints are left off, however wide the window is.
+   */
+  touch: boolean;
+  /** A touch screen with tablet room: a larger card and bigger controls. */
+  tablet: boolean;
 }
 
 export function useLayout(): LayoutInfo {
   const { width, height } = useWindowDimensions();
+  const touch = useTouchScreen();
   const wide = width >= layout.wide;
-  return { width, height, wide, compact: width < 560, paneWidth: wide ? width - layout.sidebar : width };
+  return {
+    width,
+    height,
+    wide,
+    compact: width < 560,
+    paneWidth: wide ? width - layout.sidebar : width,
+    touch,
+    tablet: touch && Math.min(width, height) >= layout.tablet,
+  };
+}
+
+// --- input ------------------------------------------------------------------
+
+/**
+ * Is the primary pointer a finger?
+ *
+ * Width alone cannot tell an iPad in landscape (1180pt) from a laptop window,
+ * and the user agent cannot either: iPadOS Safari presents itself as a Mac.
+ * `(pointer: coarse)` describes the input itself, and it stays coarse on an
+ * iPad with a keyboard or trackpad attached, where the screen is still touched.
+ *
+ * The native build has no mouse to speak of, so it is always touch.
+ */
+const COARSE_POINTER = '(pointer: coarse)';
+
+function coarseQuery(): MediaQueryList | null {
+  if (Platform.OS !== 'web' || typeof globalThis.matchMedia !== 'function') return null;
+  return globalThis.matchMedia(COARSE_POINTER);
+}
+
+function subscribeToPointer(onChange: () => void): () => void {
+  const query = coarseQuery();
+  if (!query) return () => {};
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function readTouchScreen(): boolean {
+  if (Platform.OS !== 'web') return true;
+  return coarseQuery()?.matches ?? false;
+}
+
+export function useTouchScreen(): boolean {
+  return useSyncExternalStore(subscribeToPointer, readTouchScreen, readTouchScreen);
 }

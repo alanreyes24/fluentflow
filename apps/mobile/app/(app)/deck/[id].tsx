@@ -30,7 +30,7 @@ import {
   useContentStyle,
 } from '../../../src/ui/components';
 import { Icon } from '../../../src/ui/Icon';
-import { useTheme } from '../../../src/ui/theme';
+import { useLayout, useTheme } from '../../../src/ui/theme';
 import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 
 const NEW_CARD_LIMIT_OPTIONS = [10, 20, 40, 50, 80] as const;
@@ -488,6 +488,7 @@ function Legend({
 
 function CardRow({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; onDelete: () => void }) {
   const theme = useTheme();
+  const { touch } = useLayout();
   const { t } = useI18n();
   return (
     <Surface style={styles.card}>
@@ -507,7 +508,7 @@ function CardRow({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; o
           accessibilityLabel={`${t('edit')} ${card.front}`}
           onPress={onEdit}
           hitSlop={6}
-          style={[styles.iconButton, { borderRadius: theme.radius.sm }]}
+          style={[styles.iconButton, touch ? styles.iconButtonTouch : null, { borderRadius: theme.radius.sm }]}
         >
           <Icon name="pencil" size={16} color={theme.colors.accent} />
         </Pressable>
@@ -516,7 +517,7 @@ function CardRow({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; o
           accessibilityLabel={`${t('delete')} ${card.front}`}
           onPress={onDelete}
           hitSlop={6}
-          style={[styles.iconButton, { borderRadius: theme.radius.sm }]}
+          style={[styles.iconButton, touch ? styles.iconButtonTouch : null, { borderRadius: theme.radius.sm }]}
         >
           <Icon name="x" size={16} color={theme.colors.danger} />
         </Pressable>
@@ -572,6 +573,7 @@ const styles = StyleSheet.create({
   // A real target for the edit and delete marks: a 16pt icon alone is too
   // small to hit, and `hitSlop` does not show where the target is on hover.
   iconButton: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  iconButtonTouch: { width: 44, height: 44 },
   header: {},
   card: { paddingVertical: 12 },
   grow: { flex: 1 },

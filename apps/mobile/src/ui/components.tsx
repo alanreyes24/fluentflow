@@ -148,7 +148,9 @@ export function Button({
   accessibilityHint,
 }: ButtonProps) {
   const theme = useTheme();
-  const { wide } = useLayout();
+  const { wide, touch } = useLayout();
+  // Desktop-sized controls only where there is a mouse to aim them.
+  const dense = wide && !touch;
   const [hovered, setHovered] = useState(false);
   const inactive = disabled || loading;
 
@@ -230,11 +232,14 @@ export function Button({
         styles.button,
         { borderRadius: theme.radius.md },
         // A 48pt target is sized for a thumb. With a mouse it reads as
-        // oversized, and macOS controls are nowhere near it.
+        // oversized, and macOS controls are nowhere near it. A tablet is as
+        // wide as a desktop window and keeps the thumb sizes.
         size === 'small'
-          ? { minHeight: wide ? 32 : 40, paddingHorizontal: 12, borderRadius: theme.radius.sm }
-          : { minHeight: wide ? 40 : 48, paddingHorizontal: wide ? 18 : 22 },
-        iconOnly && icon ? { paddingHorizontal: 0, minWidth: size === 'small' ? 36 : 44 } : null,
+          ? { minHeight: dense ? 32 : touch ? 44 : 40, paddingHorizontal: 12, borderRadius: theme.radius.sm }
+          : { minHeight: dense ? 40 : 48, paddingHorizontal: dense ? 18 : 22 },
+        iconOnly && icon
+          ? { paddingHorizontal: 0, minWidth: size === 'small' ? (touch ? 44 : 36) : touch ? 48 : 44 }
+          : null,
         {
           backgroundColor: (pressed || hovered) && !inactive ? hoverBackground : background,
           borderWidth: StyleSheet.hairlineWidth,
@@ -700,6 +705,7 @@ function Segment({
   wrap: boolean;
 }) {
   const theme = useTheme();
+  const { touch } = useLayout();
   const [hovered, setHovered] = useState(false);
 
   const background = selected
@@ -718,7 +724,9 @@ function Segment({
       onPointerLeave={() => setHovered(false)}
       style={[
         styles.segment,
-        wrap && { flexBasis: '40%', minHeight: 44 },
+        // 36pt suits a mouse; a finger gets the 44pt minimum.
+        (wrap || touch) && { minHeight: 44 },
+        wrap && { flexBasis: '40%' },
         {
           backgroundColor: background,
           borderRadius: theme.radius.md - 3,

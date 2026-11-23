@@ -66,7 +66,10 @@ export default function StudyScreen() {
   const { deckId, ahead } = useLocalSearchParams<{ deckId: string; ahead?: string }>();
   const { t } = useI18n();
   const theme = useTheme();
-  const { wide, compact } = useLayout();
+  const { wide, compact, touch, tablet } = useLayout();
+  // A tablet held upright is under the wide breakpoint but still has room to
+  // set the card as a card rather than a full-height panel.
+  const roomy = wide || tablet;
   const { repository, examples: exampleService, refreshDecks, user, remoteChanges } = useApp();
 
   const [deck, setDeck] = useState<Deck | null>(null);
@@ -573,7 +576,7 @@ export default function StudyScreen() {
     <Screen style={styles.studyScreen}>
       <View style={styles.studyBody}>
       <View style={styles.studyMain}>
-      <View style={[styles.stage, wide ? styles.stageWide : null]}>
+      <View style={[styles.stage, roomy ? styles.stageWide : null, tablet ? styles.stageTablet : null]}>
         <View style={[styles.studyHeader, compact ? styles.studyHeaderCompact : null]}>
           <View style={styles.topBar}>
             <Pressable
@@ -581,7 +584,11 @@ export default function StudyScreen() {
               accessibilityLabel={t('goBack')}
               onPress={() => (router.canGoBack() ? router.back() : router.replace('/(app)/decks'))}
               hitSlop={6}
-              style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.6 : 1 }]}
+              style={({ pressed }) => [
+                styles.backButton,
+                touch ? styles.touchTarget : null,
+                { opacity: pressed ? 0.6 : 1 },
+              ]}
             >
               <Icon name="chevronLeft" size={20} color={theme.colors.textMuted} />
               <Label variant="label" tone="muted" numberOfLines={1} style={styles.backLabel}>
@@ -629,7 +636,7 @@ export default function StudyScreen() {
                   disabled={savingStar}
                   onPress={() => void toggleStar()}
                   hitSlop={4}
-                  style={[styles.iconButton, { borderRadius: theme.radius.sm }]}
+                  style={[styles.iconButton, touch ? styles.iconButtonTouch : null, { borderRadius: theme.radius.sm }]}
                 >
                   <Icon
                     name="star"
@@ -648,6 +655,7 @@ export default function StudyScreen() {
                   hitSlop={4}
                   style={[
                     styles.iconButton,
+                    touch ? styles.iconButtonTouch : null,
                     { borderRadius: theme.radius.sm, backgroundColor: toolsOpen ? theme.colors.accentSoft : 'transparent' },
                   ]}
                 >
@@ -707,7 +715,12 @@ export default function StudyScreen() {
           <Animated.View
             style={[
               styles.cardWrap,
+              // Capped only in a landscape-shaped window. A tablet held upright
+              // lets the card fill the height, as a phone does, so the rating
+              // buttons sit at the bottom under the thumbs instead of floating
+              // above a band of empty screen.
               wide ? styles.cardWrapWide : null,
+              wide && tablet ? styles.cardWrapTablet : null,
             ]}
             {...gestures.handlers}
           >
@@ -744,13 +757,19 @@ export default function StudyScreen() {
                   {deck?.reverseCards ? (
                     <DefinitionBlock
                       value={card.back}
+                      large={tablet}
                       showAction={revealed}
                       generating={regeneratingDefinition}
                       onRegenerate={regenerateDefinition}
                     />
                   ) : (
                     <>
-                      <Label variant="cardFront" align="center" selectable>
+                      <Label
+                        variant="cardFront"
+                        align="center"
+                        selectable
+                        style={tablet ? styles.cardFrontTablet : null}
+                      >
                         {card.front}
                       </Label>
                     </>
@@ -760,12 +779,19 @@ export default function StudyScreen() {
                     <>
                       <Divider style={[styles.divider, compact ? styles.dividerCompact : null]} />
                       {deck?.reverseCards ? (
-                        <Label variant="cardBack" align="center" tone="muted" selectable>
+                        <Label
+                          variant="cardBack"
+                          align="center"
+                          tone="muted"
+                          selectable
+                          style={tablet ? styles.cardBackTablet : null}
+                        >
                           {card.front}
                         </Label>
                       ) : (
                         <DefinitionBlock
                           value={card.back}
+                          large={tablet}
                           showAction
                           generating={regeneratingDefinition}
                           onRegenerate={regenerateDefinition}
@@ -806,6 +832,8 @@ export default function StudyScreen() {
                         tone={theme.colors[rating]}
                         interval={intervals?.[rating]}
                         compact={compact}
+                        touch={touch}
+                        large={tablet}
                         onPress={rate}
                       />
                     ))}
@@ -824,7 +852,11 @@ export default function StudyScreen() {
                 ) : null}
               </>
             ) : (
-              <Button label={t('showAnswer')} onPress={reveal} style={styles.showAnswer} />
+              <Button
+                label={t('showAnswer')}
+                onPress={reveal}
+                style={[styles.showAnswer, tablet ? styles.showAnswerTablet : null]}
+              />
             )}
             {undoState ? (
               <>
@@ -908,6 +940,8 @@ function RatingButton({
   tone,
   interval,
   compact,
+  touch,
+  large,
   onPress,
 }: {
   rating: RatingName;
@@ -915,13 +949,17 @@ function RatingButton({
   interval?: { days: number; minutes: number };
   /** Phone width: no keyboard, so no shortcut digit to show. */
   compact?: boolean;
+  /** Tapped rather than clicked: a tablet usually has no keyboard either. */
+  touch?: boolean;
+  /** Tablet room: a taller target, comfortably under a thumb. */
+  large?: boolean;
   onPress: (rating: RatingName) => void;
 }) {
   const { t } = useI18n();
   const theme = useTheme();
   const [hovered, setHovered] = useState(false);
   const label = t(`${rating}Label` as 'againLabel');
-  const showKey = Platform.OS === 'web' && !compact;
+  const showKey = Platform.OS === 'web' && !compact && !touch;
 
   return (
     <Pressable
@@ -936,6 +974,7 @@ function RatingButton({
       style={({ pressed }) => [
         styles.rating,
         compact ? styles.ratingCompact : null,
+        large ? styles.ratingLarge : null,
         {
           // On white the wash has to stay faint: the label is set in the same
           // colour, and amber on a stronger amber tint falls under 4.5:1. The
@@ -996,11 +1035,14 @@ function ContextList({ title, items }: { title: string; items: string[] }) {
 
 function DefinitionBlock({
   value,
+  large,
   showAction,
   generating,
   onRegenerate,
 }: {
   value: string;
+  /** Tablet room: the definition set a size up, like the word above it. */
+  large?: boolean;
   showAction: boolean;
   generating: boolean;
   onRegenerate: () => void;
@@ -1009,7 +1051,7 @@ function DefinitionBlock({
 
   return (
     <View style={styles.definitionBlock}>
-      <Label variant="cardBack" align="center" tone="muted" selectable>
+      <Label variant="cardBack" align="center" tone="muted" selectable style={large ? styles.cardBackTablet : null}>
         {value}
       </Label>
       {showAction ? (
@@ -1126,7 +1168,7 @@ function SentenceWords({
   onWordPress: (word: string, sentence: string) => void;
 }) {
   const theme = useTheme();
-  const { compact } = useLayout();
+  const { compact, touch } = useLayout();
   const tokens = sentence.match(/[\p{L}\p{M}\p{N}]+(?:['’-][\p{L}\p{M}\p{N}]+)*|[^\p{L}\p{M}\p{N}]+/gu) ?? [sentence];
   const items = tokens.reduce<SentenceItem[]>((result, token) => {
     const isWord = /[\p{L}\p{M}\p{N}]/u.test(token);
@@ -1169,6 +1211,9 @@ function SentenceWords({
                   compact
                     ? [styles.wordButtonCompact, { borderBottomColor: theme.colors.textFaint }]
                     : { borderBottomColor: theme.colors.accent },
+                  // A word is a small target for a finger; a little more
+                  // height makes it hittable without spreading the line.
+                  touch ? styles.wordButtonTouch : null,
                   pressed ? { backgroundColor: theme.colors.accentSoft } : null,
                 ]}
               >
@@ -1230,6 +1275,9 @@ function statusKey(status: Card['status']): 'statusNew' | 'statusLearning' | 'st
  */
 const STAGE_WIDTH = 620;
 
+/** The same, on a tablet: wider, for a larger word and bigger buttons. */
+const TABLET_STAGE_WIDTH = 760;
+
 /** The session as it was before the last undoable action, and what that action was. */
 type UndoState = {
   queue: Card[];
@@ -1246,10 +1294,14 @@ const styles = StyleSheet.create({
   backLabel: { flexShrink: 1 },
   topActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   iconButton: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  // Apple's 44pt minimum, for a finger rather than a cursor.
+  iconButtonTouch: { width: 44, height: 44 },
+  touchTarget: { minHeight: 44 },
   progressBlock: { gap: 10, marginTop: 8 },
   counter: { fontVariant: ['tabular-nums'] },
   cardMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 16 },
   showAnswer: { minHeight: 52 },
+  showAnswerTablet: { minHeight: 60 },
   tools: { marginTop: 12 },
   rating: {
     flex: 1,
@@ -1263,6 +1315,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   ratingCompact: { minHeight: 58 },
+  ratingLarge: { minHeight: 76, paddingVertical: 12 },
   keyCap: {
     position: 'absolute',
     top: 6,
@@ -1284,6 +1337,9 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingVertical: 8,
   },
+  // A tablet sits closer to the face than a laptop and is read at arm's
+  // length when propped up, so the card gets more of the screen.
+  stageTablet: { maxWidth: TABLET_STAGE_WIDTH, paddingVertical: 16 },
   studyHeader: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
   // On a phone every point of height the header gives up goes to the card.
   studyHeaderCompact: { paddingBottom: 10 },
@@ -1298,6 +1354,9 @@ const styles = StyleSheet.create({
   // three-word card is not floating in half a window of nothing. Anything
   // longer scrolls inside the card.
   cardWrapWide: { maxHeight: 560, justifyContent: 'center' },
+  cardWrapTablet: { maxHeight: 680 },
+  cardFrontTablet: { fontSize: 52, lineHeight: 62 },
+  cardBackTablet: { fontSize: 30, lineHeight: 40 },
   // Padding lives on the scroll content so scrolled text clips at the card's
   // edge rather than at an inset.
   card: { flex: 1, padding: 0, overflow: 'hidden' },
@@ -1333,6 +1392,7 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     paddingHorizontal: 2,
   },
+  wordButtonTouch: { paddingVertical: 2, marginVertical: 1 },
   wordButtonCompact: {
     borderRadius: 0,
     borderStyle: 'dotted',

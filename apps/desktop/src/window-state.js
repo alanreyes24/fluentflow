@@ -27,7 +27,13 @@
  * window is being dragged, and this is a file on disk.
  */
 
-const { app, screen } = require('electron');
+// Electron is loaded on first use, not at the top. `chooseBounds` is pure and
+// tested under plain Node, where CI never installs this package's dependencies
+// (`apps/desktop` is outside the root workspaces), so a top-level require
+// failed the whole test file before a single assertion ran.
+function electron() {
+  return require('electron');
+}
 const { readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 
@@ -62,7 +68,7 @@ function clampZoom(level) {
 }
 
 function statePath() {
-  return path.join(app.getPath('userData'), FILENAME);
+  return path.join(electron().app.getPath('userData'), FILENAME);
 }
 
 function read() {
@@ -146,7 +152,7 @@ function isVisible(bounds, displays) {
  */
 function restore() {
   const stored = read();
-  const usable = chooseBounds(stored.bounds, screen.getAllDisplays());
+  const usable = chooseBounds(stored.bounds, electron().screen.getAllDisplays());
 
   const theme = stored.theme === 'dark' ? 'dark' : 'light';
   const themeSource = THEME_SOURCES.includes(stored.themeSource) ? stored.themeSource : 'system';

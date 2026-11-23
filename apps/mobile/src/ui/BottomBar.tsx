@@ -135,6 +135,7 @@ export function Sidebar() {
 
 function SidebarItem({ destination, label, active }: { destination: Destination; label: string; active: boolean }) {
   const theme = useTheme();
+  const { touch } = useLayout();
   const [hovered, setHovered] = useState(false);
   const color = active ? theme.colors.accent : hovered ? theme.colors.text : theme.colors.textMuted;
 
@@ -148,6 +149,8 @@ function SidebarItem({ destination, label, active }: { destination: Destination;
       onPointerLeave={() => setHovered(false)}
       style={({ pressed }) => [
         styles.sidebarItem,
+        // A tablet in landscape gets this sidebar too; 36pt rows are a mouse size.
+        touch ? styles.sidebarItemTouch : null,
         {
           backgroundColor: active ? theme.colors.accentSoft : hovered ? theme.colors.hover : 'transparent',
           borderRadius: theme.radius.sm,
@@ -156,7 +159,7 @@ function SidebarItem({ destination, label, active }: { destination: Destination;
         web({ transitionProperty: 'background-color', transitionDuration: '150ms' }),
       ]}
     >
-      <Icon name={destination.icon} size={18} color={color} />
+      <Icon name={destination.icon} size={touch ? 20 : 18} color={color} />
       <Label
         variant="label"
         numberOfLines={1}
@@ -271,6 +274,7 @@ const styles = StyleSheet.create({
   groupLabel: { paddingHorizontal: 10, marginTop: 20, marginBottom: 6 },
   grow: { flex: 1 },
   sidebarItem: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36, paddingHorizontal: 10 },
+  sidebarItemTouch: { minHeight: 48, gap: 12, paddingHorizontal: 12 },
   sidebarLabel: { fontWeight: '500', flexShrink: 1 },
   activeLabel: { fontWeight: '700' },
   sidebarFooter: { marginTop: 10, paddingTop: 12, paddingHorizontal: 10, borderTopWidth: StyleSheet.hairlineWidth },
