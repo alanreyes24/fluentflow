@@ -1,6 +1,7 @@
 import { createTestRepository } from './fakes/database';
-import { collectionDayKey } from '@fluentflow/core';
+import { FSRS_DEFAULT_PARAMETERS, collectionDayKey } from '@fluentflow/core';
 import { Repository } from '../src/db/repository';
+import { optimizeFsrsForAccount } from '../src/state/fsrs-optimize';
 import { SCHEMA_VERSION } from '../src/db/schema';
 
 /**
@@ -421,6 +422,61 @@ describe('Repository', () => {
     const converted = await repository.getCard(card.id);
     // Two same-day Goods: FSRS's initial Good stability, not SM-2's one day.
     expect(converted?.stability).toBeCloseTo(2.3065, 3);
+  });
+
+  it('hands FSRS only the cards whose whole history is logged', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    let logged = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    logged = await repository.rateCard(logged, 'good');
+    logged = await repository.rateCard(logged, 'good');
+    const imported = await repository.addCard('u1', deck, 'perro', 'dog');
+    // Twelve answers in Anki, one here.
+    await repository.rateCard(
+      await repository.updateCard(imported, { phase: 'review', interval: 30, repetitions: 12 }),
+      'good',
+    );
+
+    const histories = await repository.fsrsHistories('u1');
+    expect(histories).toHaveLength(1);
+    expect(histories[0]!.map((answer) => answer.rating)).toEqual(['good', 'good']);
+  });
+
+  it('does not fit FSRS to a history too short to trust', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    await repository.rateCard(await repository.addCard('u1', deck, 'hablar', 'to speak'), 'good');
+
+    const outcome = await optimizeFsrsForAccount(repository, 'u1', { force: true });
+    expect(outcome).toMatchObject({ status: 'skipped', reason: 'not-enough-reviews' });
+    expect((await repository.getSettings('u1')).fsrs).toBeUndefined();
+  });
+
+  it('replays memory states under new FSRS weights without moving due dates', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    let card = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    card = await repository.rateCard(card, 'good');
+    card = await repository.rateCard(card, 'good');
+    const weights = [...FSRS_DEFAULT_PARAMETERS];
+    weights[2] = 5; // a bigger head start for a first "good"
+
+    expect(await repository.recomputeFsrsMemory('u1', weights)).toBe(1);
+    const recomputed = await repository.getCard(card.id);
+    expect(recomputed?.stability).toBeCloseTo(5, 3);
+    expect(recomputed?.dueDay).toBe(card.dueDay);
+    expect(await repository.recomputeFsrsMemory('u1', weights)).toBe(0);
+  });
+
+  it('schedules with the account\'s fitted FSRS weights', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const weights = [...FSRS_DEFAULT_PARAMETERS];
+    weights[3] = 20;
+    await repository.saveSettings('u1', { fsrs: { parameters: weights, reviews: 500 } });
+
+    const card = await repository.rateCard(await repository.addCard('u1', deck, 'hablar', 'to speak'), 'easy');
+    expect(card.stability).toBeCloseTo(20, 3);
   });
 
   it('drops the ease factor on lapses but never below the floor on an SM-2 deck', async () => {

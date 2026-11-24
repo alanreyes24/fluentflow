@@ -71,7 +71,8 @@ export default function StudyScreen() {
   // A tablet held upright is under the wide breakpoint but still has room to
   // set the card as a card rather than a full-height panel.
   const roomy = wide || tablet;
-  const { repository, examples: exampleService, refreshDecks, user, remoteChanges } = useApp();
+  const { repository, examples: exampleService, refreshDecks, user, remoteChanges, settings } = useApp();
+  const fsrsParameters = settings.fsrs?.parameters ?? undefined;
 
   const [deck, setDeck] = useState<Deck | null>(null);
   const [queue, setQueue] = useState<Card[]>([]);
@@ -244,6 +245,7 @@ export default function StudyScreen() {
           random: fuzzRandomForCard(card.id),
           algorithm: scheduling.algorithm,
           desiredRetention: scheduling.desiredRetention,
+          ...(fsrsParameters ? { parameters: fsrsParameters } : {}),
         });
         const ahead = Math.max(0, Date.parse(answer.nextReview) - now);
         return [rating, {
@@ -254,7 +256,7 @@ export default function StudyScreen() {
         }];
       }),
     ) as Record<RatingName, { days: number; minutes: number }>;
-  }, [card, deck]);
+  }, [card, deck, fsrsParameters]);
 
   const rate = useCallback(
     (rating: RatingName) => {

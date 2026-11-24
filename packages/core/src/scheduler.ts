@@ -1,6 +1,7 @@
 import type { Card, CardPhase, CardStatus, Deck, IsoDate, RatingName, SchedulerAlgorithm } from './types.js';
 import {
   DEFAULT_DESIRED_RETENTION,
+  FSRS_DEFAULT_PARAMETERS,
   clampRetention,
   fsrsInterval,
   memoryStateFromHistory,
@@ -213,6 +214,8 @@ export interface ReviewOptions {
   algorithm?: SchedulerAlgorithm;
   /** FSRS's target probability of recall when a card comes due. */
   desiredRetention?: number;
+  /** FSRS weights; the published defaults unless optimized for this learner. */
+  parameters?: readonly number[];
 }
 
 /** Apply a rating to a card's scheduling state. */
@@ -236,6 +239,7 @@ export function review(
       { ...config, intervalMultiplier: 1 },
       now,
       clampRetention(options.desiredRetention ?? DEFAULT_DESIRED_RETENTION),
+      options.parameters ?? FSRS_DEFAULT_PARAMETERS,
       fuzzFactor,
     );
   }
@@ -261,18 +265,19 @@ function answerFsrs(
   config: SchedulerConfig,
   now: Date,
   retention: number,
+  parameters: readonly number[],
   fuzzFactor?: number,
 ): SchedulingState {
-  const memory = memoryStateFor(state);
+  const memory = memoryStateFor(state, parameters);
   const elapsed = elapsedDaysFor(state, now);
-  const next = nextMemoryState(memory, elapsed, rating);
+  const next = nextMemoryState(memory, elapsed, rating, parameters);
   const remembered = {
     ...state,
     stability: next.stability,
     difficulty: next.difficulty,
     lastReviewedAt: now.toISOString(),
   };
-  const intervalFor = (stability: number) => fsrsInterval(stability, retention);
+  const intervalFor = (stability: number) => fsrsInterval(stability, retention, parameters);
 
   if (state.phase !== 'review') {
     return answerLearning(remembered, rating, config, now, {
@@ -289,8 +294,8 @@ function answerFsrs(
 
   // Each passing grade gets the interval of its own memory state, then the
   // same chain SM-2 enforces: a better answer never schedules a shorter wait.
-  const hardMemory = rating === 'hard' ? next : nextMemoryState(memory, elapsed, 'hard');
-  const goodMemory = rating === 'good' ? next : nextMemoryState(memory, elapsed, 'good');
+  const hardMemory = rating === 'hard' ? next : nextMemoryState(memory, elapsed, 'hard', parameters);
+  const goodMemory = rating === 'good' ? next : nextMemoryState(memory, elapsed, 'good', parameters);
   const hard = constrain(intervalFor(hardMemory.stability), 1, config, fuzzFactor);
   const good = constrain(intervalFor(goodMemory.stability), hard + 1, config, fuzzFactor);
   const interval = rating === 'hard'
@@ -319,12 +324,13 @@ function answerFsrs(
  */
 export function memoryStateFor(
   state: Pick<SchedulingState, 'phase' | 'stability' | 'difficulty' | 'easeFactor' | 'interval'>,
+  parameters: readonly number[] = FSRS_DEFAULT_PARAMETERS,
 ): MemoryState | undefined {
   if (isFiniteNumber(state.stability) && isFiniteNumber(state.difficulty)) {
     return { stability: state.stability, difficulty: state.difficulty };
   }
   if (state.phase === 'new') return undefined;
-  if (state.interval >= 1) return memoryStateFromSm2(state.easeFactor, state.interval);
+  if (state.interval >= 1) return memoryStateFromSm2(state.easeFactor, state.interval, parameters);
   return undefined;
 }
 
@@ -368,6 +374,7 @@ export interface ReviewHistoryEntry {
 export function convertCardToFsrs(
   card: Card,
   history: readonly ReviewHistoryEntry[] = [],
+  parameters: readonly number[] = FSRS_DEFAULT_PARAMETERS,
 ): Pick<Card, 'stability' | 'difficulty' | 'lastReviewedAt'> | null {
   if (isFiniteNumber(card.stability) && isFiniteNumber(card.difficulty)) return null;
   const phase = card.phase ?? schedulingStateFor(card).phase;
@@ -387,11 +394,12 @@ export function convertCardToFsrs(
         rating: entry.rating,
         elapsedDays: index === 0 ? 0 : Math.max(0, dayDiff(days[index - 1]!, days[index]!)),
       })),
+      parameters,
     );
     if (memory) return { ...memory, lastReviewedAt: new Date(last.reviewedAt).toISOString() };
   }
 
-  const memory = memoryStateFor({ ...schedulingStateFor(card), phase });
+  const memory = memoryStateFor({ ...schedulingStateFor(card), phase }, parameters);
   if (!memory) return null;
   return {
     ...memory,

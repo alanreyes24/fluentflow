@@ -192,6 +192,8 @@ export function createAppState(options: HarnessOptions = {}): AppState {
     remoteChanges: 0,
     settings: {},
     updateSettings: jest.fn(),
+    optimizeFsrs: jest.fn(async () => null),
+    fsrsOptimizing: null,
     refreshDecks: jest.fn(async () => {}),
     syncNow: jest.fn(async () => {}),
     signIn: jest.fn(async () => {}),

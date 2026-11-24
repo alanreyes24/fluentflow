@@ -3,6 +3,7 @@ export * from './id.js';
 export * from './factory.js';
 export * from './scheduler.js';
 export * from './fsrs.js';
+export * from './fsrs-optimizer.js';
 export * from './stats.js';
 export * from './language.js';
 

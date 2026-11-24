@@ -511,3 +511,20 @@ test('settings round-trip per account, merged per setting, with bad values refus
   assert.equal((await put('sam', { dailyGoal: { value: 0, updatedAt: T2 } })).status, 400);
   assert.deepEqual(await (await call('/api/settings', { user: 'tia' })).json(), { settings: {} });
 });
+
+test('fitted FSRS weights sync as an account setting', async () => {
+  const put = (settings: unknown) =>
+    call('/api/settings', {
+      user: 'uma',
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ settings }),
+    });
+  const updatedAt = '2026-11-24T10:00:00.000Z';
+  const fsrs = { parameters: Array.from({ length: 21 }, (_, i) => 0.1 + i / 10), reviews: 1700, logLoss: 0.43, defaultLogLoss: 0.44 };
+
+  const saved = await put({ fsrs: { value: fsrs, updatedAt } });
+  assert.equal(saved.status, 200);
+  assert.deepEqual((await saved.json()).settings.fsrs, { value: fsrs, updatedAt });
+  assert.equal((await put({ fsrs: { value: { parameters: [1, 2], reviews: 3 }, updatedAt } })).status, 400);
+});

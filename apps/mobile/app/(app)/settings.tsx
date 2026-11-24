@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { LANGUAGE_NAMES, SUPPORTED_LANGUAGES, type LanguageCode } from '@fluentflow/core';
+import { LANGUAGE_NAMES, MIN_OPTIMIZE_REVIEWS, SUPPORTED_LANGUAGES, type LanguageCode } from '@fluentflow/core';
+import type { FsrsOptimizeOutcome } from '../../src/state/fsrs-optimize';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
 import { desktopBridge, type DesktopBridge, type WebBundleStatus } from '../../src/desktop';
@@ -70,6 +71,8 @@ export default function SettingsScreen() {
         </Section>
 
         <ExamplesSection />
+
+        {user ? <FsrsSection /> : null}
 
         <Section title={t('account')}>
           <Label variant="body">{user?.email ?? t('workOffline')}</Label>
@@ -142,6 +145,55 @@ export default function SettingsScreen() {
         ) : null}
       </ScrollView>
     </Screen>
+  );
+}
+
+/**
+ * Whether FSRS runs on its default weights or on ones fitted to this account,
+ * and how much better the fitted ones predict. Fitting also runs by itself
+ * after launch; the button is for running it now.
+ */
+function FsrsSection() {
+  const { t } = useI18n();
+  const theme = useTheme();
+  const { settings, optimizeFsrs, fsrsOptimizing } = useApp();
+  const [outcome, setOutcome] = useState<FsrsOptimizeOutcome | null>(null);
+  const fsrs = settings.fsrs;
+  const personalized = Boolean(fsrs?.parameters);
+
+  let detail: string;
+  if (outcome?.status === 'skipped' && outcome.reason === 'not-enough-reviews') {
+    detail = t('fsrsNotEnough', { min: MIN_OPTIMIZE_REVIEWS, count: outcome.reviews });
+  } else if (!fsrs) {
+    detail = t('fsrsNeverRun');
+  } else if (personalized && fsrs.logLoss !== undefined && fsrs.defaultLogLoss) {
+    const percent = Math.max(0, Math.round((1 - fsrs.logLoss / fsrs.defaultLogLoss) * 100));
+    detail = t('fsrsBetter', { percent });
+  } else {
+    detail = t('fsrsNotBetter', { count: fsrs.reviews });
+  }
+
+  return (
+    <Section title={t('fsrsSection')}>
+      <Label variant="body">{personalized ? t('fsrsPersonalized') : t('fsrsDefault')}</Label>
+      <Label variant="caption" tone="faint">{detail}</Label>
+      <Spacer size={theme.spacing.sm} />
+      <Button
+        label={
+          fsrsOptimizing === null
+            ? t('fsrsOptimize')
+            : t('fsrsOptimizing', { percent: Math.round(fsrsOptimizing * 100) })
+        }
+        variant="secondary"
+        loading={fsrsOptimizing !== null}
+        disabled={fsrsOptimizing !== null}
+        onPress={() => {
+          void optimizeFsrs(true).then(setOutcome).catch((cause) => {
+            console.warn('[fluentflow] FSRS optimization failed:', cause);
+          });
+        }}
+      />
+    </Section>
   );
 }
 

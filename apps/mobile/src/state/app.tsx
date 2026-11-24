@@ -23,6 +23,7 @@ import { Repository } from '../db/repository';
 import { normalizeExistingCards } from '../ai/card-fronts';
 import { ExampleService } from '../ai/service';
 import { SyncEngine, type SyncStatus } from '../sync/engine';
+import { optimizeFsrsForAccount, type FsrsOptimizeOutcome } from './fsrs-optimize';
 import { createSyncRemote, syncBaseUrl } from '../sync/remote';
 import { isInstalledDesktopApp } from '../desktop';
 import { authApi, type AuthApi } from '../firebase/client';
@@ -66,6 +67,13 @@ export interface AppState {
   settings: Partial<SettingValues>;
   /** Choose settings. Saved with the account and pushed on the next sync. */
   updateSettings: (changes: Partial<SettingValues>) => void;
+  /**
+   * Fit FSRS to the account's review history; `force` runs it even when the
+   * history has not grown since the last fit. Runs by itself after launch.
+   */
+  optimizeFsrs: (force?: boolean) => Promise<FsrsOptimizeOutcome | null>;
+  /** Progress (0-1) of a running FSRS optimization, or null when idle. */
+  fsrsOptimizing: number | null;
   /** Re-read decks from SQLite. Called after any mutation. */
   refreshDecks: () => Promise<void>;
   syncNow: () => Promise<void>;
@@ -102,6 +110,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const engineRef = useRef<SyncEngine | null>(null);
+  const [fsrsOptimizing, setFsrsOptimizing] = useState<number | null>(null);
+  const optimizingRef = useRef<Promise<FsrsOptimizeOutcome | null> | null>(null);
+  // Lets the sync effect start an optimization without depending on it.
+  const optimizeFsrsRef = useRef<((force?: boolean) => Promise<FsrsOptimizeOutcome | null>) | null>(null);
   const auth = useMemo<AuthApi | null>(() => authApi(), []);
 
   // 1. Open and migrate the database.
@@ -251,7 +263,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // as it gets: cards with a complete history are replayed rather than
       // converted from SM-2. Idempotent, so it only does work once.
       .then(() => convertToFsrs(repository, user.id, () => void engine.sync()))
-      .then(refreshDecks);
+      .then(refreshDecks)
+      // Last, and in the background: fitting takes a few seconds, and only
+      // does anything once the review history has grown enough.
+      .then(() => optimizeFsrsRef.current?.(false))
+      .catch((cause) => console.warn('[fluentflow] FSRS optimization skipped:', cause));
 
     const unsubscribeNet = NetInfo.addEventListener((netState) => {
       engine.setOnline(netState.isConnected !== false);
@@ -339,6 +355,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [repository, user, accountSettings],
   );
 
+  const optimizeFsrs = useCallback(
+    (force = false): Promise<FsrsOptimizeOutcome | null> => {
+      if (!repository || !user) return Promise.resolve(null);
+      if (optimizingRef.current) return optimizingRef.current;
+      const userId = user.id;
+      const run = (async () => {
+        setFsrsOptimizing(0);
+        try {
+          const outcome = await optimizeFsrsForAccount(repository, userId, {
+            force,
+            onProgress: (fraction) => setFsrsOptimizing(fraction),
+          });
+          if (outcome.status !== 'skipped') {
+            console.info(`[fluentflow] FSRS optimization: ${outcome.status}`, outcome.result);
+            setAccountSettings({ userId, values: settingValues(await repository.getSettings(userId)) });
+            void engineRef.current?.sync();
+          }
+          return outcome;
+        } finally {
+          setFsrsOptimizing(null);
+          optimizingRef.current = null;
+        }
+      })();
+      optimizingRef.current = run;
+      return run;
+    },
+    [repository, user],
+  );
+  useEffect(() => {
+    optimizeFsrsRef.current = optimizeFsrs;
+  }, [optimizeFsrs]);
+
   const syncNow = useCallback(async () => {
     await engineRef.current?.sync();
     await refreshDecks();
@@ -357,6 +405,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       remoteChanges,
       settings,
       updateSettings,
+      optimizeFsrs,
+      fsrsOptimizing,
       refreshDecks,
       syncNow,
       signIn,
@@ -370,6 +420,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       booted,
       settings,
       updateSettings,
+      optimizeFsrs,
+      fsrsOptimizing,
       error,
       examples,
       user,

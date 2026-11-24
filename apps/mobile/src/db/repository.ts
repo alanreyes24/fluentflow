@@ -380,11 +380,13 @@ export class Repository {
    * The deck decides which scheduler runs (FSRS unless it picked SM-2).
    */
   async rateCard(card: Card, rating: RatingName, now: Date = new Date()): Promise<Card> {
-    const scheduling = deckScheduling(await this.getDeck(card.deckId));
+    const [deck, settings] = await Promise.all([this.getDeck(card.deckId), this.getSettings(card.userId)]);
+    const scheduling = deckScheduling(deck);
     const reviewed = reviewCard(card, rating, {
       now,
       algorithm: scheduling.algorithm,
       desiredRetention: scheduling.desiredRetention,
+      ...(settings.fsrs?.value.parameters ? { parameters: settings.fsrs.value.parameters } : {}),
     });
     const introducedAt =
       schedulingStateFor(card).phase === 'new' && !card.introducedAt
@@ -451,6 +453,74 @@ export class Repository {
     }
     if (converted.length > 0) await this.saveCards(converted);
     return converted.length;
+  }
+
+  /**
+   * Replay every card with a complete logged history under new FSRS weights,
+   * as Anki does after optimizing. Due dates stay; only the memory state the
+   * next answer builds on changes. Returns how many cards changed.
+   */
+  async recomputeFsrsMemory(userId: string, parameters: readonly number[], now: Date = new Date()): Promise<number> {
+    const rows = await this.db.getAllAsync<CardRow>(
+      `SELECT * FROM cards WHERE userId = ? AND deleted = 0 AND phase != 'new'`,
+      userId,
+    );
+    const events = await this.db.getAllAsync<{ cardId: string; rating: string; reviewedAt: string }>(
+      `SELECT r.cardId, r.rating, r.reviewedAt FROM review_log r
+       JOIN cards c ON c.id = r.cardId WHERE c.userId = ? AND c.deleted = 0`,
+      userId,
+    );
+    const history = new Map<string, ReviewHistoryEntry[]>();
+    for (const event of events) {
+      const rating = ratingName(event.rating);
+      if (!rating) continue;
+      const list = history.get(event.cardId) ?? [];
+      list.push({ rating, reviewedAt: event.reviewedAt });
+      history.set(event.cardId, list);
+    }
+
+    const changed: Card[] = [];
+    for (const card of rows.map(toCard)) {
+      const answers = history.get(card.id) ?? [];
+      // Without its whole history a card keeps the state it has.
+      if (answers.length === 0 || answers.length < card.repetitions) continue;
+      const memory = convertCardToFsrs(
+        { ...card, stability: undefined, difficulty: undefined },
+        answers,
+        parameters,
+      );
+      if (!memory) continue;
+      if (memory.stability === card.stability && memory.difficulty === card.difficulty) continue;
+      changed.push(touch({ ...card, ...memory }, now));
+    }
+    if (changed.length > 0) await this.saveCards(changed);
+    return changed.length;
+  }
+
+  /**
+   * Every live card's answers, for fitting FSRS — only cards whose whole
+   * history is in the log, since a partial one would replay from the wrong
+   * state. Answers whose rating cannot be read are dropped with their card.
+   */
+  async fsrsHistories(userId: string): Promise<ReviewHistoryEntry[][]> {
+    const rows = await this.db.getAllAsync<{ cardId: string; repetitions: number; rating: string; reviewedAt: string }>(
+      `SELECT r.cardId, c.repetitions, r.rating, r.reviewedAt FROM review_log r
+       JOIN cards c ON c.id = r.cardId
+       WHERE c.userId = ? AND c.deleted = 0
+       ORDER BY r.cardId, r.reviewedAt`,
+      userId,
+    );
+    const byCard = new Map<string, { repetitions: number; answers: ReviewHistoryEntry[]; valid: boolean }>();
+    for (const row of rows) {
+      const entry = byCard.get(row.cardId) ?? { repetitions: row.repetitions, answers: [], valid: true };
+      byCard.set(row.cardId, entry);
+      const rating = ratingName(row.rating);
+      if (rating) entry.answers.push({ rating, reviewedAt: row.reviewedAt });
+      else entry.valid = false;
+    }
+    return [...byCard.values()]
+      .filter((entry) => entry.valid && entry.answers.length >= entry.repetitions)
+      .map((entry) => entry.answers);
   }
 
   async newCardsIntroducedToday(deckId: string, now: Date = new Date()): Promise<number> {
