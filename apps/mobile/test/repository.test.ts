@@ -89,8 +89,12 @@ describe('Repository', () => {
 
     const graduated = await repository.rateCard(learning, 'good');
 
+    // The deck runs FSRS, so graduation reads the interval off the card's
+    // stability (2.3 days for two same-day Goods) rather than SM-2's flat day.
     expect(graduated.phase).toBe('review');
-    expect(graduated.interval).toBe(1);
+    expect(graduated.interval).toBe(2);
+    expect(graduated.stability).toBeCloseTo(2.3065, 3);
+    expect(graduated.lastReviewedAt).toBeDefined();
     expect(await repository.reviewsSince('u1', new Date(Date.now() - 60_000))).toBe(2);
   });
 
@@ -333,9 +337,98 @@ describe('Repository', () => {
     expect(await repository.undoLastReview('u1')).toBeNull();
   });
 
-  it('drops the ease factor on lapses but never below the floor', async () => {
+  it('leaves ease alone under FSRS but still counts lapses towards a leech', async () => {
     const { repository } = context;
     const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    let card = await repository.addCard('u1', deck, 'hablar', 'to speak');
+
+    card = await repository.rateCard(card, 'easy');
+    const graduatedStability = card.stability!;
+    for (let i = 0; i < 10; i++) {
+      card = await repository.rateCard(card, 'again');
+      expect(card.phase).toBe('relearning');
+      card = await repository.rateCard(card, 'good');
+    }
+
+    expect(card.easeFactor).toBe(2.5);
+    expect(card.stability).toBeLessThan(graduatedStability);
+    expect(card.difficulty).toBeGreaterThan(9);
+    expect(card.lapses).toBe(10);
+    expect(card.leech).toBe(true);
+  });
+
+  it('keeps a deck\'s scheduler choice and defaults to FSRS at 90%', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    expect(deck.scheduler).toBeUndefined();
+
+    await repository.setScheduling(deck, { scheduler: 'sm2', desiredRetention: 0.85 });
+    const stored = await repository.getDeck(deck.id);
+    expect(stored).toMatchObject({ scheduler: 'sm2', desiredRetention: 0.85, syncStatus: 'pending' });
+  });
+
+  it('converts studied SM-2 cards to FSRS once, without moving their due dates', async () => {
+    const { repository } = context;
+    const deck = await repository.createDeck('u1', 'Spanish', 'es');
+    const sm2Deck = await repository.setScheduling(
+      await repository.createDeck('u1', 'Old', 'es'),
+      { scheduler: 'sm2' },
+    );
+    const fresh = await repository.addCard('u1', deck, 'nuevo', 'new');
+    const imported = await repository.addCard('u1', deck, 'perro', 'dog');
+    const kept = await repository.addCard('u1', sm2Deck, 'gato', 'cat');
+    // An Anki import: SM-2 state and twelve answers this app never saw.
+    const sm2State = {
+      phase: 'review' as const,
+      interval: 30,
+      easeFactor: 2.3,
+      repetitions: 12,
+      status: 'mastered' as const,
+      dueDay: '2030-01-15',
+      nextReview: '2030-01-15T12:00:00.000Z',
+    };
+    await repository.updateCard(imported, sm2State);
+    await repository.updateCard(kept, sm2State);
+
+    expect(await repository.convertCardsToFsrs('u1')).toBe(1);
+
+    const converted = await repository.getCard(imported.id);
+    expect(converted?.stability).toBeCloseTo(30, 3);
+    expect(converted?.difficulty).toBeGreaterThan(1);
+    expect(converted).toMatchObject({ dueDay: '2030-01-15', interval: 30, easeFactor: 2.3, syncStatus: 'pending' });
+    expect((await repository.getCard(kept.id))?.stability).toBeUndefined();
+    expect((await repository.getCard(fresh.id))?.stability).toBeUndefined();
+
+    // Nothing left to do on the next launch.
+    expect(await repository.convertCardsToFsrs('u1')).toBe(0);
+  });
+
+  it('replays a card\'s logged history when converting it', async () => {
+    const { repository } = context;
+    const deck = await repository.setScheduling(
+      await repository.createDeck('u1', 'Spanish', 'es'),
+      { scheduler: 'sm2' },
+    );
+    let card = await repository.addCard('u1', deck, 'hablar', 'to speak');
+    card = await repository.rateCard(card, 'good');
+    card = await repository.rateCard(card, 'good');
+    expect(card.phase).toBe('review');
+    // Reviewed under SM-2: no memory state to read yet.
+    await repository.updateCard(card, { stability: undefined, difficulty: undefined });
+    await repository.setScheduling((await repository.getDeck(deck.id))!, { scheduler: 'fsrs' });
+
+    expect(await repository.convertCardsToFsrs('u1')).toBe(1);
+    const converted = await repository.getCard(card.id);
+    // Two same-day Goods: FSRS's initial Good stability, not SM-2's one day.
+    expect(converted?.stability).toBeCloseTo(2.3065, 3);
+  });
+
+  it('drops the ease factor on lapses but never below the floor on an SM-2 deck', async () => {
+    const { repository } = context;
+    const deck = await repository.setScheduling(
+      await repository.createDeck('u1', 'Spanish', 'es'),
+      { scheduler: 'sm2' },
+    );
     let card = await repository.addCard('u1', deck, 'hablar', 'to speak');
 
     // Ease only moves on review answers, so the card has to graduate first and

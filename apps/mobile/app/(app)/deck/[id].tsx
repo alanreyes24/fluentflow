@@ -3,10 +3,12 @@ import { Alert, FlatList, Platform, Pressable, StyleSheet, View } from 'react-na
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   LANGUAGE_NAMES,
+  deckScheduling,
   type Card,
   type CardStatus,
   type Deck,
   type DeckProgress,
+  type SchedulerAlgorithm,
   type StudyQueue,
 } from '@fluentflow/core';
 import { useI18n } from '../../../src/i18n';
@@ -35,6 +37,7 @@ import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 
 const NEW_CARD_LIMIT_OPTIONS = [10, 20, 40, 50, 80] as const;
 const REVIEW_LIMIT_OPTIONS = [20, 50, 100, 200, 400] as const;
+const RETENTION_OPTIONS = [0.8, 0.85, 0.9, 0.95] as const;
 
 /** Deck detail: progress, the study entry point, and card management. */
 export default function DeckScreen() {
@@ -54,6 +57,7 @@ export default function DeckScreen() {
   const [cardsExpanded, setCardsExpanded] = useState(false);
   const [newCardsSettingsExpanded, setNewCardsSettingsExpanded] = useState(false);
   const [maxReviewsSettingsExpanded, setMaxReviewsSettingsExpanded] = useState(false);
+  const [schedulerSettingsExpanded, setSchedulerSettingsExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // A new deck starts minimized. Within a deck, preserve the user's choice
@@ -62,6 +66,7 @@ export default function DeckScreen() {
     setCardsExpanded(false);
     setNewCardsSettingsExpanded(false);
     setMaxReviewsSettingsExpanded(false);
+    setSchedulerSettingsExpanded(false);
   }, [id]);
 
   const load = useCallback(async () => {
@@ -127,6 +132,7 @@ export default function DeckScreen() {
   }
 
   const due = progress?.due ?? 0;
+  const scheduling = deckScheduling(deck);
 
   return (
     <Screen>
@@ -341,6 +347,67 @@ export default function DeckScreen() {
                   <Label variant="caption" tone="faint">
                     {t('maxReviewsPerDayHint')}
                   </Label>
+                </>
+              ) : null}
+            </Surface>
+
+            <Spacer size={theme.spacing.sm} />
+
+            <Surface style={styles.limitCard}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('scheduler')}
+                accessibilityState={{ expanded: schedulerSettingsExpanded }}
+                onPress={() => setSchedulerSettingsExpanded((expanded) => !expanded)}
+                style={styles.settingHeader}
+              >
+                <Row justify="space-between">
+                  <SectionLabel>{t('scheduler')}</SectionLabel>
+                  <Icon name={schedulerSettingsExpanded ? 'chevronUp' : 'chevronDown'} size={18} color={theme.colors.textFaint} />
+                </Row>
+              </Pressable>
+              {schedulerSettingsExpanded ? (
+                <>
+                  <Spacer size={theme.spacing.xs} />
+                  <SegmentedControl<SchedulerAlgorithm>
+                    options={[
+                      { value: 'fsrs', label: 'FSRS' },
+                      { value: 'sm2', label: 'SM-2' },
+                    ]}
+                    value={scheduling.algorithm}
+                    onChange={(value) => {
+                      if (!repository) return;
+                      void repository.setScheduling(deck, { scheduler: value }).then((updated) => setDeck(updated));
+                    }}
+                  />
+                  <Spacer size={theme.spacing.xs} />
+                  <Label variant="caption" tone="faint">
+                    {t('schedulerHint')}
+                  </Label>
+                  {scheduling.algorithm === 'fsrs' ? (
+                    <>
+                      <Spacer size={theme.spacing.md} />
+                      <SectionLabel>{t('desiredRetention')}</SectionLabel>
+                      <Spacer size={theme.spacing.xs} />
+                      <SegmentedControl<string>
+                        options={RETENTION_OPTIONS.map((retention) => ({
+                          value: String(retention),
+                          label: `${Math.round(retention * 100)}%`,
+                        }))}
+                        value={String(scheduling.desiredRetention)}
+                        onChange={(value) => {
+                          if (!repository) return;
+                          void repository
+                            .setScheduling(deck, { desiredRetention: Number(value) })
+                            .then((updated) => setDeck(updated));
+                        }}
+                      />
+                      <Spacer size={theme.spacing.xs} />
+                      <Label variant="caption" tone="faint">
+                        {t('desiredRetentionHint')}
+                      </Label>
+                    </>
+                  ) : null}
                 </>
               ) : null}
             </Surface>

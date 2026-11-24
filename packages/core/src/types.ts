@@ -20,6 +20,10 @@ export type CardStatus = 'new' | 'learning' | 'mastered';
  * so it stays optional and `normalizeCard()` reconstructs it.
  */
 export type CardPhase = 'new' | 'learning' | 'review' | 'relearning';
+
+/** Anki's two schedulers: FSRS (the default here) and the legacy SM-2. */
+export type SchedulerAlgorithm = 'fsrs' | 'sm2';
+export const SCHEDULER_ALGORITHMS: readonly SchedulerAlgorithm[] = ['fsrs', 'sm2'];
 export type SyncStatus = 'synced' | 'pending';
 
 /** ISO-8601 UTC string, e.g. `2024-09-05T10:00:00.000Z`. */
@@ -67,6 +71,15 @@ export interface Card {
   learningStep?: number;
   /** Set once the lapse count crosses the leech threshold. */
   leech?: boolean;
+  /**
+   * FSRS memory state: days until recall drops to 90%, and difficulty 1-10.
+   * Absent on cards never answered under FSRS; the scheduler converts their
+   * SM-2 interval and ease on the next answer.
+   */
+  stability?: number;
+  difficulty?: number;
+  /** When the card was last answered; FSRS measures elapsed time from it. */
+  lastReviewedAt?: IsoDate;
   nextReview: IsoDate;
   status: CardStatus;
   lastModified: IsoDate;
@@ -100,6 +113,10 @@ export interface Deck {
   newCardsPerDay: number | null;
   /** Review/learning cards shown per collection day; null means unlimited. */
   maxReviewsPerDay: number | null;
+  /** Which scheduler the deck runs. Absent means FSRS. */
+  scheduler?: SchedulerAlgorithm;
+  /** FSRS's target chance of recall when a card falls due. Absent means 0.9. */
+  desiredRetention?: number;
   /** Study presentation preferences, synced with the deck. */
   reverseCards: boolean;
   showExamples: boolean;

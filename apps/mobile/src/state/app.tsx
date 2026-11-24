@@ -245,7 +245,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
     });
     engineRef.current = engine;
-    void engine.start().then(refreshDecks);
+    void engine
+      .start()
+      // After the first sync, so the review log this device holds is as full
+      // as it gets: cards with a complete history are replayed rather than
+      // converted from SM-2. Idempotent, so it only does work once.
+      .then(() => convertToFsrs(repository, user.id, () => void engine.sync()))
+      .then(refreshDecks);
 
     const unsubscribeNet = NetInfo.addEventListener((netState) => {
       engine.setOnline(netState.isConnected !== false);
@@ -527,4 +533,20 @@ async function claimAnonymousData(
   if (!previous?.anonymous) return;
   if (previous.id === newUserId) return;
   await repository.claimLocalData(previous.id, newUserId);
+}
+
+/**
+ * Switch any studied card still on SM-2 state over to FSRS, then sync.
+ * A failure is logged and retried at the next launch; it never blocks the app.
+ */
+async function convertToFsrs(repository: Repository, userId: string, sync: () => void): Promise<void> {
+  try {
+    const converted = await repository.convertCardsToFsrs(userId);
+    if (converted > 0) {
+      console.info(`[fluentflow] converted ${converted} card(s) to FSRS`);
+      sync();
+    }
+  } catch (cause) {
+    console.warn('[fluentflow] FSRS conversion skipped:', cause);
+  }
 }

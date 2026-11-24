@@ -1,5 +1,8 @@
 import {
+  MAX_DESIRED_RETENTION,
+  MIN_DESIRED_RETENTION,
   RATING_NAMES,
+  SCHEDULER_ALGORITHMS,
   SETTING_KEYS,
   TARGET_LANGUAGES,
   isSettingValue,
@@ -9,6 +12,7 @@ import {
   type Card,
   type CardPhase,
   type Deck,
+  type SchedulerAlgorithm,
   type TargetLanguage,
   type UserSettings,
 } from '@fluentflow/core';
@@ -119,6 +123,21 @@ function parseDeck(value: unknown, userId: string, path: string): Deck {
     showExamples: raw.showExamples !== false,
     showGrammarNotes: raw.showGrammarNotes !== false,
     showRelatedWords: raw.showRelatedWords !== false,
+    ...(raw.scheduler === undefined || raw.scheduler === null
+      ? {}
+      : {
+          scheduler: oneOf<SchedulerAlgorithm>(raw.scheduler, SCHEDULER_ALGORITHMS, `${path}.scheduler`),
+        }),
+    ...(raw.desiredRetention === undefined || raw.desiredRetention === null
+      ? {}
+      : {
+          desiredRetention: number(
+            raw.desiredRetention,
+            `${path}.desiredRetention`,
+            MIN_DESIRED_RETENTION,
+            MAX_DESIRED_RETENTION,
+          ),
+        }),
     cardCount: integer(raw.cardCount ?? 0, `${path}.cardCount`, 0),
     createdAt: isoDate(raw.createdAt, `${path}.createdAt`),
     lastModified: isoDate(raw.lastModified, `${path}.lastModified`),
@@ -159,6 +178,16 @@ function parseCard(value: unknown, userId: string, path: string): Card {
     lapses: integer(raw.lapses ?? 0, `${path}.lapses`, 0),
     learningStep: integer(raw.learningStep ?? 0, `${path}.learningStep`, 0),
     ...(raw.leech === true ? { leech: true } : {}),
+    // FSRS memory state: optional, since cards from older clients have none.
+    ...(raw.stability === undefined || raw.stability === null
+      ? {}
+      : { stability: number(raw.stability, `${path}.stability`, 0.001, 36500) }),
+    ...(raw.difficulty === undefined || raw.difficulty === null
+      ? {}
+      : { difficulty: number(raw.difficulty, `${path}.difficulty`, 1, 10) }),
+    ...(raw.lastReviewedAt === undefined || raw.lastReviewedAt === null
+      ? {}
+      : { lastReviewedAt: isoDate(raw.lastReviewedAt, `${path}.lastReviewedAt`) }),
     ...(raw.introducedAt === undefined
       ? {}
       : { introducedAt: isoDate(raw.introducedAt, `${path}.introducedAt`) }),

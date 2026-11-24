@@ -361,12 +361,14 @@ describe('StudyScreen', () => {
 
     await waitFor(async () => {
       const stored = await repository.getCard(card!.id);
-      // "Easy" skips the learning steps for the four-day easy interval, where
-      // "Good" would have left the card ten minutes out. Anki fuzzes the exact
-      // number of days, so the assertion is the window, not the midpoint.
+      // "Easy" skips the learning steps for FSRS's easy interval (about eight
+      // days at 90% retention), where "Good" would have left the card ten
+      // minutes out. Anki fuzzes the exact number of days, so the assertion
+      // is the fuzz window, not the midpoint.
       expect(stored?.phase).toBe('review');
-      expect(stored?.interval).toBeGreaterThanOrEqual(3);
-      expect(stored?.interval).toBeLessThanOrEqual(5);
+      expect(stored?.interval).toBeGreaterThanOrEqual(6);
+      expect(stored?.interval).toBeLessThanOrEqual(10);
+      expect(stored?.stability).toBeGreaterThan(0);
     });
   });
 
@@ -378,7 +380,7 @@ describe('StudyScreen', () => {
     await reveal();
     await screen.findByText('to speak');
     // Good once is a learning step, so the card returns; good again graduates
-    // it to a one-day interval and the session is over.
+    // it to a day-level interval and the session is over.
     await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
 
     await screen.findByText('hablar');
@@ -451,12 +453,12 @@ describe('StudyScreen', () => {
 
     // A brand-new card walks the learning steps (1m, 10m): Again restarts them,
     // Hard sits between, Good moves to the next, and Easy graduates straight to
-    // the four-day interval. The preview runs the same `review` the button
+    // FSRS's easy interval. The preview runs the same `review` the button
     // will, against the same scheduling state, so it cannot drift from it.
     expect(screen.getByText('1 min')).toBeTruthy();
     expect(screen.getByText('6 min')).toBeTruthy();
     expect(screen.getByText('10 min')).toBeTruthy();
-    expect(screen.getByText(/^[345] d$/)).toBeTruthy();
+    expect(screen.getByText(/^([6-9]|10) d$/)).toBeTruthy();
   });
 
   it('returns home once the queue runs out', async () => {

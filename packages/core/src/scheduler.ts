@@ -1,4 +1,13 @@
-import type { Card, CardPhase, CardStatus, IsoDate, RatingName } from './types.js';
+import type { Card, CardPhase, CardStatus, Deck, IsoDate, RatingName, SchedulerAlgorithm } from './types.js';
+import {
+  DEFAULT_DESIRED_RETENTION,
+  clampRetention,
+  fsrsInterval,
+  memoryStateFromHistory,
+  memoryStateFromSm2,
+  nextMemoryState,
+  type MemoryState,
+} from './fsrs.js';
 
 /**
  * Anki's SM-2 scheduler (the "v3" scheduler shipped by Anki Desktop), ported
@@ -23,6 +32,14 @@ import type { Card, CardPhase, CardStatus, IsoDate, RatingName } from './types.j
  * `nextReview` remains an instant for intraday learning steps and ordering,
  * while `dueDay` carries Anki's collection-day semantics for day-level review
  * cards. Per-deck daily limits are enforced by the queue builder below.
+ *
+ * Decks use **FSRS** by default, as Anki does once FSRS is switched on (see
+ * `fsrs.ts`). The phases, learning steps, lapses, leeches, fuzz and queue are
+ * the same; what changes is where a day-level interval comes from. Instead of
+ * interval x ease, every answer updates the card's stability and difficulty,
+ * and the interval is the wait that brings predicted recall down to the deck's
+ * desired retention. Ease is left untouched under FSRS, as in Anki, so a deck
+ * switched back to SM-2 carries on from where it was.
  */
 
 export const MS_PER_DAY = 86_400_000;
@@ -114,6 +131,29 @@ export interface SchedulingState {
   dueDay?: string;
   leech: boolean;
   status: CardStatus;
+  /** FSRS memory state. Absent until a card is first answered under FSRS. */
+  stability?: number;
+  difficulty?: number;
+  /** When the card was last answered; FSRS measures elapsed time from it. */
+  lastReviewedAt?: IsoDate;
+}
+
+/** Which scheduler a deck runs and, for FSRS, the retention it aims for. */
+export interface DeckScheduling {
+  algorithm: SchedulerAlgorithm;
+  desiredRetention: number;
+}
+
+export const DEFAULT_SCHEDULER_ALGORITHM: SchedulerAlgorithm = 'fsrs';
+
+/** A deck's scheduling choice, with defaults for decks that predate it. */
+export function deckScheduling(
+  deck?: Partial<Pick<Deck, 'scheduler' | 'desiredRetention'>> | null,
+): DeckScheduling {
+  return {
+    algorithm: deck?.scheduler === 'sm2' ? 'sm2' : DEFAULT_SCHEDULER_ALGORITHM,
+    desiredRetention: clampRetention(deck?.desiredRetention ?? DEFAULT_DESIRED_RETENTION),
+  };
 }
 
 /** The local calendar day Anki considers "today". */
@@ -169,6 +209,10 @@ export interface ReviewOptions {
   config?: Partial<SchedulerConfig>;
   /** Uniform [0, 1) source for interval fuzz. Injected to pin tests. */
   random?: () => number;
+  /** Which scheduler to run. Defaults to FSRS, like every deck does. */
+  algorithm?: SchedulerAlgorithm;
+  /** FSRS's target probability of recall when a card comes due. */
+  desiredRetention?: number;
 }
 
 /** Apply a rating to a card's scheduling state. */
@@ -181,10 +225,186 @@ export function review(
   const now = options.now ?? new Date();
   const random = options.random ?? Math.random;
   const fuzzFactor = config.fuzz ? random() : undefined;
+  const algorithm = options.algorithm ?? DEFAULT_SCHEDULER_ALGORITHM;
 
-  return state.phase === 'review'
+  if (algorithm === 'fsrs') {
+    return answerFsrs(
+      state,
+      rating,
+      // FSRS intervals already aim at a retention; Anki hides the interval
+      // multiplier under FSRS because scaling them would just miss the target.
+      { ...config, intervalMultiplier: 1 },
+      now,
+      clampRetention(options.desiredRetention ?? DEFAULT_DESIRED_RETENTION),
+      fuzzFactor,
+    );
+  }
+
+  const answered = state.phase === 'review'
     ? answerReview(state, rating, config, now, fuzzFactor)
     : answerLearning(state, rating, config, now);
+  return { ...answered, lastReviewedAt: now.toISOString() };
+}
+
+// --- FSRS --------------------------------------------------------------------
+
+/**
+ * One answer under FSRS.
+ *
+ * The memory state is updated on every answer, learning steps included — a
+ * same-day answer goes through FSRS's short-term formula. Then the phase logic
+ * is SM-2's, with every day-level interval read off the new stability.
+ */
+function answerFsrs(
+  state: SchedulingState,
+  rating: RatingName,
+  config: SchedulerConfig,
+  now: Date,
+  retention: number,
+  fuzzFactor?: number,
+): SchedulingState {
+  const memory = memoryStateFor(state);
+  const elapsed = elapsedDaysFor(state, now);
+  const next = nextMemoryState(memory, elapsed, rating);
+  const remembered = {
+    ...state,
+    stability: next.stability,
+    difficulty: next.difficulty,
+    lastReviewedAt: now.toISOString(),
+  };
+  const intervalFor = (stability: number) => fsrsInterval(stability, retention);
+
+  if (state.phase !== 'review') {
+    return answerLearning(remembered, rating, config, now, {
+      days: intervalFor(next.stability),
+      fuzzFactor,
+    });
+  }
+
+  const repetitions = state.repetitions + 1;
+  if (rating === 'again') {
+    const interval = constrain(intervalFor(next.stability), config.minimumLapseInterval, config, fuzzFactor);
+    return lapseTo(remembered, repetitions, state.easeFactor, interval, config, now);
+  }
+
+  // Each passing grade gets the interval of its own memory state, then the
+  // same chain SM-2 enforces: a better answer never schedules a shorter wait.
+  const hardMemory = rating === 'hard' ? next : nextMemoryState(memory, elapsed, 'hard');
+  const goodMemory = rating === 'good' ? next : nextMemoryState(memory, elapsed, 'good');
+  const hard = constrain(intervalFor(hardMemory.stability), 1, config, fuzzFactor);
+  const good = constrain(intervalFor(goodMemory.stability), hard + 1, config, fuzzFactor);
+  const interval = rating === 'hard'
+    ? hard
+    : rating === 'good'
+      ? good
+      : constrain(intervalFor(next.stability), good + 1, config, fuzzFactor);
+
+  return {
+    ...remembered,
+    phase: 'review',
+    learningStep: 0,
+    interval,
+    repetitions,
+    nextReview: reviewDueAt(now, interval),
+    status: statusFor('review', interval),
+  };
+}
+
+/**
+ * A card's FSRS memory state, converting from SM-2 when it has none yet.
+ *
+ * New cards have no memory: their first answer initialises it. A card that
+ * graduated under SM-2 gets Anki's interval-and-ease conversion. A card still
+ * on its first learning steps has too little to convert and starts fresh.
+ */
+export function memoryStateFor(
+  state: Pick<SchedulingState, 'phase' | 'stability' | 'difficulty' | 'easeFactor' | 'interval'>,
+): MemoryState | undefined {
+  if (isFiniteNumber(state.stability) && isFiniteNumber(state.difficulty)) {
+    return { stability: state.stability, difficulty: state.difficulty };
+  }
+  if (state.phase === 'new') return undefined;
+  if (state.interval >= 1) return memoryStateFromSm2(state.easeFactor, state.interval);
+  return undefined;
+}
+
+/**
+ * Whole collection days since the card was last answered, which is the unit
+ * FSRS is fitted in. A card answered before this field existed is assumed to
+ * have been answered one interval before it fell due, as Anki assumes.
+ */
+export function elapsedDaysFor(
+  state: Pick<SchedulingState, 'phase' | 'lastReviewedAt' | 'dueDay' | 'interval' | 'nextReview'>,
+  now: Date,
+): number {
+  const today = collectionDayKey(now);
+  if (state.lastReviewedAt && Number.isFinite(Date.parse(state.lastReviewedAt))) {
+    return Math.max(0, dayDiff(collectionDayKey(new Date(state.lastReviewedAt)), today));
+  }
+  if (state.phase === 'review' || state.phase === 'relearning') {
+    const due = state.dueDay ?? collectionDayKey(new Date(state.nextReview));
+    const reviewed = addCollectionDays(due, -Math.max(1, Math.round(state.interval)));
+    return Math.max(0, dayDiff(reviewed, today));
+  }
+  return 0;
+}
+
+/** One past answer, as the review log records it. */
+export interface ReviewHistoryEntry {
+  rating: RatingName;
+  reviewedAt: IsoDate;
+}
+
+/**
+ * Give a card an FSRS memory state without rescheduling it.
+ *
+ * This is what Anki does when FSRS is switched on: due dates stay where SM-2
+ * put them, and only the state the next answer builds on is filled in. When
+ * the review log holds the card's whole history, it is replayed answer by
+ * answer; otherwise (an Anki import, say) the SM-2 interval and ease are
+ * converted. Returns null when there is nothing to convert: a new card, one
+ * that already has a memory state, or one too early in learning to convert.
+ */
+export function convertCardToFsrs(
+  card: Card,
+  history: readonly ReviewHistoryEntry[] = [],
+): Pick<Card, 'stability' | 'difficulty' | 'lastReviewedAt'> | null {
+  if (isFiniteNumber(card.stability) && isFiniteNumber(card.difficulty)) return null;
+  const phase = card.phase ?? schedulingStateFor(card).phase;
+  if (phase === 'new') return null;
+
+  const answers = history
+    .filter((entry) => Number.isFinite(Date.parse(entry.reviewedAt)))
+    .slice()
+    .sort((a, b) => Date.parse(a.reviewedAt) - Date.parse(b.reviewedAt));
+  const last = answers[answers.length - 1];
+
+  // A log at least as long as the card's answer count covers its whole life.
+  if (last && answers.length >= card.repetitions) {
+    const days = answers.map((entry) => collectionDayKey(new Date(entry.reviewedAt)));
+    const memory = memoryStateFromHistory(
+      answers.map((entry, index) => ({
+        rating: entry.rating,
+        elapsedDays: index === 0 ? 0 : Math.max(0, dayDiff(days[index - 1]!, days[index]!)),
+      })),
+    );
+    if (memory) return { ...memory, lastReviewedAt: new Date(last.reviewedAt).toISOString() };
+  }
+
+  const memory = memoryStateFor({ ...schedulingStateFor(card), phase });
+  if (!memory) return null;
+  return {
+    ...memory,
+    ...(last ? { lastReviewedAt: new Date(last.reviewedAt).toISOString() } : {}),
+  };
+}
+
+function dayDiff(from: string, to: string): number {
+  return Math.round((dayForKey(to).getTime() - dayForKey(from).getTime()) / MS_PER_DAY);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 /**
@@ -199,18 +419,26 @@ function answerLearning(
   rating: RatingName,
   config: SchedulerConfig,
   now: Date,
+  /**
+   * Under FSRS, the interval a graduating card gets — read off its updated
+   * stability — in place of SM-2's graduating, easy and lapse intervals.
+   */
+  fsrsGraduation?: { days: number; fuzzFactor?: number },
 ): SchedulingState {
   const relearning = state.phase === 'relearning';
   const steps = relearning ? config.relearningSteps : config.learningSteps;
   const repetitions = state.repetitions + 1;
+  const minimum = relearning ? config.minimumLapseInterval : 1;
+  const fsrsDays = fsrsGraduation
+    ? constrain(fsrsGraduation.days, minimum, config, fsrsGraduation.fuzzFactor)
+    : undefined;
 
   // Easy always leaves the steps immediately. A relearning card returns to a
   // day more than the interval its lapse left it with; a new one takes the
   // easy interval outright.
   if (rating === 'easy') {
     const target = relearning ? state.interval + 1 : config.easyInterval;
-    const minimum = relearning ? config.minimumLapseInterval : 1;
-    return graduate(state, repetitions, constrain(target, minimum, config), now);
+    return graduate(state, repetitions, fsrsDays ?? constrain(target, minimum, config), now);
   }
 
   const step = nextStep(state.learningStep, rating, steps.length);
@@ -219,8 +447,7 @@ function answerLearning(
   // interval, a relearning card back onto the interval its lapse computed.
   if (step >= steps.length) {
     const target = relearning ? state.interval : config.graduatingInterval;
-    const minimum = relearning ? config.minimumLapseInterval : 1;
-    return graduate(state, repetitions, constrain(target, minimum, config), now);
+    return graduate(state, repetitions, fsrsDays ?? constrain(target, minimum, config), now);
   }
 
   const delay = roundLearningDelay(rating === 'hard' ? hardDelay(steps, step) : stepAt(steps, step));
@@ -395,13 +622,28 @@ function lapse(
   now: Date,
   fuzzFactor?: number,
 ): SchedulingState {
-  const lapses = state.lapses + 1;
   const interval = constrain(
     state.interval * config.lapseMultiplier,
     config.minimumLapseInterval,
     config,
     fuzzFactor,
   );
+  return lapseTo(state, repetitions, easeFactor, interval, config, now);
+}
+
+/**
+ * Put a failed review card into relearning, waiting to return to `interval`.
+ * Shared by SM-2 and FSRS, which differ only in how that interval is decided.
+ */
+function lapseTo(
+  state: SchedulingState,
+  repetitions: number,
+  easeFactor: number,
+  interval: number,
+  config: SchedulerConfig,
+  now: Date,
+): SchedulingState {
+  const lapses = state.lapses + 1;
   const leech = state.leech || lapses >= config.leechThreshold;
 
   // A deck with no relearning steps sends the card straight back to review.
@@ -553,6 +795,9 @@ export function schedulingStateFor(card: Card): SchedulingState {
     dueDay: card.dueDay,
     leech: card.leech ?? false,
     status: card.status,
+    ...(card.stability !== undefined ? { stability: card.stability } : {}),
+    ...(card.difficulty !== undefined ? { difficulty: card.difficulty } : {}),
+    ...(card.lastReviewedAt ? { lastReviewedAt: card.lastReviewedAt } : {}),
   };
 }
 
@@ -621,6 +866,9 @@ export function reviewCard(card: Card, rating: RatingName, options: ReviewOption
         : collectionDayKey(new Date(result.nextReview)),
     status: result.status,
     ...(result.leech ? { leech: true } : {}),
+    ...(result.stability !== undefined ? { stability: result.stability } : {}),
+    ...(result.difficulty !== undefined ? { difficulty: result.difficulty } : {}),
+    ...(result.lastReviewedAt ? { lastReviewedAt: result.lastReviewedAt } : {}),
     lastModified: now.toISOString(),
     syncStatus: 'pending',
   };

@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  review,
-  reviewCard,
+  review as runReview,
+  reviewCard as runReviewCard,
   newCardState,
   normalizeCard,
   schedulingStateFor,
@@ -23,6 +23,13 @@ import {
 } from '../dist/index.js';
 
 const NOW = new Date('2024-09-03T10:00:00.000Z');
+
+/**
+ * This file pins Anki's SM-2 scheduler, which a deck can still choose. Decks
+ * default to FSRS, covered in fsrs.test.js.
+ */
+const review = (state, rating, options = {}) => runReview(state, rating, { algorithm: 'sm2', ...options });
+const reviewCard = (card, rating, options = {}) => runReviewCard(card, rating, { algorithm: 'sm2', ...options });
 
 /** Fuzz is what makes Anki's intervals non-deterministic; pin it off. */
 const exact = { now: NOW, config: { fuzz: false } };

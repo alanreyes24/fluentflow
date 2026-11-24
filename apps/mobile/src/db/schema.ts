@@ -227,6 +227,19 @@ const migrations: Migration[] = [
       );
     `);
   },
+  // 17 — FSRS: each card's memory state, and each deck's scheduler choice.
+  // Both are nullable: a card without a memory state is converted from its
+  // SM-2 interval and ease (see Repository.convertCardsToFsrs), and a deck
+  // without a choice runs FSRS at 90% retention.
+  async (db) => {
+    await db.execAsync(`
+      ALTER TABLE cards ADD COLUMN stability REAL;
+      ALTER TABLE cards ADD COLUMN difficulty REAL;
+      ALTER TABLE cards ADD COLUMN lastReviewedAt TEXT;
+      ALTER TABLE decks ADD COLUMN scheduler TEXT;
+      ALTER TABLE decks ADD COLUMN desiredRetention REAL;
+    `);
+  },
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

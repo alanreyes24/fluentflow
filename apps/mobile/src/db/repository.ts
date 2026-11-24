@@ -8,9 +8,11 @@ import {
   collectionDayKey,
   collectionDayStart,
   collectionSummary,
+  convertCardToFsrs,
   createCard,
   createDeck,
   deckProgress,
+  deckScheduling,
   dueCards,
   forecast,
   isInterdayLearningCard,
@@ -32,6 +34,7 @@ import {
   type RatingCounts,
   type RatingName,
   type ReviewEvent,
+  type ReviewHistoryEntry,
   type SettingEntry,
   type SettingKey,
   type SettingValues,
@@ -133,6 +136,16 @@ export class Repository {
 
   async setMaxReviewsPerDay(deck: Deck, maxReviewsPerDay: number | null): Promise<Deck> {
     const updated = touch({ ...deck, maxReviewsPerDay });
+    await this.saveDecks([updated]);
+    return updated;
+  }
+
+  /** Pick the deck's scheduler and, for FSRS, the retention it aims for. */
+  async setScheduling(
+    deck: Deck,
+    changes: Partial<Pick<Deck, 'scheduler' | 'desiredRetention'>>,
+  ): Promise<Deck> {
+    const updated = touch({ ...deck, ...changes });
     await this.saveDecks([updated]);
     return updated;
   }
@@ -362,9 +375,17 @@ export class Repository {
     await this.refreshDeckCount(card.deckId);
   }
 
-  /** Apply a review: update scheduling, and record it for the stats screen. */
+  /**
+   * Apply a review: update scheduling, and record it for the stats screen.
+   * The deck decides which scheduler runs (FSRS unless it picked SM-2).
+   */
   async rateCard(card: Card, rating: RatingName, now: Date = new Date()): Promise<Card> {
-    const reviewed = reviewCard(card, rating, { now });
+    const scheduling = deckScheduling(await this.getDeck(card.deckId));
+    const reviewed = reviewCard(card, rating, {
+      now,
+      algorithm: scheduling.algorithm,
+      desiredRetention: scheduling.desiredRetention,
+    });
     const introducedAt =
       schedulingStateFor(card).phase === 'new' && !card.introducedAt
         ? now.toISOString()
@@ -386,6 +407,50 @@ export class Repository {
       );
     });
     return withIntroduction;
+  }
+
+  /**
+   * Give every studied card on an FSRS deck an FSRS memory state.
+   *
+   * This is the one-time switch from SM-2, done the way Anki does it: due dates
+   * stay as they are, and each card gets the stability and difficulty its next
+   * answer builds on. A card whose full history is in the review log has it
+   * replayed; the rest (Anki imports, mostly) convert from interval and ease.
+   * Only cards still missing a memory state are touched, so it is safe to run
+   * on every launch. Returns how many cards changed.
+   */
+  async convertCardsToFsrs(userId: string, now: Date = new Date()): Promise<number> {
+    const missing = `userId = ? AND deleted = 0 AND phase != 'new'
+      AND (stability IS NULL OR difficulty IS NULL)`;
+    const rows = await this.db.getAllAsync<CardRow>(`SELECT * FROM cards WHERE ${missing}`, userId);
+    if (rows.length === 0) return 0;
+
+    const [deckRows, events] = await Promise.all([
+      this.db.getAllAsync<DeckRow>('SELECT * FROM decks WHERE userId = ?', userId),
+      this.db.getAllAsync<{ cardId: string; rating: string; reviewedAt: string }>(
+        `SELECT cardId, rating, reviewedAt FROM review_log
+         WHERE cardId IN (SELECT id FROM cards WHERE ${missing})`,
+        userId,
+      ),
+    ]);
+    const decks = new Map(deckRows.map((row) => [row.id, toDeck(row)]));
+    const history = new Map<string, ReviewHistoryEntry[]>();
+    for (const event of events) {
+      const rating = ratingName(event.rating);
+      if (!rating) continue;
+      const list = history.get(event.cardId) ?? [];
+      list.push({ rating, reviewedAt: event.reviewedAt });
+      history.set(event.cardId, list);
+    }
+
+    const converted: Card[] = [];
+    for (const card of rows.map(toCard)) {
+      if (deckScheduling(decks.get(card.deckId)).algorithm !== 'fsrs') continue;
+      const memory = convertCardToFsrs(card, history.get(card.id) ?? []);
+      if (memory) converted.push(touch({ ...card, ...memory }, now));
+    }
+    if (converted.length > 0) await this.saveCards(converted);
+    return converted.length;
   }
 
   async newCardsIntroducedToday(deckId: string, now: Date = new Date()): Promise<number> {
@@ -1025,8 +1090,9 @@ export class Repository {
       await this.db.runAsync(
         `INSERT INTO decks (id, userId, name, language, newCardsPerDay, maxReviewsPerDay,
                             reverseCards, showExamples, showGrammarNotes, showRelatedWords,
-                            cardCount, createdAt, lastModified, syncStatus, deleted)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            cardCount, createdAt, lastModified, syncStatus, deleted,
+                            scheduler, desiredRetention)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            userId = excluded.userId,
            name = excluded.name,
@@ -1040,7 +1106,9 @@ export class Repository {
            cardCount = excluded.cardCount,
            lastModified = excluded.lastModified,
            syncStatus = excluded.syncStatus,
-           deleted = excluded.deleted`,
+           deleted = excluded.deleted,
+           scheduler = excluded.scheduler,
+           desiredRetention = excluded.desiredRetention`,
         deck.id,
         deck.userId,
         deck.name,
@@ -1056,6 +1124,8 @@ export class Repository {
         deck.lastModified,
         deck.syncStatus,
         deck.deleted ? 1 : 0,
+        deck.scheduler ?? null,
+        deck.desiredRetention ?? null,
       );
     }
   }
@@ -1065,8 +1135,9 @@ export class Repository {
       await this.db.runAsync(
         `INSERT INTO cards (id, deckId, userId, front, back, language, examples, grammarNotes, relatedWords, interval,
                             easeFactor, repetitions, phase, lapses, learningStep, leech,
-                            introducedAt, dueDay, buriedUntil, suspended, nextReview, status, lastModified, syncStatus, deleted, starred, tags, exampleTranslations)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            introducedAt, dueDay, buriedUntil, suspended, nextReview, status, lastModified, syncStatus, deleted, starred, tags, exampleTranslations,
+                            stability, difficulty, lastReviewedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET
            deckId = excluded.deckId,
            userId = excluded.userId,
@@ -1094,7 +1165,10 @@ export class Repository {
            deleted = excluded.deleted,
            starred = excluded.starred,
            tags = excluded.tags,
-           exampleTranslations = excluded.exampleTranslations`,
+           exampleTranslations = excluded.exampleTranslations,
+           stability = excluded.stability,
+           difficulty = excluded.difficulty,
+           lastReviewedAt = excluded.lastReviewedAt`,
         card.id,
         card.deckId,
         card.userId,
@@ -1123,6 +1197,9 @@ export class Repository {
         card.starred ? 1 : 0,
         JSON.stringify(card.tags ?? []),
         JSON.stringify(card.exampleTranslations ?? []),
+        finiteOrNull(card.stability),
+        finiteOrNull(card.difficulty),
+        card.lastReviewedAt ?? null,
       );
     }
   }
@@ -1136,6 +1213,7 @@ const CARD_UPDATE_COLUMNS = [
   'relatedWords', 'interval', 'easeFactor', 'repetitions', 'phase', 'lapses',
   'learningStep', 'leech', 'introducedAt', 'dueDay', 'buriedUntil', 'suspended',
   'nextReview', 'status', 'lastModified', 'syncStatus', 'deleted', 'starred', 'tags',
+  'stability', 'difficulty', 'lastReviewedAt',
 ] as const satisfies readonly (keyof Card)[];
 
 interface DeckRow {
@@ -1154,6 +1232,8 @@ interface DeckRow {
   lastModified: string;
   syncStatus: string;
   deleted: number;
+  scheduler: string | null;
+  desiredRetention: number | null;
 }
 
 interface CardRow {
@@ -1185,6 +1265,9 @@ interface CardRow {
   lastModified: string;
   syncStatus: string;
   deleted: number;
+  stability: number | null;
+  difficulty: number | null;
+  lastReviewedAt: string | null;
 }
 
 interface ReviewEventRow {
@@ -1227,6 +1310,8 @@ function toDeck(row: DeckRow): Deck {
     lastModified: row.lastModified,
     syncStatus: row.syncStatus as Deck['syncStatus'],
     ...(row.deleted ? { deleted: true } : {}),
+    ...(row.scheduler === 'fsrs' || row.scheduler === 'sm2' ? { scheduler: row.scheduler } : {}),
+    ...(typeof row.desiredRetention === 'number' ? { desiredRetention: row.desiredRetention } : {}),
   };
 }
 
@@ -1264,7 +1349,18 @@ function toCard(row: CardRow): Card {
     ...(row.suspended ? { suspended: true } : {}),
     ...(row.leech ? { leech: true } : {}),
     ...(row.deleted ? { deleted: true } : {}),
+    ...(typeof row.stability === 'number' ? { stability: row.stability } : {}),
+    ...(typeof row.difficulty === 'number' ? { difficulty: row.difficulty } : {}),
+    ...(row.lastReviewedAt ? { lastReviewedAt: row.lastReviewedAt } : {}),
   };
+}
+
+function ratingName(value: string): RatingName | undefined {
+  return value === 'again' || value === 'hard' || value === 'good' || value === 'easy' ? value : undefined;
+}
+
+function finiteOrNull(value: number | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function parseCardSnapshot(value: string): Card | null {

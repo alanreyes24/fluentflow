@@ -5,6 +5,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import {
   RATING_NAMES,
   RATINGS,
+  deckScheduling,
   fuzzRandomForCard,
   review,
   schedulingStateFor,
@@ -228,6 +229,8 @@ export default function StudyScreen() {
     if (!card) return null;
     const state = schedulingStateFor(card);
     const now = Date.now();
+    // The deck's scheduler, exactly as `rateCard` resolves it.
+    const scheduling = deckScheduling(deck);
     return Object.fromEntries(
       RATING_NAMES.map((rating) => {
         // The gap to the answer's own `nextReview`, not its `interval`: a card
@@ -237,7 +240,11 @@ export default function StudyScreen() {
         // spreads intervals so a day's reviews do not all come back together,
         // but a preview that changed on every render — or disagreed with the
         // button beside it — would read as a bug.
-        const answer = review(state, rating, { random: fuzzRandomForCard(card.id) });
+        const answer = review(state, rating, {
+          random: fuzzRandomForCard(card.id),
+          algorithm: scheduling.algorithm,
+          desiredRetention: scheduling.desiredRetention,
+        });
         const ahead = Math.max(0, Date.parse(answer.nextReview) - now);
         return [rating, {
           // Day-level answers display Anki's scheduled interval, not the
@@ -247,7 +254,7 @@ export default function StudyScreen() {
         }];
       }),
     ) as Record<RatingName, { days: number; minutes: number }>;
-  }, [card]);
+  }, [card, deck]);
 
   const rate = useCallback(
     (rating: RatingName) => {

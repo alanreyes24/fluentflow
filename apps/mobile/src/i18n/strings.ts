@@ -91,6 +91,10 @@ export const en = {
   newCardsPerDayHint: 'How many untouched cards this deck can introduce today.',
   maxReviewsPerDay: 'Maximum reviews per day',
   maxReviewsPerDayHint: 'How many due review cards this deck can show today.',
+  scheduler: 'Scheduler',
+  schedulerHint: 'FSRS predicts when you would forget each card and needs fewer reviews for the same recall. SM-2 is Anki’s older scheduler.',
+  desiredRetention: 'Desired retention',
+  desiredRetentionHint: 'The chance you still remember a card when it comes due. Higher means more reviews.',
   unlimited: 'Unlimited',
 
   // Study
@@ -426,6 +430,10 @@ const es: Strings = {
   newCardsPerDayHint: 'Cuántas tarjetas sin estudiar puede introducir este mazo hoy.',
   maxReviewsPerDay: 'Máximo de repasos por día',
   maxReviewsPerDayHint: 'Cuántas tarjetas de repaso pendientes puede mostrar este mazo hoy.',
+  scheduler: 'Programador',
+  schedulerHint: 'FSRS predice cuándo olvidarías cada tarjeta y necesita menos repasos para recordar lo mismo. SM-2 es el programador antiguo de Anki.',
+  desiredRetention: 'Retención deseada',
+  desiredRetentionHint: 'La probabilidad de que aún recuerdes una tarjeta cuando toque repasarla. Más alta significa más repasos.',
   unlimited: 'Sin límite',
 
   study: 'Estudiar',
@@ -741,6 +749,10 @@ const bs: Strings = {
   newCardsPerDayHint: 'Koliko neobrađenih kartica ovaj špil može uvesti danas.',
   maxReviewsPerDay: 'Najviše ponavljanja dnevno',
   maxReviewsPerDayHint: 'Koliko dospjelih kartica za ponavljanje ovaj špil može prikazati danas.',
+  scheduler: 'Algoritam ponavljanja',
+  schedulerHint: 'FSRS predviđa kada biste zaboravili svaku karticu i treba manje ponavljanja za isto pamćenje. SM-2 je Ankijev stariji algoritam.',
+  desiredRetention: 'Željeno pamćenje',
+  desiredRetentionHint: 'Vjerovatnoća da ćete se još sjećati kartice kad dođe na red. Više znači više ponavljanja.',
   unlimited: 'Bez ograničenja',
 
   study: 'Uči',

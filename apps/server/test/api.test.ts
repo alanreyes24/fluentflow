@@ -227,6 +227,48 @@ test('a pushed change comes back on an incremental pull, and nothing else does',
   assert.deepEqual(changes.reviewEvents.map((e: { eventId: string }) => e.eventId), ['event-wes']);
 });
 
+test('FSRS memory state and deck scheduling survive a push and pull', async () => {
+  const epoch = await seed('fern', {
+    decks: [deck({ id: 'fsrs-deck', scheduler: 'sm2', desiredRetention: 0.85 })],
+  });
+  const { cursor } = await (await pull('fern', epoch)).json();
+
+  const pushed = await json('/api/sync/push', {
+    epoch,
+    cards: [card({
+      id: 'remembered',
+      deckId: 'fsrs-deck',
+      phase: 'review',
+      stability: 12.5,
+      difficulty: 4.2,
+      lastReviewedAt: '2024-09-03T10:00:00.000Z',
+      lastModified: '2024-09-05T00:00:00.000Z',
+    })],
+  }, { user: 'fern' });
+  assert.equal(pushed.status, 200);
+
+  const changes = await (await pull('fern', epoch, cursor)).json();
+  assert.equal(changes.cards[0].stability, 12.5);
+  assert.equal(changes.cards[0].difficulty, 4.2);
+  assert.equal(changes.cards[0].lastReviewedAt, '2024-09-03T10:00:00.000Z');
+  const everything = await (await pull('fern', epoch)).json();
+  assert.equal(everything.decks[0].scheduler, 'sm2');
+  assert.equal(everything.decks[0].desiredRetention, 0.85);
+});
+
+test('out-of-range FSRS values are refused', async () => {
+  const epoch = await seed('gale');
+  for (const bad of [
+    { cards: [card({ id: 'bad-d', difficulty: 11 })] },
+    { cards: [card({ id: 'bad-s', stability: -1 })] },
+    { decks: [deck({ id: 'bad-r', desiredRetention: 0.5 })] },
+    { decks: [deck({ id: 'bad-a', scheduler: 'leitner' })] },
+  ]) {
+    const response = await json('/api/sync/push', { epoch, ...bad }, { user: 'gale' });
+    assert.equal(response.status, 400, JSON.stringify(bad));
+  }
+});
+
 test('a stale push is refused and the server copy is handed back', async () => {
   const fresh = card({ id: 'race', interval: 6, lastModified: '2024-09-05T00:00:00.000Z' });
   const stale = card({ id: 'race', interval: 1, lastModified: '2024-09-01T00:00:00.000Z' });
