@@ -55,6 +55,21 @@ function run(items, voice) {
   });
 }
 
+/**
+ * Turn the event loop until `ready()` holds, moving the mocked clock by
+ * `stepMs` between turns. The clip cache is real disk I/O, which finishes on
+ * its own time, so a fixed number of turns is not enough on a slow CI runner;
+ * this waits on the condition instead, for up to five seconds of real time.
+ */
+async function until(t, ready, stepMs = 0) {
+  const started = performance.now();
+  while (!ready()) {
+    if (performance.now() - started > 5_000) throw new Error('timed out waiting for the backfill');
+    await new Promise((resolve) => setImmediate(resolve));
+    if (stepMs) t.mock.timers.tick(stepMs);
+  }
+}
+
 beforeEach(() => {
   calls.length = 0;
   respond = () => wavResponse();
@@ -90,13 +105,12 @@ test('a rate limit slows the run down and retries instead of dropping the card',
   let limited = 1;
   respond = () => (limited-- > 0 ? new Response('{}', { status: 429 }) : wavResponse());
 
-  const done = run([{ text: 'Da, da.', language: 'bs' }], 'Aoede');
+  let status = null;
+  void run([{ text: 'Da, da.', language: 'bs' }], 'Aoede').then((value) => {
+    status = value;
+  });
   // Let the 429 land, then let the back-off elapse.
-  for (let i = 0; i < 5; i++) {
-    await new Promise((resolve) => setImmediate(resolve));
-    t.mock.timers.tick(20_000);
-  }
-  const status = await done;
+  await until(t, () => status !== null, 20_000);
   assert.equal(status.ready, 1);
   assert.equal(status.failed, 0);
   assert.equal(calls.length, 2);
@@ -114,22 +128,22 @@ test('the daily cap pauses the run until the reset time, then it carries on', as
   respond = () => (capped-- > 0 ? new Response(daily, { status: 429 }) : wavResponse());
 
   const seen = [];
-  const done = new Promise((resolve) => {
-    void ai.prepareSpeech([{ text: 'Da, da.', language: 'bs' }, { text: 'Da, je.', language: 'bs' }], 'Aoede', (status) => {
-      seen.push(status);
-      if (!status.running) resolve(status);
-    });
+  let status = null;
+  void ai.prepareSpeech([{ text: 'Da, da.', language: 'bs' }, { text: 'Da, je.', language: 'bs' }], 'Aoede', (value) => {
+    seen.push(value);
+    if (!value.running) status = value;
   });
-  for (let i = 0; i < 10; i++) {
-    await new Promise((resolve) => setImmediate(resolve));
-    if (i === 3) {
-      const paused = seen.at(-1);
-      assert.ok(paused.resumesAt, 'the pause says when it ends');
-      assert.equal(paused.failed, 0, 'nothing is marked failed for hitting the cap');
-    }
-    t.mock.timers.tick(10 * 60_000);
-  }
-  const status = await done;
+
+  // The capped request lands without the clock moving: the run is paused.
+  // The clock moves a second a turn: enough to clear any short back-off an
+  // earlier test left in the shell's (module-wide) run, far short of the hour.
+  await until(t, () => seen.some((value) => value.resumesAt), 1_000);
+  const paused = seen.find((value) => value.resumesAt);
+  assert.equal(paused.failed, 0, 'nothing is marked failed for hitting the cap');
+  assert.ok(Date.parse(paused.resumesAt) - Date.now() >= 3_000_000, 'it waits for the reset Gemini gave');
+
+  // Once the hour passes, the capped card is made and the run finishes.
+  await until(t, () => status !== null, 10 * 60_000);
   assert.equal(status.ready, 2);
   assert.equal(status.failed, 0);
 });
