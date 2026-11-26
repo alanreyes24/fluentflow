@@ -31,6 +31,23 @@ const VOICE_LANGUAGES: Record<TargetLanguage, string[]> = {
   es: ['es'],
 };
 
+/** The region read first when a language has several, matching what Gemini is asked for. */
+const PREFERRED_REGIONS: Record<TargetLanguage, string> = { bs: 'ba', es: 'es' };
+
+/**
+ * macOS ships every language a set of novelty voices built on an old engine
+ * (Eloquence: "Eddy", "Flo", "Grandma", ...), plus joke voices ("Bubbles",
+ * "Zarvox"). They sort first alphabetically, so a plain first match picks a
+ * robotic voice over "Mónica" or "Paulina". They are used only when nothing
+ * else speaks the language.
+ */
+const NOVELTY_VOICES = new Set([
+  'eddy', 'flo', 'grandma', 'grandpa', 'reed', 'rocko', 'sandy', 'shelley',
+  'albert', 'bad news', 'bahh', 'bells', 'boing', 'bubbles', 'cellos', 'good news',
+  'jester', 'organ', 'superstar', 'trinoids', 'whisper', 'wobble', 'zarvox',
+  'fred', 'junior', 'kathy', 'ralph',
+]);
+
 /** Slightly under normal speed: these are learners listening for each word. */
 const SPEAKING_RATE = 0.9;
 
@@ -68,12 +85,29 @@ export function voiceFor(language: TargetLanguage): SpeechSynthesisVoice | null 
   const voices = synth()?.getVoices() ?? [];
   for (const code of VOICE_LANGUAGES[language]) {
     const matching = voices.filter((voice) => languageOf(voice) === code);
-    // A voice installed on the device works offline; a network voice may not.
-    const local = matching.find((voice) => voice.localService);
-    const chosen = local ?? matching[0];
-    if (chosen) return chosen;
+    if (matching.length === 0) continue;
+    return [...matching].sort((a, b) => voiceScore(b, language) - voiceScore(a, language))[0] ?? null;
   }
   return null;
+}
+
+/**
+ * Higher is better: a downloaded Premium or Enhanced voice, then any real
+ * voice, with novelty voices last; then the preferred region; then a voice on
+ * the device (works offline) over a network one.
+ */
+export function voiceScore(voice: Pick<SpeechSynthesisVoice, 'name' | 'lang' | 'localService'>, language: TargetLanguage): number {
+  const name = voice.name.toLowerCase();
+  const base = name.replace(/\s*\(.*$/, '').trim();
+  let score = 0;
+  if (NOVELTY_VOICES.has(base)) score -= 100;
+  else if (/premium/.test(name)) score += 30;
+  else if (/enhanced|improved/.test(name)) score += 20;
+  else score += 10;
+  const region = voice.lang.toLowerCase().split(/[-_]/)[1];
+  if (region === PREFERRED_REGIONS[language]) score += 5;
+  if (voice.localService) score += 1;
+  return score;
 }
 
 const clips = new Map<string, Promise<string>>();
@@ -131,11 +165,24 @@ export function speak(text: string, language: TargetLanguage): boolean {
       .catch((error: unknown) => {
         if (mine !== generation) return;
         console.warn('[fluentflow] natural read-aloud failed, using the system voice:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        for (const listener of fallbackListeners) listener(/daily/i.test(message) ? 'daily-limit' : 'error');
         speakWithSystemVoice(trimmed, language);
       });
     return true;
   }
   return speakWithSystemVoice(trimmed, language);
+}
+
+export type SpeechFallbackReason = 'daily-limit' | 'error';
+const fallbackListeners = new Set<(reason: SpeechFallbackReason) => void>();
+
+/** Hear about a card being read by the system voice because Gemini could not. */
+export function onSpeechFallback(listener: (reason: SpeechFallbackReason) => void): () => void {
+  fallbackListeners.add(listener);
+  return () => {
+    fallbackListeners.delete(listener);
+  };
 }
 
 function speakWithSystemVoice(text: string, language: TargetLanguage): boolean {

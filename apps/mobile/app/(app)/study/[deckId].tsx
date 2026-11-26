@@ -38,7 +38,15 @@ import { formatInterval } from '../../../src/ui/format';
 import { useCardGestures } from '../../../src/ui/useCardGestures';
 import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 import { Icon } from '../../../src/ui/Icon';
-import { autoReadEnabled, deckAudioEnabled, prefetchSpeech, speak, stopSpeaking, useCanSpeak } from '../../../src/speech';
+import {
+  autoReadEnabled,
+  deckAudioEnabled,
+  onSpeechFallback,
+  prefetchSpeech,
+  speak,
+  stopSpeaking,
+  useCanSpeak,
+} from '../../../src/speech';
 import { useLayout, useTheme } from '../../../src/ui/theme';
 
 /**
@@ -443,11 +451,25 @@ export default function StudyScreen() {
     [repository, card, exampleService, deck?.showExamples, refreshDecks, t],
   );
 
-  const showToast = useCallback((message: string) => {
+  const showToast = useCallback((message: string, durationMs = 2400) => {
     setToast(message);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 2400);
+    toastTimer.current = setTimeout(() => setToast(null), durationMs);
   }, []);
+
+  // When Gemini's daily limit is used up, cards are read by the device's own
+  // voice, which sounds noticeably worse. Say so once a session, so the
+  // drop in quality is not a mystery.
+  const toldAboutFallback = useRef(false);
+  useEffect(
+    () =>
+      onSpeechFallback((reason) => {
+        if (toldAboutFallback.current) return;
+        toldAboutFallback.current = true;
+        showToast(t(reason === 'daily-limit' ? 'readAloudFallbackDaily' : 'readAloudFallback'), 5000);
+      }),
+    [showToast, t],
+  );
 
   const toggleStar = useCallback(async () => {
     if (!repository || !card || starPending.current || ratingPending.current) return;
