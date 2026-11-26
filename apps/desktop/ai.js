@@ -41,7 +41,7 @@
  */
 
 const { existsSync, readdirSync } = require('node:fs');
-const { mkdir, readFile, writeFile } = require('node:fs/promises');
+const { appendFile, mkdir, readFile, writeFile } = require('node:fs/promises');
 const crypto = require('node:crypto');
 const { app } = require('electron');
 const path = require('node:path');
@@ -245,6 +245,47 @@ async function saveRecordings(recordings) {
   return saved;
 }
 
+/**
+ * Deck recordings go up to the sync server so the web build plays them too.
+ * The page drives it (it holds the sign-in token); the shell lists what has
+ * not gone up yet for that account and remembers what has.
+ */
+function recordingUploadLog(userId) {
+  const name = crypto.createHash('sha256').update(String(userId)).digest('hex').slice(0, 32);
+  return path.join(app.getPath('userData'), 'recording-uploads', `${name}.txt`);
+}
+
+async function uploadedRecordings(userId) {
+  try {
+    return new Set((await readFile(recordingUploadLog(userId), 'utf8')).split('\n').filter(Boolean));
+  } catch {
+    return new Set();
+  }
+}
+
+/** Up to `limit` recordings this account has not uploaded, as `{ id, audio }` (base64). */
+async function pendingRecordings(userId, limit = 50) {
+  if (!userId || !existsSync(speechCacheDir())) return [];
+  const done = await uploadedRecordings(userId);
+  const pending = readdirSync(speechCacheDir())
+    .filter((file) => file.endsWith('.recording'))
+    .map((file) => file.slice(0, -'.recording'.length))
+    .filter((id) => /^[0-9a-f]{64}$/.test(id) && !done.has(id))
+    .slice(0, Math.max(1, Math.min(100, limit)));
+  return Promise.all(pending.map(async (id) => ({
+    id,
+    audio: (await readFile(path.join(speechCacheDir(), `${id}.recording`))).toString('base64'),
+  })));
+}
+
+async function markRecordingsUploaded(userId, ids) {
+  const valid = (ids ?? []).filter((id) => typeof id === 'string' && /^[0-9a-f]{64}$/.test(id));
+  if (!userId || valid.length === 0) return;
+  const log = recordingUploadLog(userId);
+  await mkdir(path.dirname(log), { recursive: true });
+  await appendFile(log, `${valid.join('\n')}\n`);
+}
+
 async function speech({ text, language, voice }) {
   const core = await loadCore();
   const { name, model, voice: chosenVoice, file } = speechClipPath(core, text, language, voice);
@@ -434,4 +475,15 @@ async function makeClip(item, attempt = 0) {
   }
 }
 
-module.exports = { sources, resolve, examples, chat, speech, saveRecordings, prepareSpeech, backfillStatus };
+module.exports = {
+  sources,
+  resolve,
+  examples,
+  chat,
+  speech,
+  saveRecordings,
+  pendingRecordings,
+  markRecordingsUploaded,
+  prepareSpeech,
+  backfillStatus,
+};

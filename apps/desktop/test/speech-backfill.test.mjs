@@ -175,3 +175,24 @@ test('a recording that came with the deck is played and counted, and Gemini is n
   assert.equal(status.ready, 2);
   assert.deepEqual(calls, ['tramposo'], 'only the card without a recording is made');
 });
+
+test('deck recordings are listed for upload once per account', async () => {
+  const mp3 = new Uint8Array([0x49, 0x44, 0x33, 4, 1]);
+  await ai.saveRecordings([
+    { text: 'Uno.', language: 'es', audio: mp3 },
+    { text: 'Dos.', language: 'es', audio: mp3 },
+  ]);
+
+  const first = await ai.pendingRecordings('user-a', 1);
+  assert.equal(first.length, 1);
+  assert.match(first[0].id, /^[0-9a-f]{64}$/);
+  assert.deepEqual([...Buffer.from(first[0].audio, 'base64')], [...mp3]);
+
+  await ai.markRecordingsUploaded('user-a', [first[0].id]);
+  const rest = await ai.pendingRecordings('user-a', 50);
+  assert.equal(rest.length, 1);
+  assert.notEqual(rest[0].id, first[0].id);
+
+  // Another account on the same computer still has both to send.
+  assert.equal((await ai.pendingRecordings('user-b', 50)).length, 2);
+});

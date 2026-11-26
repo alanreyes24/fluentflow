@@ -110,6 +110,14 @@ export function createApp({ config, store }: AppDeps): express.Express {
    * When there is no database, clips are still made, just not kept.
    */
   const clipKey = (name: string) => createHash('sha256').update(name).digest('hex');
+  /**
+   * Where one user's deck recording is kept. Generated clips are shared by
+   * content because the server made them; a recording came from a user's
+   * file, so it is only ever played back to that user. `recordedHash` is the
+   * SHA-256 of `recordedSpeechKey`, the name the desktop shell files it under.
+   */
+  const recordingKey = (userId: string, recordedHash: string) =>
+    clipKey(`recording\u001f${userId}\u001f${recordedHash}`);
   const speechCache = new Map<string, Uint8Array>();
   const SPEECH_CACHE_LIMIT = 200;
   const rememberClip = (key: string, audio: Uint8Array) => {
@@ -127,24 +135,22 @@ export function createApp({ config, store }: AppDeps): express.Express {
     const key = createHash('sha256')
       .update(speechCacheKey(text, language, speechVoice, speechModel))
       .digest('hex');
-    // A recording that came with the deck is read first, whatever the voice.
-    const recordedKey = clipKey(recordedSpeechKey(text, language));
+    // A recording that came with one of the caller's decks is read first,
+    // whatever the voice.
+    const recordedKey = recordingKey(req.userId!, clipKey(recordedSpeechKey(text, language)));
     const lookup = (name: string) =>
       store.getSpeechClip(name).catch((error: unknown) => {
         if (!(error instanceof StoreUnavailableError)) console.warn('[fluentflow] speech clip lookup failed', error);
         return null;
       });
     try {
-      let audio = speechCache.get(recordedKey) ?? speechCache.get(key) ?? null;
-      if (!audio) {
-        const recorded = await lookup(recordedKey);
-        if (recorded) {
-          rememberClip(recordedKey, recorded);
-          res.type(audioMimeType(recorded)).send(Buffer.from(recorded));
-          return;
-        }
-        audio = await lookup(key);
+      const recorded = speechCache.get(recordedKey) ?? (await lookup(recordedKey));
+      if (recorded) {
+        rememberClip(recordedKey, recorded);
+        res.type(audioMimeType(recorded)).send(Buffer.from(recorded));
+        return;
       }
+      let audio = speechCache.get(key) ?? (await lookup(key));
       if (!audio) {
         const clip = await synthesizeSpeech(
           { apiKey: config.geminiApiKey ?? '', model: speechModel, voice: speechVoice },
@@ -318,16 +324,59 @@ export function createApp({ config, store }: AppDeps): express.Express {
    * Keep a deck's own recordings where read-aloud finds them. A deck without
    * a database still imports; its cards are just read by Gemini instead.
    */
-  async function storeRecordings(recordings: { text: string; language: TargetLanguage; audio: Uint8Array }[]) {
+  async function storeRecordings(
+    userId: string,
+    recordings: { text: string; language: TargetLanguage; audio: Uint8Array }[],
+  ) {
     for (const recording of recordings) {
       try {
-        await store.putSpeechClip(clipKey(recordedSpeechKey(recording.text, recording.language)), recording.audio);
+        await store.putSpeechClip(
+          recordingKey(userId, clipKey(recordedSpeechKey(recording.text, recording.language))),
+          recording.audio,
+        );
       } catch (error) {
         if (!(error instanceof StoreUnavailableError)) console.warn('[fluentflow] deck recording not stored', error);
         return;
       }
     }
   }
+
+  /**
+   * Deck recordings the desktop app imported, uploaded so the web build plays
+   * them too. Each is named by the hash the shell files it under (see
+   * `recordingKey`) and must be audio; a batch is at most 100 clips.
+   */
+  const MAX_RECORDING_BYTES = 2 * 1024 * 1024;
+  app.post('/api/speech/recordings', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const list = (req.body as { recordings?: unknown } | undefined)?.recordings;
+    if (!Array.isArray(list) || list.length === 0 || list.length > 100) {
+      res.status(400).json({ message: 'Send 1 to 100 recordings.' });
+      return;
+    }
+    const clips: { id: string; audio: Uint8Array }[] = [];
+    for (const item of list as { id?: unknown; audio?: unknown }[]) {
+      const audio = typeof item?.audio === 'string' ? new Uint8Array(Buffer.from(item.audio, 'base64')) : null;
+      if (
+        typeof item?.id !== 'string' || !/^[0-9a-f]{64}$/.test(item.id)
+        || !audio || audio.byteLength === 0 || audio.byteLength > MAX_RECORDING_BYTES
+        || !audioMimeType(audio).startsWith('audio/')
+      ) {
+        res.status(400).json({ message: 'Each recording needs a clip id and audio.' });
+        return;
+      }
+      clips.push({ id: item.id, audio });
+    }
+    try {
+      for (const clip of clips) await store.putSpeechClip(recordingKey(req.userId!, clip.id), clip.audio);
+      res.json({ stored: clips.length });
+    } catch (error) {
+      if (error instanceof StoreUnavailableError) {
+        res.status(503).json({ message: 'Recordings cannot be kept without a database.' });
+        return;
+      }
+      next(error);
+    }
+  });
 
   /**
    * Import an `.apkg`.
@@ -373,7 +422,7 @@ export function createApp({ config, store }: AppDeps): express.Express {
           const epoch = await store.getEpoch(userId);
           if (!epoch) throw new EpochError(null);
           await store.push(userId, epoch, { decks, cards, reviewEvents: [] });
-          await storeRecordings(result.recordings ?? []);
+          await storeRecordings(userId, result.recordings ?? []);
         }
 
         res.json({ decks, cards, summary: result.summary, stored: !dryRun });

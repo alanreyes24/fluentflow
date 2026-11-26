@@ -89,6 +89,21 @@ export async function speechOnWeb(text: string, language: TargetLanguage, voice?
   return new Uint8Array(await response.arrayBuffer());
 }
 
+/** A deck recording, named by the hash the desktop shell files it under. */
+export interface DeckRecordingUpload {
+  id: string;
+  /** Base64 audio. */
+  audio: string;
+}
+
+export async function uploadRecordingsOnWeb(recordings: DeckRecordingUpload[]): Promise<number> {
+  const body = await request('/api/speech/recordings', {
+    method: 'POST',
+    body: JSON.stringify({ recordings }),
+  });
+  return body.stored;
+}
+
 export async function chatOnWeb(messages: import('@fluentflow/core').ChatMessage[]): Promise<string> {
   const result = await request('/api/ai/chat', {
     method: 'POST', body: JSON.stringify({ messages }),

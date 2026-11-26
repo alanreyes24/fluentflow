@@ -579,6 +579,19 @@ function registerAiHandlers() {
     }
   });
   ipcMain.handle('ai:speech:status', () => ai.backfillStatus());
+  ipcMain.handle('ai:recordings:pending', async (_event, request) => {
+    const userId = typeof request?.userId === 'string' ? request.userId : '';
+    const limit = Number.isFinite(request?.limit) ? request.limit : 50;
+    try {
+      return await ai.pendingRecordings(userId, limit);
+    } catch {
+      return [];
+    }
+  });
+  ipcMain.handle('ai:recordings:uploaded', async (_event, request) => {
+    const userId = typeof request?.userId === 'string' ? request.userId : '';
+    await ai.markRecordingsUploaded(userId, Array.isArray(request?.ids) ? request.ids.slice(0, 100) : []);
+  });
 
   ipcMain.handle('ai:resolve', async (event, request) => {
     const { words, language, useModel } = request ?? {};

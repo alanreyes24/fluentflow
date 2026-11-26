@@ -6,6 +6,7 @@ import {
   prepareSpeechForCards,
   speechBackfillStatus,
   speechBackfillSupported,
+  uploadDeckRecordings,
   type SpeechBackfillStatus,
 } from '../ai/desktop';
 import { deckAudioEnabled, naturalVoice, speechEngine } from '../speech';
@@ -109,6 +110,18 @@ export function useSpeechBackfill(): void {
     }, SETTLE_MS);
     return () => clearTimeout(timer);
   }, [repository, user, decks, remoteChanges, kick]);
+
+  // Recordings a deck came with (imported here) go up to the sync server, so
+  // the web build reads those cards in them too. Re-checked after imports.
+  useEffect(() => {
+    if (!user) return;
+    const timer = setTimeout(() => {
+      uploadDeckRecordings(user.id).catch((error: unknown) => {
+        console.warn('[fluentflow] deck recordings not uploaded yet:', error);
+      });
+    }, SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [user, decks]);
 }
 
 /** Live progress of the background run, or null where there is none. */

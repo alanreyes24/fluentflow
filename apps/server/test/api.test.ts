@@ -605,3 +605,29 @@ test('a deck imported with its own recordings is read in them, with no Gemini ca
   assert.equal(response.headers.get('content-type'), 'audio/mpeg');
   assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [...mp3]);
 });
+
+test('uploaded deck recordings play back for their owner only, and must be audio', async () => {
+  const { recordedSpeechKey } = await import('@fluentflow/core');
+  const { createHash } = await import('node:crypto');
+  const id = createHash('sha256').update(recordedSpeechKey('¿Puedo hablar con Bill?', 'es')).digest('hex');
+  const mp3 = Buffer.from([0x49, 0x44, 0x33, 4, 0, 5, 5]);
+
+  const stored = await json('/api/speech/recordings', { recordings: [{ id, audio: mp3.toString('base64') }] }, { user: 'pia' });
+  assert.equal(stored.status, 200);
+  assert.deepEqual(await stored.json(), { stored: 1 });
+
+  const mine = await json('/api/ai/speech', { text: '¿Puedo hablar con Bill?', language: 'es' }, { user: 'pia' });
+  assert.equal(mine.headers.get('content-type'), 'audio/mpeg');
+  assert.deepEqual(Buffer.from(await mine.arrayBuffer()), mp3);
+
+  // Another account asking for the same sentence never gets pia's file.
+  const theirs = await json('/api/ai/speech', { text: '¿Puedo hablar con Bill?', language: 'es' }, { user: 'quinn' });
+  assert.notEqual(theirs.headers.get('content-type'), 'audio/mpeg');
+
+  const notAudio = await json('/api/speech/recordings', {
+    recordings: [{ id, audio: Buffer.from('<html>').toString('base64') }],
+  }, { user: 'pia' });
+  assert.equal(notAudio.status, 400);
+  const badId = await json('/api/speech/recordings', { recordings: [{ id: '../x', audio: mp3.toString('base64') }] }, { user: 'pia' });
+  assert.equal(badId.status, 400);
+});

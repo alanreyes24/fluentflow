@@ -60,6 +60,8 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
     speech: (request) => ipcRenderer.invoke('ai:speech', request),
     prepareSpeech: (request) => ipcRenderer.invoke('ai:speech:prepare', request),
     speechStatus: () => ipcRenderer.invoke('ai:speech:status'),
+    pendingRecordings: (request) => ipcRenderer.invoke('ai:recordings:pending', request),
+    recordingsUploaded: (request) => ipcRenderer.invoke('ai:recordings:uploaded', request),
     onSpeechProgress: (listener) => {
       const handler = (_event, status) => listener(status);
       ipcRenderer.on('ai:speech:progress', handler);

@@ -5,7 +5,15 @@ import type {
   ResolvedMeaning,
   TargetLanguage,
 } from '@fluentflow/core';
-import { webAiAvailable, lookupSourcesOnWeb, resolveMeaningsOnWeb, chatOnWeb, speechOnWeb } from './web';
+import {
+  webAiAvailable,
+  lookupSourcesOnWeb,
+  resolveMeaningsOnWeb,
+  chatOnWeb,
+  speechOnWeb,
+  uploadRecordingsOnWeb,
+  type DeckRecordingUpload,
+} from './web';
 
 /**
  * The desktop shell's lookup bridge, as the app sees it.
@@ -117,6 +125,8 @@ interface DesktopBridge {
       voice?: string;
     }): Promise<SpeechBackfillStatus>;
     speechStatus?(): Promise<SpeechBackfillStatus>;
+    pendingRecordings?(request: { userId: string; limit?: number }): Promise<DeckRecordingUpload[]>;
+    recordingsUploaded?(request: { userId: string; ids: string[] }): Promise<void>;
     onSpeechProgress?(listener: (status: SpeechBackfillStatus) => void): () => void;
     status(): Promise<LookupSources>;
     resolve(
@@ -322,6 +332,30 @@ export function onSpeechBackfillProgress(listener: (status: SpeechBackfillStatus
 }
 
 /** Whether this build can ask Gemini for read-aloud audio at all. */
+/**
+ * Send the deck recordings this desktop imported up to the sync server, so
+ * the web build reads those cards in them too. Runs one batch at a time until
+ * none are left; a failure leaves the rest for the next run.
+ */
+let uploadingRecordings = false;
+export async function uploadDeckRecordings(userId: string): Promise<number> {
+  const ai = bridge();
+  if (uploadingRecordings || !ai?.pendingRecordings || !ai.recordingsUploaded || !webAiAvailable()) return 0;
+  uploadingRecordings = true;
+  let sent = 0;
+  try {
+    for (;;) {
+      const batch = await ai.pendingRecordings({ userId, limit: 50 });
+      if (batch.length === 0) return sent;
+      await uploadRecordingsOnWeb(batch);
+      await ai.recordingsUploaded({ userId, ids: batch.map((recording) => recording.id) });
+      sent += batch.length;
+    }
+  } finally {
+    uploadingRecordings = false;
+  }
+}
+
 export function naturalSpeechReachable(): boolean {
   return Boolean(bridge()?.speech) || webAiAvailable();
 }
