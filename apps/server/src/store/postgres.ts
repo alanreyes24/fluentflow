@@ -86,6 +86,14 @@ const SCHEMA = `
     data        jsonb NOT NULL,
     updated_at  timestamptz NOT NULL DEFAULT now()
   );
+
+  -- Read-aloud clips, shared by content: see Store.getSpeechClip.
+  CREATE TABLE IF NOT EXISTS speech_clips (
+    key         text PRIMARY KEY,
+    audio       bytea NOT NULL,
+    bytes       integer NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+  );
 `;
 
 export class PostgresStore implements Store {
@@ -231,6 +239,26 @@ export class PostgresStore implements Store {
       );
       return merged;
     });
+  }
+
+  async getSpeechClip(key: string): Promise<Uint8Array | null> {
+    await this.migrate();
+    const { rows } = await this.db.query<{ audio: Uint8Array }>(
+      'SELECT audio FROM speech_clips WHERE key = $1',
+      [key],
+    );
+    const audio = rows[0]?.audio;
+    return audio ? new Uint8Array(audio) : null;
+  }
+
+  async putSpeechClip(key: string, audio: Uint8Array): Promise<void> {
+    await this.migrate();
+    await this.db.query(
+      `INSERT INTO speech_clips (key, audio, bytes) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO NOTHING`,
+      // `pg` sends a Buffer as bytea; a bare Uint8Array is not guaranteed to be.
+      [key, Buffer.from(audio), audio.byteLength],
+    );
   }
 
   async check(): Promise<void> {

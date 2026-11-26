@@ -92,6 +92,16 @@ for (const [name, create] of implementations) {
     });
     after(() => store.close());
 
+    test('read-aloud clips are stored by key, byte for byte, and never overwritten', async () => {
+      assert.equal(await store.getSpeechClip('clip-1'), null);
+      const wav = new Uint8Array([82, 73, 70, 70, 0, 1, 2, 255]);
+      await store.putSpeechClip('clip-1', wav);
+      assert.deepEqual([...(await store.getSpeechClip('clip-1'))!], [...wav]);
+      // A second clip for the same key (a retry, another device) keeps the first.
+      await store.putSpeechClip('clip-1', new Uint8Array([9]));
+      assert.deepEqual([...(await store.getSpeechClip('clip-1'))!], [...wav]);
+    });
+
     test('a user has no epoch until seeded', async () => {
       assert.equal(await store.getEpoch('fresh'), null);
       await assert.rejects(store.pull('fresh', 'x'), EpochError);

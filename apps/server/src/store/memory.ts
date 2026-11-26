@@ -32,6 +32,15 @@ interface UserData {
 export class MemoryStore implements Store {
   private readonly users = new Map<string, UserData>();
   private readonly settings = new Map<string, UserSettings>();
+  private readonly speechClips = new Map<string, Uint8Array>();
+
+  async getSpeechClip(key: string): Promise<Uint8Array | null> {
+    return this.speechClips.get(key) ?? null;
+  }
+
+  async putSpeechClip(key: string, audio: Uint8Array): Promise<void> {
+    if (!this.speechClips.has(key)) this.speechClips.set(key, audio);
+  }
 
   async getEpoch(userId: string): Promise<string | null> {
     return this.users.get(userId)?.epoch ?? null;
@@ -100,6 +109,7 @@ export class MemoryStore implements Store {
   async close(): Promise<void> {
     this.users.clear();
     this.settings.clear();
+    this.speechClips.clear();
   }
 
   private current(userId: string, epoch: string): UserData {

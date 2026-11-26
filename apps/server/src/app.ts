@@ -3,7 +3,10 @@ import cors from 'cors';
 import {
   ApkgError,
   chatWithGemini,
+  DEFAULT_SPEECH_MODEL,
+  DEFAULT_SPEECH_VOICE,
   isSpeechModel,
+  isSpeechVoice,
   speechCacheKey,
   synthesizeSpeech,
   validateChatMessages,
@@ -14,6 +17,7 @@ import {
   type TargetLanguage,
   isTargetLanguage,
 } from '@fluentflow/core';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Config } from './config.ts';
@@ -95,34 +99,51 @@ export function createApp({ config, store }: AppDeps): express.Express {
   });
 
   /**
-   * Read-aloud audio. Clips are kept in memory so replaying a card, or the
-   * next person studying the same sentence, costs nothing; the desktop shell
-   * keeps its own cache on disk.
+   * Read-aloud audio for the web build.
+   *
+   * Clips are kept in the database (shared by content, see
+   * `Store.getSpeechClip`), so a sentence is generated once and then served
+   * to every browser, after restarts and redeploys too. A small in-memory
+   * layer in front saves the round trip for a card replayed in one session.
+   * When there is no database, clips are still made, just not kept.
    */
   const speechCache = new Map<string, Uint8Array>();
-  const SPEECH_CACHE_LIMIT = 500;
+  const SPEECH_CACHE_LIMIT = 200;
+  const rememberClip = (key: string, audio: Uint8Array) => {
+    speechCache.set(key, audio);
+    if (speechCache.size > SPEECH_CACHE_LIMIT) speechCache.delete(speechCache.keys().next().value!);
+  };
   app.post('/api/ai/speech', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
     const { text, language, voice, model } = (req.body ?? {}) as Record<string, unknown>;
     if (typeof text !== 'string' || !text.trim() || !isTargetLanguage(language)) {
       res.status(400).json({ message: 'text and language are required.' });
       return;
     }
-    const speechModel = isSpeechModel(model) ? model : config.geminiSpeechModel;
+    const speechModel = isSpeechModel(model) ? model : (config.geminiSpeechModel ?? DEFAULT_SPEECH_MODEL);
+    const speechVoice = isSpeechVoice(voice) ? voice : DEFAULT_SPEECH_VOICE;
+    const key = createHash('sha256')
+      .update(speechCacheKey(text, language, speechVoice, speechModel))
+      .digest('hex');
     try {
-      const key = speechCacheKey(text, language, String(voice ?? ''), String(speechModel ?? ''));
-      let audio = speechCache.get(key);
+      let audio = speechCache.get(key) ?? null;
+      if (!audio) {
+        audio = await store.getSpeechClip(key).catch((error: unknown) => {
+          if (!(error instanceof StoreUnavailableError)) console.warn('[fluentflow] speech clip lookup failed', error);
+          return null;
+        });
+      }
       if (!audio) {
         const clip = await synthesizeSpeech(
-          { apiKey: config.geminiApiKey ?? '', model: speechModel, voice: typeof voice === 'string' ? voice : undefined },
+          { apiKey: config.geminiApiKey ?? '', model: speechModel, voice: speechVoice },
           text,
           language,
         );
         audio = clip.audio;
-        speechCache.set(key, audio);
-        if (speechCache.size > SPEECH_CACHE_LIMIT) {
-          speechCache.delete(speechCache.keys().next().value!);
-        }
+        await store.putSpeechClip(key, audio).catch((error: unknown) => {
+          if (!(error instanceof StoreUnavailableError)) console.warn('[fluentflow] speech clip not stored', error);
+        });
       }
+      rememberClip(key, audio);
       res.type('audio/wav').send(Buffer.from(audio));
     } catch (error) {
       const status = (error as { status?: number }).status;
