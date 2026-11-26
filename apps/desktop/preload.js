@@ -57,6 +57,14 @@ contextBridge.exposeInMainWorld('fluentflowDesktop', {
 
   ai: {
     chat: (messages) => ipcRenderer.invoke('ai:chat', messages),
+    speech: (request) => ipcRenderer.invoke('ai:speech', request),
+    prepareSpeech: (request) => ipcRenderer.invoke('ai:speech:prepare', request),
+    speechStatus: () => ipcRenderer.invoke('ai:speech:status'),
+    onSpeechProgress: (listener) => {
+      const handler = (_event, status) => listener(status);
+      ipcRenderer.on('ai:speech:progress', handler);
+      return () => ipcRenderer.removeListener('ai:speech:progress', handler);
+    },
     /** `{ dictionary, model }` — what is installed, each with its own status. */
     status: () => ipcRenderer.invoke('ai:status'),
 

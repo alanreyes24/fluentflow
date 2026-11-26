@@ -40,7 +40,10 @@
  * finished sentences and gets them.
  */
 
-const { existsSync } = require('node:fs');
+const { existsSync, readdirSync } = require('node:fs');
+const { mkdir, readFile, writeFile } = require('node:fs/promises');
+const crypto = require('node:crypto');
+const { app } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const dictionary = require('./dictionary');
@@ -194,4 +197,215 @@ async function chat(messages) {
   return core.chatWithGemini({ apiKey: cloud.apiKey(), model: cloud.model() }, messages);
 }
 
-module.exports = { sources, resolve, examples, chat };
+/**
+ * Read-aloud audio for one card, as WAV bytes.
+ *
+ * Clips are cached on disk under the app's data folder, keyed by model, voice,
+ * language and text, so a sentence is generated (and billed) once and replays
+ * offline after that. Concurrent requests for the same clip share one call,
+ * which matters because the study screen prefetches the next card.
+ */
+const speechInFlight = new Map();
+
+function speechCacheDir() {
+  return path.join(app.getPath('userData'), 'speech-cache');
+}
+
+/** Where one clip lives on disk, and the name it is cached under. */
+function speechClipPath(core, text, language, voice) {
+  const model = process.env.GEMINI_SPEECH_MODEL || core.DEFAULT_SPEECH_MODEL;
+  const chosenVoice = core.isSpeechVoice(voice) ? voice : core.DEFAULT_SPEECH_VOICE;
+  const name = crypto
+    .createHash('sha256')
+    .update(core.speechCacheKey(text, language, chosenVoice, model))
+    .digest('hex');
+  return { name, model, voice: chosenVoice, file: path.join(speechCacheDir(), `${name}.wav`) };
+}
+
+async function speech({ text, language, voice }) {
+  const core = await loadCore();
+  const { name, model, voice: chosenVoice, file } = speechClipPath(core, text, language, voice);
+  const dir = speechCacheDir();
+
+  const pending = speechInFlight.get(name);
+  if (pending) return pending;
+
+  const work = (async () => {
+    try {
+      return new Uint8Array(await readFile(file));
+    } catch {
+      // Not cached yet.
+    }
+    const clip = await core.synthesizeSpeech(
+      { apiKey: cloud.apiKey(), model, voice: chosenVoice },
+      text,
+      language,
+    );
+    await mkdir(dir, { recursive: true });
+    await writeFile(file, clip.audio);
+    return clip.audio;
+  })();
+  speechInFlight.set(name, work);
+  try {
+    return await work;
+  } finally {
+    speechInFlight.delete(name);
+  }
+}
+
+/**
+ * Background audio for a whole collection.
+ *
+ * The page hands over every card's front (on launch, and again whenever cards
+ * are imported, added, edited or synced in); whatever is not on disk yet is
+ * generated a few at a time. Asking again while a run is going replaces its
+ * to-do list rather than starting a second run, and finished clips are on
+ * disk, so a run cut short by quitting picks up where it stopped.
+ *
+ * Rate limits slow it down instead of stopping it: a 429 halves how many run
+ * at once and waits before retrying. The daily request cap (100 a day on the
+ * first paid tier) pauses the whole run until the reset time Gemini gives,
+ * with nothing marked failed. A refused key stops the run, since every later
+ * request would be refused too.
+ */
+const SPEECH_MAX_CONCURRENCY = 4;
+const SPEECH_RETRY_LIMIT = 6;
+const backfill = {
+  queue: [],
+  queued: new Set(),
+  running: 0,
+  concurrency: SPEECH_MAX_CONCURRENCY,
+  total: 0,
+  ready: 0,
+  failed: 0,
+  error: null,
+  pausedUntil: 0,
+  /** Set while the daily cap is hit: when the run picks up again. */
+  resumesAt: null,
+  stopped: false,
+  onProgress: null,
+  voice: undefined,
+};
+
+function backfillStatus() {
+  return {
+    total: backfill.total,
+    ready: backfill.ready,
+    failed: backfill.failed,
+    remaining: backfill.queue.length + backfill.running,
+    running: backfill.running > 0 || backfill.queue.length > 0,
+    error: backfill.error,
+    resumesAt: backfill.resumesAt && backfill.resumesAt > Date.now() ? new Date(backfill.resumesAt).toISOString() : null,
+  };
+}
+
+function reportBackfill() {
+  backfill.onProgress?.(backfillStatus());
+}
+
+/**
+ * @param items      `{ text, language }` for every card, duplicates allowed
+ * @param voice      the voice clips should be made in
+ * @param onProgress called with {@link backfillStatus} as clips finish
+ */
+async function prepareSpeech(items, voice, onProgress) {
+  const core = await loadCore();
+  if (!cloud.apiKey()) {
+    backfill.error = 'Add a Gemini API key in Settings to make card audio.';
+    onProgress?.(backfillStatus());
+    return backfillStatus();
+  }
+
+  const cached = new Set(existsSync(speechCacheDir()) ? readdirSync(speechCacheDir()) : []);
+  const wanted = new Map();
+  for (const item of items ?? []) {
+    const text = typeof item?.text === 'string' ? item.text.trim() : '';
+    const language = item?.language;
+    if (!text || text.length > core.MAX_SPEECH_CHARACTERS || (language !== 'bs' && language !== 'es')) continue;
+    const { name } = speechClipPath(core, text, language, voice);
+    wanted.set(name, { name, text, language });
+  }
+
+  const missing = [...wanted.values()].filter((item) => !cached.has(`${item.name}.wav`));
+  backfill.voice = voice;
+  backfill.onProgress = onProgress;
+  backfill.stopped = false;
+  // A daily-cap pause outlives a new to-do list; the cap has not reset.
+  const paused = backfill.resumesAt && backfill.resumesAt > Date.now();
+  backfill.error = paused ? backfill.error : null;
+  backfill.total = wanted.size;
+  backfill.ready = wanted.size - missing.length;
+  backfill.failed = 0;
+  // Replace the to-do list. Clips already being made finish on their own.
+  backfill.queue = missing.filter((item) => !speechInFlight.has(item.name));
+  backfill.queued = new Set(backfill.queue.map((item) => item.name));
+  backfill.concurrency = paused ? 1 : SPEECH_MAX_CONCURRENCY;
+  reportBackfill();
+  pumpBackfill();
+  return backfillStatus();
+}
+
+function pumpBackfill() {
+  while (!backfill.stopped && backfill.running < backfill.concurrency && backfill.queue.length > 0) {
+    const item = backfill.queue.shift();
+    backfill.running++;
+    void makeClip(item).finally(() => {
+      backfill.running--;
+      reportBackfill();
+      pumpBackfill();
+    });
+  }
+}
+
+async function makeClip(item, attempt = 0) {
+  const wait = backfill.pausedUntil - Date.now();
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  if (backfill.stopped) return;
+  try {
+    await speech({ text: item.text, language: item.language, voice: backfill.voice });
+    backfill.ready++;
+    if (backfill.resumesAt && Date.now() >= backfill.resumesAt) {
+      backfill.resumesAt = null;
+      backfill.error = null;
+    }
+  } catch (error) {
+    const status = error?.status;
+    if (error?.daily) {
+      // Out of requests for today. Put the card back and wait for the reset;
+      // the cards already waiting behind this one wait too.
+      const until = Date.now() + Math.max(60_000, error.retryAfterMs ?? 3_600_000);
+      backfill.pausedUntil = Math.max(backfill.pausedUntil, until);
+      backfill.resumesAt = backfill.pausedUntil;
+      backfill.error = error.message;
+      backfill.concurrency = 1;
+      reportBackfill();
+      return makeClip(item, attempt);
+    }
+    if (status === 422) {
+      // The model said more than the card. Asking again costs a request
+      // from a small daily allowance, so it is left for the next pass.
+      backfill.failed++;
+      backfill.error = error.message;
+      return;
+    }
+    if (status === 401 || status === 403) {
+      backfill.stopped = true;
+      backfill.error = error.message;
+      backfill.queue = [];
+      return;
+    }
+    if ((status === 429 || status === undefined || status >= 500) && attempt < SPEECH_RETRY_LIMIT) {
+      if (status === 429) {
+        backfill.concurrency = Math.max(1, Math.floor(backfill.concurrency / 2));
+        backfill.pausedUntil = Date.now() + Math.max(error?.retryAfterMs ?? 0, 15_000 * (attempt + 1));
+      } else {
+        backfill.pausedUntil = Date.now() + 3_000 * (attempt + 1);
+      }
+      return makeClip(item, attempt + 1);
+    }
+    backfill.failed++;
+    backfill.error = error.message;
+  }
+}
+
+module.exports = { sources, resolve, examples, chat, speech, prepareSpeech, backfillStatus };

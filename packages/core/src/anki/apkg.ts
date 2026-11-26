@@ -77,6 +77,12 @@ export interface ApkgImportOptions {
    * "Level 1 / Level 2 / ..." subdecks.
    */
   flatten?: boolean;
+  /**
+   * Put every card in one new deck with this name, whatever the package calls
+   * its decks. Keeps a shared deck from landing in an existing deck that
+   * happens to share its Anki name.
+   */
+  deckName?: string;
 }
 
 export interface ApkgImportSummary {
@@ -168,9 +174,10 @@ export async function parseApkg(
 
     // Detect language once over the whole collection, then refine per deck.
     const sampleText = buildSample(notes, noteTypes, mappings);
-    const collectionName = options.filename
+    const chosenName = options.deckName?.trim();
+    const collectionName = chosenName || (options.filename
       ? options.filename.replace(/\.(apkg|colpkg|zip)$/i, '')
-      : ([...deckNames.values()][0] ?? 'Imported deck');
+      : ([...deckNames.values()][0] ?? 'Imported deck'));
     const detection = options.language
       ? { language: options.language, confidence: 'high' as const, reason: 'chosen by user' }
       : detectLanguage(
@@ -181,6 +188,8 @@ export async function parseApkg(
 
     const decks = new Map<string, Deck>();
     const cards: Card[] = [];
+    /** Anki's new-card position (`due` on a new card), by index in `cards`. */
+    const newPositions = new Map<number, number>();
     let cardsSkipped = 0;
 
     for (const note of notes) {
@@ -208,7 +217,7 @@ export async function parseApkg(
       // Filtered decks put the card's home deck in `odid`.
       const homeDeckId = num(cardRow.odid) || num(cardRow.did);
       const rawDeckName = deckNames.get(String(homeDeckId)) ?? collectionName;
-      const deckName = options.flatten ? collectionName : rawDeckName;
+      const deckName = options.flatten || chosenName ? collectionName : rawDeckName;
 
       const deck = ensureDeck(decks, {
         userId: options.userId,
@@ -220,6 +229,7 @@ export async function parseApkg(
         nowIso,
       });
 
+      newPositions.set(cards.length, num(cardRow.type) === 0 ? num(cardRow.due) : -Infinity);
       cards.push(
         toCard({
           cardRow,
@@ -245,9 +255,11 @@ export async function parseApkg(
       warnings.push(`${cardsSkipped} note(s) were skipped for having an empty front or back.`);
     }
 
+    hideExamplesForSentenceDecks(decks, cards);
+
     return {
       decks: [...decks.values()],
-      cards,
+      cards: inNewCardOrder(cards, newPositions),
       summary: {
         schema,
         collectionFile,
@@ -265,6 +277,39 @@ export async function parseApkg(
   } finally {
     db.close();
   }
+}
+
+/**
+ * A sentence deck already is the example: generating example sentences for
+ * "Baš ti hvala." spends model calls on something nobody needs. Decks whose
+ * fronts are mostly full sentences start with examples off; the deck screen
+ * can turn them back on.
+ */
+function hideExamplesForSentenceDecks(decks: Map<string, Deck>, cards: Card[]): void {
+  for (const deck of decks.values()) {
+    const fronts = cards.filter((card) => card.deckId === deck.id).map((card) => card.front);
+    if (fronts.length === 0) continue;
+    const sentences = fronts.filter(isSentenceFront).length;
+    if (sentences / fronts.length >= 0.8) deck.showExamples = false;
+  }
+}
+
+function isSentenceFront(front: string): boolean {
+  return /[.!?…]["'”’»)]*$/.test(front.trim());
+}
+
+/**
+ * New cards are studied in the order they are stored, so they are stored in
+ * Anki's new-card order: the position Anki keeps in `due` for a new card. Graded
+ * decks ("easiest to hardest") depend on it, and the notes table has no order
+ * of its own. Cards that were already studied go first; their own due dates
+ * decide when they come up, so their order does not matter.
+ */
+function inNewCardOrder(cards: Card[], positions: Map<number, number>): Card[] {
+  return cards
+    .map((card, index) => ({ card, index, position: positions.get(index) ?? -Infinity }))
+    .sort((a, b) => a.position - b.position || a.index - b.index)
+    .map(({ card }) => card);
 }
 
 // ---------------------------------------------------------------------------

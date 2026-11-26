@@ -60,6 +60,15 @@ export interface Store {
   getSettings(userId: string): Promise<UserSettings>;
   /** Merge `incoming` into the stored settings (newest per setting) and return the result. */
   mergeSettings(userId: string, incoming: UserSettings): Promise<UserSettings>;
+  /**
+   * A stored read-aloud clip (a WAV file), or null. Keyed by content (model,
+   * voice, language and text, hashed), not by user: the same card text makes
+   * the same audio for anyone, so a clip is generated once and served to every
+   * device and account that asks for it.
+   */
+  getSpeechClip(key: string): Promise<Uint8Array | null>;
+  /** Keep a clip. Storing one that already exists is a no-op. */
+  putSpeechClip(key: string, audio: Uint8Array): Promise<void>;
   /** Resolves when the store can serve requests; rejects with why it cannot. */
   check(): Promise<void>;
   close(): Promise<void>;

@@ -528,3 +528,54 @@ test('fitted FSRS weights sync as an account setting', async () => {
   assert.deepEqual((await saved.json()).settings.fsrs, { value: fsrs, updatedAt });
   assert.equal((await put({ fsrs: { value: { parameters: [1, 2], reviews: 3 }, updatedAt } })).status, 400);
 });
+
+test('read-aloud clips are generated once, kept in the store, and served after a restart', async () => {
+  const realFetch = globalThis.fetch;
+  let geminiCalls = 0;
+  const pcm = Buffer.from([1, 0, 2, 0]).toString('base64');
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (!url.startsWith('https://generativelanguage.googleapis.com/')) return realFetch(input, init);
+    geminiCalls++;
+    return new Response(
+      JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'audio/L16;rate=24000', data: pcm } }] } }] }),
+      { status: 200 },
+    );
+  }) as typeof fetch;
+
+  const shared = new MemoryStore();
+  const config = loadConfig({ FLUENTFLOW_MODE: 'local', PORT: '0', GEMINI_API_KEY: 'test-key' } as NodeJS.ProcessEnv);
+  const start = async () => {
+    const app = createApp({ config, store: shared });
+    const s = await new Promise<Server>((resolve) => {
+      const listening = app.listen(0, '127.0.0.1', () => resolve(listening));
+    });
+    return { s, url: `http://127.0.0.1:${(s.address() as AddressInfo).port}` };
+  };
+  const ask = (url: string) =>
+    realFetch(`${url}/api/ai/speech`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer local:alice' },
+      body: JSON.stringify({ text: 'Baš ti hvala.', language: 'bs', voice: 'Aoede' }),
+    });
+
+  try {
+    const first = await start();
+    const made = await ask(first.url);
+    assert.equal(made.status, 200);
+    assert.equal(made.headers.get('content-type'), 'audio/wav');
+    const audio = new Uint8Array(await made.arrayBuffer());
+    assert.equal(Buffer.from(audio.slice(0, 4)).toString('ascii'), 'RIFF');
+    await new Promise<void>((resolve) => first.s.close(() => resolve()));
+
+    // A fresh process has an empty memory layer; the clip comes from the store.
+    const second = await start();
+    const replay = await ask(second.url);
+    assert.deepEqual([...new Uint8Array(await replay.arrayBuffer())], [...audio]);
+    assert.equal(geminiCalls, 1, 'Gemini was asked once for the sentence');
+    await new Promise<void>((resolve) => second.s.close(() => resolve()));
+  } finally {
+    globalThis.fetch = realFetch;
+    await shared.close();
+  }
+});

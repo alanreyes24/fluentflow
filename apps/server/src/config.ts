@@ -24,6 +24,8 @@ export interface Config {
   geminiApiKey?: string;
   /** Hosted model id; defaults to the shared core default. */
   geminiModel?: string;
+  /** Text-to-speech model id; defaults to the shared core default. */
+  geminiSpeechModel?: string;
   /** Firebase project id; required in firebase mode. */
   projectId?: string;
   /** Path to a service-account JSON file, or undefined to use ADC. */
@@ -99,6 +101,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     host: env.HOST ?? (mode === 'local' ? '127.0.0.1' : '0.0.0.0'),
     geminiApiKey: env.GEMINI_API_KEY ?? env.GOOGLE_API_KEY ?? undefined,
     geminiModel: env.GEMINI_MODEL ?? undefined,
+    geminiSpeechModel: env.GEMINI_SPEECH_MODEL ?? undefined,
     projectId,
     credentialsPath,
     serviceAccountJson,

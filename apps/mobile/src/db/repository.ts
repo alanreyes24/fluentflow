@@ -189,10 +189,10 @@ export class Repository {
   async listAllCards(userId?: string): Promise<Card[]> {
     const rows = userId
       ? await this.db.getAllAsync<CardRow>(
-          'SELECT * FROM cards WHERE userId = ? AND deleted = 0',
+          'SELECT * FROM cards WHERE userId = ? AND deleted = 0 ORDER BY rowid',
           userId,
         )
-      : await this.db.getAllAsync<CardRow>('SELECT * FROM cards WHERE deleted = 0');
+      : await this.db.getAllAsync<CardRow>('SELECT * FROM cards WHERE deleted = 0 ORDER BY rowid');
     return rows.map(toCard);
   }
 

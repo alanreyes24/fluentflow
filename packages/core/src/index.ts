@@ -12,6 +12,7 @@ export * from './ai/parse.js';
 export * from './ai/fallback.js';
 export * from './ai/generate.js';
 export * from './ai/remote.js';
+export * from './ai/speech.js';
 export * from './ai/translate.js';
 export * from './ai/resolve.js';
 

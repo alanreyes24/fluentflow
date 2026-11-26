@@ -38,6 +38,7 @@ import { formatInterval } from '../../../src/ui/format';
 import { useCardGestures } from '../../../src/ui/useCardGestures';
 import { StudyQueueCounts } from '../../../src/ui/StudyQueueCounts';
 import { Icon } from '../../../src/ui/Icon';
+import { autoReadEnabled, deckAudioEnabled, prefetchSpeech, speak, stopSpeaking, useCanSpeak } from '../../../src/speech';
 import { useLayout, useTheme } from '../../../src/ui/theme';
 
 /**
@@ -101,6 +102,38 @@ export default function StudyScreen() {
 
   const card = queue[index] ?? null;
   const studyAhead = ahead === '1';
+
+  // Read-aloud. On a reversed deck the target-language side is the answer, so
+  // it is only spoken once revealed.
+  const canSpeak = useCanSpeak(card?.language);
+  const [autoRead] = useState(autoReadEnabled);
+  const speakable = Boolean(card && canSpeak && (!deck?.reverseCards || revealed));
+  const readAloud = useCallback(() => {
+    if (card && speakable) speak(card.front, card.language);
+  }, [card, speakable]);
+  useEffect(() => {
+    if (!autoRead || !speakable || !card || editing) return;
+    speak(card.front, card.language);
+    // Keyed on the card shown, not the card object: starring or editing a card
+    // replaces the object, and that should not read it again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRead, speakable, card?.id, index]);
+  useEffect(() => () => stopSpeaking(), []);
+  // Natural clips take a second or two to generate, so the card on screen and
+  // the next one are fetched as soon as they are known. Cached clips cost nothing.
+  const nextCard = queue[index + 1];
+  const currentFront = card?.front;
+  const currentLanguage = card?.language;
+  const nextFront = nextCard?.front;
+  const nextLanguage = nextCard?.language;
+  const studyDeckId = deck?.id;
+  useEffect(() => {
+    // A deck with audio switched off is not fetched ahead; the speaker button
+    // still fetches the card on screen when pressed.
+    if (!canSpeak || (studyDeckId && !deckAudioEnabled(studyDeckId))) return;
+    if (currentFront && currentLanguage) prefetchSpeech(currentFront, currentLanguage);
+    if (nextFront && nextLanguage) prefetchSpeech(nextFront, nextLanguage);
+  }, [canSpeak, studyDeckId, currentFront, currentLanguage, nextFront, nextLanguage]);
   const remainingCounts = useMemo(() => countQueue(queue.slice(index)), [queue, index]);
 
   useEffect(() => {
@@ -558,6 +591,7 @@ export default function StudyScreen() {
   const gestures = useCardGestures({
     onRate: rate,
     onReveal: reveal,
+    onReplay: speakable ? readAloud : undefined,
     enabled: revealed && !editing && !toolsOpen && !chatOpen,
     active: !loading && !!card && !editing && !toolsOpen && !chatOpen,
   });
@@ -636,6 +670,17 @@ export default function StudyScreen() {
                   iconOnly={compact}
                   onPress={() => void removeFromSession('suspend')}
                 />
+              ) : null}
+              {speakable && !editing ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('readAloud')}
+                  onPress={readAloud}
+                  hitSlop={4}
+                  style={[styles.iconButton, touch ? styles.iconButtonTouch : null, { borderRadius: theme.radius.sm }]}
+                >
+                  <Icon name="volume" size={20} color={theme.colors.textMuted} />
+                </Pressable>
               ) : null}
               {!editing ? (
                 <Pressable

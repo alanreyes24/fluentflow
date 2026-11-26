@@ -18,6 +18,14 @@ const BACK_NAMES = [
   'traduccion', 'traducción', 'significado', 'prijevod', 'znacenje', 'značenje', 'gloss',
 ];
 
+/**
+ * Sentence decks (one sentence per note, with its translation) name the prompt
+ * field "Sentence". That word also names example fields in vocabulary decks,
+ * so it only counts as the front on an exact match, and only when no field is
+ * recognisably the word itself.
+ */
+const SENTENCE_FRONT_NAMES = ['sentence', 'phrase', 'frase', 'oracion', 'recenica'];
+
 const EXAMPLE_NAMES = [
   'example', 'examples', 'sentence', 'sentences', 'example sentence',
   'usage', 'context', 'ejemplo', 'ejemplos', 'frase', 'primjer', 'primjeri', 'recenica', 'rečenica',
@@ -46,9 +54,12 @@ export function mapFields(fields: NoteTypeField[], sortIndex = 0): FieldMapping 
   const ordered = [...fields].sort((a, b) => a.ord - b.ord);
   const names = ordered.map((f) => normalize(f.name));
 
-  const frontByName = matchIndex(names, FRONT_NAMES);
-  const backByName = matchIndex(names, BACK_NAMES);
-  const exampleIndex = matchIndex(names, EXAMPLE_NAMES, [frontByName, backByName]);
+  const frontByName = matchIndex(names, FRONT_NAMES) ?? exactIndex(names, SENTENCE_FRONT_NAMES);
+  const backByName = matchIndex(names, BACK_NAMES, [frontByName]);
+  // A "search field" is a plain-text copy of another field kept for Anki's
+  // search, never an example of its own.
+  const searchFields = names.flatMap((name, index) => (name.includes('search') ? [index] : []));
+  const exampleIndex = matchIndex(names, EXAMPLE_NAMES, [frontByName, backByName, ...searchFields]);
 
   let frontIndex = frontByName;
   let backIndex = backByName;
@@ -76,12 +87,29 @@ export interface ExtractedNote {
 
 /** Apply a {@link FieldMapping} to one note's raw field values. */
 export function extractNote(values: string[], mapping: FieldMapping): ExtractedNote {
-  const front = stripHtml(values[mapping.frontIndex] ?? '');
+  const front = frontText(values[mapping.frontIndex] ?? '');
   const back = stripHtml(values[mapping.backIndex] ?? '');
+  // Some decks keep a plain-text copy of the front for Anki's search, and it
+  // can look like an example field; a copy of the prompt is not an example.
   const examples = mapping.exampleIndex === null
     ? []
-    : splitExamples(values[mapping.exampleIndex] ?? '');
+    : splitExamples(values[mapping.exampleIndex] ?? '')
+        .filter((example) => example.toLowerCase() !== front.toLowerCase());
   return { front, back, examples };
+}
+
+/**
+ * A front with one complete sentence per line lists alternative phrasings
+ * ("Ovo je samo početak.<br>To je samo početak."); run together they read as
+ * one long sentence, so they are kept apart with a slash. Any other line
+ * breaks in a front are just layout and collapse to spaces.
+ */
+function frontText(field: string): string {
+  const lines = stripHtmlKeepLines(field).split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length > 1 && lines.every((line) => /[.!?…]["'”’»)]*$/.test(line))) {
+    return lines.join(' / ');
+  }
+  return stripHtml(field);
 }
 
 /** Split an example field into individual sentences. */
@@ -122,6 +150,14 @@ function matchIndex(
   for (const candidate of candidates) {
     const partial = names.findIndex((n, i) => n.includes(candidate) && !blocked.has(i));
     if (partial !== -1) return partial;
+  }
+  return null;
+}
+
+function exactIndex(names: string[], candidates: string[]): number | null {
+  for (const candidate of candidates) {
+    const index = names.indexOf(candidate);
+    if (index !== -1) return index;
   }
   return null;
 }

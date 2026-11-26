@@ -3,6 +3,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../src/state/app';
+import { useSpeechBackfill } from '../../src/state/speech-backfill';
 import { subscribeToShellImports } from '../../src/desktop-import';
 import { BottomBar, Sidebar } from '../../src/ui/BottomBar';
 import { TitleBar } from '../../src/ui/TitleBar';
@@ -30,6 +31,10 @@ export default function AppLayout() {
   // or a deck opened with the app. This is the only place mounted for the whole
   // session, so it is the only place that can route one.
   useEffect(() => subscribeToShellImports(() => router.push('/(app)/new-deck')), []);
+
+  // Audio for every card, kept up to date as cards are imported, added,
+  // edited or synced in. Mounted here because this shell lives all session.
+  useSpeechBackfill();
 
   // Escape is the desktop convention for leaving the current view. Keeping
   // this in the shell makes it work consistently on every route, including

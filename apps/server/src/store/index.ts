@@ -89,6 +89,14 @@ class LazyPostgresStore implements Store {
     return (await this.resolve()).mergeSettings(...args);
   }
 
+  async getSpeechClip(...args: Parameters<Store['getSpeechClip']>) {
+    return (await this.resolve()).getSpeechClip(...args);
+  }
+
+  async putSpeechClip(...args: Parameters<Store['putSpeechClip']>) {
+    return (await this.resolve()).putSpeechClip(...args);
+  }
+
   async check() {
     return (await this.resolve()).check();
   }
@@ -116,6 +124,12 @@ class UnavailableStore implements Store {
     throw new StoreUnavailableError();
   }
   async mergeSettings(): Promise<never> {
+    throw new StoreUnavailableError();
+  }
+  async getSpeechClip(): Promise<never> {
+    throw new StoreUnavailableError();
+  }
+  async putSpeechClip(): Promise<never> {
     throw new StoreUnavailableError();
   }
   async check(): Promise<never> {
