@@ -11,9 +11,10 @@ import {
   resolveMeaningsOnWeb,
   chatOnWeb,
   speechOnWeb,
-  uploadRecordingsOnWeb,
+  uploadRecordings,
   type DeckRecordingUpload,
 } from './web';
+import { syncBaseUrl } from '../sync/remote';
 
 /**
  * The desktop shell's lookup bridge, as the app sees it.
@@ -340,14 +341,16 @@ export function onSpeechBackfillProgress(listener: (status: SpeechBackfillStatus
 let uploadingRecordings = false;
 export async function uploadDeckRecordings(userId: string): Promise<number> {
   const ai = bridge();
-  if (uploadingRecordings || !ai?.pendingRecordings || !ai.recordingsUploaded || !webAiAvailable()) return 0;
+  if (uploadingRecordings || !ai?.pendingRecordings || !ai.recordingsUploaded) return 0;
   uploadingRecordings = true;
   let sent = 0;
   try {
+    const base = await syncBaseUrl();
+    if (!base) return 0;
     for (;;) {
       const batch = await ai.pendingRecordings({ userId, limit: 50 });
       if (batch.length === 0) return sent;
-      await uploadRecordingsOnWeb(batch);
+      await uploadRecordings(base, batch);
       await ai.recordingsUploaded({ userId, ids: batch.map((recording) => recording.id) });
       sent += batch.length;
     }

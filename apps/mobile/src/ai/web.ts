@@ -96,12 +96,22 @@ export interface DeckRecordingUpload {
   audio: string;
 }
 
-export async function uploadRecordingsOnWeb(recordings: DeckRecordingUpload[]): Promise<number> {
-  const body = await request('/api/speech/recordings', {
+/**
+ * Store deck recordings on the sync server. The desktop page has no AI server
+ * address of its own (it is served from `app://`), so the caller passes the
+ * sync server's, which is the same server.
+ */
+export async function uploadRecordings(base: string, recordings: DeckRecordingUpload[]): Promise<number> {
+  const token = await authApi()?.idToken();
+  if (!token) throw new Error('Sign in to keep deck recordings on the server.');
+  const response = await fetch(`${base}/api/speech/recordings`, {
     method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
     body: JSON.stringify({ recordings }),
   });
-  return body.stored;
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.message ?? `Uploading recordings failed (HTTP ${response.status}).`);
+  return body?.stored ?? recordings.length;
 }
 
 export async function chatOnWeb(messages: import('@fluentflow/core').ChatMessage[]): Promise<string> {
