@@ -1,4 +1,4 @@
-import { stripHtml, stripHtmlKeepLines } from './html.js';
+import { soundFiles, stripHtml, stripHtmlKeepLines } from './html.js';
 
 /**
  * Anki note types are user-defined: a field called "Front" in one shared deck
@@ -26,6 +26,23 @@ const BACK_NAMES = [
  */
 const SENTENCE_FRONT_NAMES = ['sentence', 'phrase', 'frase', 'oracion', 'recenica'];
 
+/**
+ * Decks built from parallel corpora (Tatoeba and the like) name both sides
+ * after their language: "SpanishSentence" and "EnglishSentence", next to
+ * "SpanishSentenceID" and a "ClozeWord". A field naming the learner's language
+ * *and* a sentence is the prompt there, ahead of any generic "word" field.
+ */
+const TARGET_LANGUAGE_NAMES = ['spanish', 'espanol', 'bosnian', 'bosanski', 'target'];
+const SENTENCE_WORDS = ['sentence', 'phrase', 'frase', 'oracion', 'recenica', 'text'];
+
+/** Fields that hold a recording rather than text. */
+const AUDIO_NAMES = ['audio', 'sound', 'pronunciation', 'pronunciacion', 'izgovor', 'recording'];
+/** Recordings of an example, not of the prompt, in a vocabulary deck. */
+const EXAMPLE_AUDIO_WORDS = ['sentence', 'example', 'frase', 'ejemplo', 'recenica', 'primjer'];
+
+/** Fields that grade notes easiest first (lower is introduced sooner). */
+const ORDER_WORDS = ['difficulty', 'rank'];
+
 const EXAMPLE_NAMES = [
   'example', 'examples', 'sentence', 'sentences', 'example sentence',
   'usage', 'context', 'ejemplo', 'ejemplos', 'frase', 'primjer', 'primjeri', 'recenica', 'rečenica',
@@ -40,6 +57,18 @@ export interface FieldMapping {
   frontIndex: number;
   backIndex: number;
   exampleIndex: number | null;
+  /**
+   * The field holding a recording of the front (`[sound:...]`), when one is
+   * named for it. A sound tag in the front field itself is used first.
+   */
+  audioIndex: number | null;
+  /**
+   * A numeric "Difficulty" or "Rank" field, which graded decks sort by. Their
+   * stored new-card order can be stale (re-shared decks keep whatever order
+   * the author's collection last had), so this field, when every note fills
+   * it, decides which new card comes first.
+   */
+  orderIndex: number | null;
   /** True when the mapping fell back to field order instead of field names. */
   positional: boolean;
 }
@@ -54,12 +83,28 @@ export function mapFields(fields: NoteTypeField[], sortIndex = 0): FieldMapping 
   const ordered = [...fields].sort((a, b) => a.ord - b.ord);
   const names = ordered.map((f) => normalize(f.name));
 
-  const frontByName = matchIndex(names, FRONT_NAMES) ?? exactIndex(names, SENTENCE_FRONT_NAMES);
-  const backByName = matchIndex(names, BACK_NAMES, [frontByName]);
+  // Database IDs ("SpanishSentenceID") name a language too, but hold numbers.
+  const ids = names.flatMap((name, index) => (isIdField(name) ? [index] : []));
+
+  const pairedFront = tokenIndex(names, [TARGET_LANGUAGE_NAMES, SENTENCE_WORDS], ids);
+  const frontByName = pairedFront
+    ?? matchIndex(names, FRONT_NAMES, ids)
+    ?? exactIndex(names, SENTENCE_FRONT_NAMES);
+  const backByName = (pairedFront === null ? null : tokenIndex(names, [['english'], SENTENCE_WORDS], ids))
+    ?? matchIndex(names, BACK_NAMES, [frontByName, ...ids]);
   // A "search field" is a plain-text copy of another field kept for Anki's
   // search, never an example of its own.
   const searchFields = names.flatMap((name, index) => (name.includes('search') ? [index] : []));
-  const exampleIndex = matchIndex(names, EXAMPLE_NAMES, [frontByName, backByName, ...searchFields]);
+  const exampleIndex = matchIndex(names, EXAMPLE_NAMES, [frontByName, backByName, ...searchFields, ...ids]);
+
+  // In a sentence deck the sentence recording is the front's; in a word deck a
+  // "Sentence Audio" field reads the example instead.
+  const frontIsSentence = frontByName !== null && tokens(names[frontByName]).some((t) => SENTENCE_WORDS.includes(t));
+  const audioIndex = names.findIndex((name, index) =>
+    !ids.includes(index)
+    && AUDIO_NAMES.some((word) => name.includes(word))
+    && (frontIsSentence || !EXAMPLE_AUDIO_WORDS.some((word) => name.includes(word))),
+  );
 
   let frontIndex = frontByName;
   let backIndex = backByName;
@@ -76,13 +121,26 @@ export function mapFields(fields: NoteTypeField[], sortIndex = 0): FieldMapping 
     positional = true;
   }
 
-  return { frontIndex, backIndex, exampleIndex, positional };
+  const orderIndex = names.findIndex((name, index) =>
+    !ids.includes(index) && tokens(name).some((t) => ORDER_WORDS.includes(t)),
+  );
+
+  return {
+    frontIndex,
+    backIndex,
+    exampleIndex,
+    audioIndex: audioIndex === -1 ? null : audioIndex,
+    orderIndex: orderIndex === -1 ? null : orderIndex,
+    positional,
+  };
 }
 
 export interface ExtractedNote {
   front: string;
   back: string;
   examples: string[];
+  /** Media file name of the front's recording, as the package names it. */
+  sound?: string;
 }
 
 /** Apply a {@link FieldMapping} to one note's raw field values. */
@@ -95,7 +153,9 @@ export function extractNote(values: string[], mapping: FieldMapping): ExtractedN
     ? []
     : splitExamples(values[mapping.exampleIndex] ?? '')
         .filter((example) => example.toLowerCase() !== front.toLowerCase());
-  return { front, back, examples };
+  const sound = soundFiles(values[mapping.frontIndex] ?? '')[0]
+    ?? (mapping.audioIndex === null ? undefined : soundFiles(values[mapping.audioIndex] ?? '')[0]);
+  return sound ? { front, back, examples, sound } : { front, back, examples };
 }
 
 /**
@@ -154,6 +214,22 @@ function matchIndex(
   return null;
 }
 
+/** The first field whose words include one from every group. */
+function tokenIndex(names: string[], groups: string[][], exclude: number[]): number | null {
+  const index = names.findIndex((name, i) =>
+    !exclude.includes(i) && groups.every((group) => tokens(name).some((t) => group.includes(t))),
+  );
+  return index === -1 ? null : index;
+}
+
+function tokens(name: string | undefined): string[] {
+  return (name ?? '').split(' ').filter(Boolean);
+}
+
+function isIdField(name: string): boolean {
+  return /(^| )ids?$/.test(name);
+}
+
 function exactIndex(names: string[], candidates: string[]): number | null {
   for (const candidate of candidates) {
     const index = names.indexOf(candidate);
@@ -172,6 +248,9 @@ function firstUnused(length: number, used: (number | null)[]): number {
 
 function normalize(name: string): string {
   return name
+    // "SpanishSentenceID" -> "Spanish Sentence ID", so its words can be told apart.
+    .replace(/(\p{Ll}|\d)(\p{Lu})/gu, '$1 $2')
+    .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2')
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')

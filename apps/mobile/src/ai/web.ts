@@ -72,7 +72,7 @@ async function request(path: string, init: RequestInit): Promise<any> {
   return body;
 }
 
-/** Read-aloud audio from the server's Gemini proxy, as WAV bytes. */
+/** Read-aloud audio from the server's Gemini proxy, as audio bytes (WAV, or a deck recording). */
 export async function speechOnWeb(text: string, language: TargetLanguage, voice?: string): Promise<Uint8Array> {
   const base = appConfig.apiBaseUrl;
   if (!webAiAvailable() || !base) throw new Error('The AI server is not configured.');

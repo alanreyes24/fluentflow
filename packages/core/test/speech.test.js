@@ -151,3 +151,15 @@ test('cache keys separate voices, models and languages', () => {
   assert.equal(base, speechCacheKey(' Da. ', 'bs', 'Aoede', 'm'));
   assert.equal(pcmToWav(new Uint8Array(0)).byteLength, 44);
 });
+
+test('a deck recording has one key whatever the voice, apart from every generated clip', async () => {
+  const { recordedSpeechKey, audioMimeType } = await import('../dist/index.js');
+  assert.equal(recordedSpeechKey(' Es lo que es. ', 'es'), recordedSpeechKey('Es lo que es.', 'es'));
+  assert.notEqual(recordedSpeechKey('Da.', 'bs'), speechCacheKey('Da.', 'bs', DEFAULT_SPEECH_VOICE, DEFAULT_SPEECH_MODEL));
+  assert.notEqual(recordedSpeechKey('Da.', 'bs'), recordedSpeechKey('Da.', 'es'));
+
+  assert.equal(audioMimeType(pcmToWav(new Uint8Array(4))), 'audio/wav');
+  assert.equal(audioMimeType(new Uint8Array([0x49, 0x44, 0x33, 4])), 'audio/mpeg');
+  assert.equal(audioMimeType(new Uint8Array([0xff, 0xfb, 0x90, 0])), 'audio/mpeg');
+  assert.equal(audioMimeType(new Uint8Array([...Buffer.from('OggS')])), 'audio/ogg');
+});

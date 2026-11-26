@@ -164,3 +164,14 @@ test('without a key nothing is attempted', async () => {
   assert.match(status.error, /Gemini API key/);
   assert.equal(calls.length, 0);
 });
+
+test('a recording that came with the deck is played and counted, and Gemini is not asked', async () => {
+  const mp3 = new Uint8Array([0x49, 0x44, 0x33, 4, 0, 9, 9]);
+  assert.equal(await ai.saveRecordings([{ text: 'Es lo que es.', language: 'es', audio: mp3 }]), 1);
+
+  assert.deepEqual([...(await ai.speech({ text: 'Es lo que es.', language: 'es', voice: 'Leda' }))], [...mp3]);
+  const status = await run([{ text: 'Es lo que es.', language: 'es' }, { text: 'tramposo', language: 'es' }], 'Aoede');
+  assert.equal(status.total, 2);
+  assert.equal(status.ready, 2);
+  assert.deepEqual(calls, ['tramposo'], 'only the card without a recording is made');
+});

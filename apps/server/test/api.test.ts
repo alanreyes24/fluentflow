@@ -579,3 +579,29 @@ test('read-aloud clips are generated once, kept in the store, and served after a
     await shared.close();
   }
 });
+
+test('a deck imported with its own recordings is read in them, with no Gemini call', async () => {
+  await seed('olga');
+  const mp3 = new Uint8Array([0x49, 0x44, 0x33, 4, 0, 7, 7, 7]);
+  const apkg = buildApkg({
+    schema: 11,
+    decks: ['Spanish sentences'],
+    fieldNames: ['SpanishSentenceID', 'EnglishSentence', 'SpanishSentence', 'Audio'],
+    notes: [{ fields: ['1', 'It is what it is.', 'Es lo que es.', '[sound:arh 1.mp3]'] }],
+    media: { 'arh 1.mp3': mp3 },
+  });
+  const imported = await call('/api/import/apkg?filename=Spanish.apkg', {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream' },
+    body: apkg,
+    user: 'olga',
+  });
+  assert.equal(imported.status, 200);
+  assert.equal((await imported.json()).summary.recordingsFound, 1);
+
+  // Any voice: the recording comes first, and this server has no Gemini key.
+  const response = await json('/api/ai/speech', { text: 'Es lo que es.', language: 'es', voice: 'Leda' }, { user: 'olga' });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'audio/mpeg');
+  assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [...mp3]);
+});

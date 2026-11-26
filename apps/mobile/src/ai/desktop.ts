@@ -326,7 +326,7 @@ export function naturalSpeechReachable(): boolean {
   return Boolean(bridge()?.speech) || webAiAvailable();
 }
 
-/** One card's read-aloud clip, as WAV bytes, from the shell or the AI server. */
+/** One card's read-aloud clip, as audio bytes (WAV, or a deck recording), from the shell or the AI server. */
 export async function fetchSpeech(text: string, language: TargetLanguage, voice?: string): Promise<Uint8Array> {
   const ai = bridge();
   if (ai?.speech) {

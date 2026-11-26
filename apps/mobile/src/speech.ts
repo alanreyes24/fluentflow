@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from 'react';
-import { DEFAULT_SPEECH_VOICE, isSpeechVoice, type SpeechVoice, type TargetLanguage } from '@fluentflow/core';
+import { DEFAULT_SPEECH_VOICE, audioMimeType, isSpeechVoice, type SpeechVoice, type TargetLanguage } from '@fluentflow/core';
 import { fetchSpeech, naturalSpeechReachable } from './ai/desktop';
 
 /**
@@ -121,7 +121,8 @@ function clipUrl(text: string, language: TargetLanguage): Promise<string> {
   let clip = clips.get(key);
   if (!clip) {
     clip = fetchSpeech(text, language, voice).then((audio) =>
-      URL.createObjectURL(new Blob([audio as BlobPart], { type: 'audio/wav' })),
+      // A deck's own recording is usually MP3; generated clips are WAV.
+      URL.createObjectURL(new Blob([audio as BlobPart], { type: audioMimeType(audio) })),
     );
     // A failed clip is forgotten so the next attempt asks again.
     clip.catch(() => clips.delete(key));

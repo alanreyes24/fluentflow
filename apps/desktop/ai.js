@@ -222,6 +222,29 @@ function speechClipPath(core, text, language, voice) {
   return { name, model, voice: chosenVoice, file: path.join(speechCacheDir(), `${name}.wav`) };
 }
 
+/**
+ * Where a recording that came with a deck lives. It is keyed by text and
+ * language only, so it is found whatever voice is chosen, and it is read
+ * before any generated clip.
+ */
+function recordingPath(core, text, language) {
+  const name = crypto.createHash('sha256').update(core.recordedSpeechKey(text, language)).digest('hex');
+  return { name, file: path.join(speechCacheDir(), `${name}.recording`) };
+}
+
+/** Keep a deck's own recordings (handed over by the importer) on disk. */
+async function saveRecordings(recordings) {
+  const core = await loadCore();
+  await mkdir(speechCacheDir(), { recursive: true });
+  let saved = 0;
+  for (const recording of recordings ?? []) {
+    if (!recording?.text || !(recording.audio instanceof Uint8Array)) continue;
+    await writeFile(recordingPath(core, recording.text, recording.language).file, recording.audio);
+    saved++;
+  }
+  return saved;
+}
+
 async function speech({ text, language, voice }) {
   const core = await loadCore();
   const { name, model, voice: chosenVoice, file } = speechClipPath(core, text, language, voice);
@@ -231,10 +254,12 @@ async function speech({ text, language, voice }) {
   if (pending) return pending;
 
   const work = (async () => {
-    try {
-      return new Uint8Array(await readFile(file));
-    } catch {
-      // Not cached yet.
+    for (const candidate of [recordingPath(core, text, language).file, file]) {
+      try {
+        return new Uint8Array(await readFile(candidate));
+      } catch {
+        // Not on disk.
+      }
     }
     const clip = await core.synthesizeSpeech(
       { apiKey: cloud.apiKey(), model, voice: chosenVoice },
@@ -323,10 +348,11 @@ async function prepareSpeech(items, voice, onProgress) {
     const language = item?.language;
     if (!text || text.length > core.MAX_SPEECH_CHARACTERS || (language !== 'bs' && language !== 'es')) continue;
     const { name } = speechClipPath(core, text, language, voice);
-    wanted.set(name, { name, text, language });
+    wanted.set(name, { name, text, language, recording: `${recordingPath(core, text, language).name}.recording` });
   }
 
-  const missing = [...wanted.values()].filter((item) => !cached.has(`${item.name}.wav`));
+  // A card whose deck came with a recording needs nothing made.
+  const missing = [...wanted.values()].filter((item) => !cached.has(`${item.name}.wav`) && !cached.has(item.recording));
   backfill.voice = voice;
   backfill.onProgress = onProgress;
   backfill.stopped = false;
@@ -408,4 +434,4 @@ async function makeClip(item, attempt = 0) {
   }
 }
 
-module.exports = { sources, resolve, examples, chat, speech, prepareSpeech, backfillStatus };
+module.exports = { sources, resolve, examples, chat, speech, saveRecordings, prepareSpeech, backfillStatus };

@@ -108,6 +108,7 @@ export const CRT = Math.floor(Date.UTC(2024, 0, 1, 4, 0, 0) / 1000);
  * @param {string} [options.noteTypeName]
  * @param {number} [options.sortIndex]
  * @param {FixtureNote[]} options.notes
+ * @param {Record<string, Uint8Array>} [options.media] media files by the name cards use
  * @returns {Uint8Array} the `.apkg` bytes
  */
 export function buildApkg(options) {
@@ -118,6 +119,7 @@ export function buildApkg(options) {
     noteTypeName = 'Basic',
     sortIndex = 0,
     notes,
+    media = {},
   } = options;
 
   const dir = mkdtempSync(join(tmpdir(), 'fluentflow-apkg-'));
@@ -225,7 +227,14 @@ export function buildApkg(options) {
     const collectionBytes = new Uint8Array(readFileSync(dbPath));
     const entryName = schema >= 18 ? 'collection.anki21' : 'collection.anki2';
     /** @type {Record<string, Uint8Array>} */
-    const entries = { [entryName]: collectionBytes, media: strToU8('{}') };
+    const mediaNames = Object.keys(media);
+    const entries = {
+      [entryName]: collectionBytes,
+      media: strToU8(JSON.stringify(Object.fromEntries(mediaNames.map((name, index) => [String(index), name])))),
+    };
+    mediaNames.forEach((name, index) => {
+      entries[String(index)] = media[name];
+    });
     if (schema >= 18) {
       // Modern exports also ship a downgrade stub; the importer must ignore it.
       entries['collection.anki2'] = buildDowngradeStub(dir);

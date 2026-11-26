@@ -382,6 +382,7 @@ function registerImportHandlers() {
       language: request?.language || undefined,
       flatten: request?.flatten === true,
       deckName: typeof request?.deckName === 'string' ? request.deckName.slice(0, 200) : undefined,
+      saveRecordings: ai.saveRecordings,
     });
   });
 

@@ -121,6 +121,26 @@ export function speechCacheKey(text: string, language: TargetLanguage, voice: st
   return [SPEECH_CACHE_VERSION, model, voice, language, text.trim()].join('\u001f');
 }
 
+/**
+ * The cache key of a recording that came with a deck. It names no voice or
+ * model, so it outlives a change of either, and it is looked up before the
+ * generated clip: a person reading the sentence beats any synthetic voice.
+ */
+export function recordedSpeechKey(text: string, language: TargetLanguage): string {
+  return speechCacheKey(text, language, 'recorded', 'deck');
+}
+
+/** The media type of a clip, from its first bytes: WAV, MP3 or Ogg. */
+export function audioMimeType(bytes: Uint8Array): string {
+  if (isWav(bytes)) return 'audio/wav';
+  const head = String.fromCharCode(...bytes.subarray(0, 4));
+  if (head.startsWith('ID3') || (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0)) return 'audio/mpeg';
+  if (head === 'OggS') return 'audio/ogg';
+  if (head === 'fLaC') return 'audio/flac';
+  if (String.fromCharCode(...bytes.subarray(4, 8)) === 'ftyp') return 'audio/mp4';
+  return 'application/octet-stream';
+}
+
 export async function synthesizeSpeech(
   options: SpeechOptions,
   text: string,

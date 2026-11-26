@@ -449,3 +449,86 @@ test('a chosen deck name puts every card in one new deck of that name', async ()
   // A different name is a different deck, never the one called "Bosnian".
   assert.ok(!plain.decks.some((deck) => deck.id === named.decks[0].id));
 });
+
+/** The note type of a Tatoeba-built cloze deck, as AnkiWeb ships it. */
+const TATOEBA_FIELDS = [
+  'EnglishSentenceID', 'SpanishSentenceID', 'EnglishSentence', 'SpanishSentence', 'ClozeWord',
+  'Difficulty', 'Text', 'Audio', 'NumberOfSpanishWords', 'Extra', 'Other',
+];
+
+function tatoebaNote(english, spanish, cloze, sound, difficulty = '10', due = 0) {
+  return {
+    due,
+    fields: [
+      '2528426', '2760065', english, spanish, cloze, difficulty,
+      spanish.replace(cloze, `{{c1::${cloze}}}`), sound ? `[sound:${sound}]` : '', '4', '', '',
+    ],
+  };
+}
+
+test('a Tatoeba deck reads its Spanish sentence (not the ID or cloze word), easiest first', async () => {
+  const apkg = buildApkg({
+    schema: 11,
+    decks: ['Spanish sentences'],
+    fieldNames: TATOEBA_FIELDS,
+    sortIndex: 5,
+    // The stored new-card order is stale: the hardest sentence sits first.
+    notes: [
+      tatoebaNote('There were several accidents.', 'Hubo varios accidentes.', 'accidentes', '', '42084', 1),
+      tatoebaNote('It is what it is.', 'Es lo que es.', 'lo', '', '10', 2),
+      tatoebaNote('And why not?', '¿Y por qué no?', 'qué', '', '13', 3),
+    ],
+  });
+
+  const { cards, decks, summary } = await parseApkg(apkg, base);
+
+  // Easiest first, by the deck's own Difficulty field.
+  assert.deepEqual(cards.map((card) => [card.front, card.back]), [
+    ['Es lo que es.', 'It is what it is.'],
+    ['¿Y por qué no?', 'And why not?'],
+    ['Hubo varios accidentes.', 'There were several accidents.'],
+  ]);
+  assert.equal(decks[0].language, 'es');
+  assert.deepEqual(summary.positionalNoteTypes, []);
+});
+
+test('recordings of the front come back on request, keyed by the card they read', async () => {
+  const mp3 = new Uint8Array([0x49, 0x44, 0x33, 4, 0, 1, 2, 3]);
+  const apkg = buildApkg({
+    schema: 11,
+    decks: ['Spanish sentences'],
+    fieldNames: TATOEBA_FIELDS,
+    notes: [
+      tatoebaNote('It is what it is.', 'Es lo que es.', 'lo', 'arh 1.mp3'),
+      tatoebaNote('And why not?', '¿Y por qué no?', 'qué', 'missing.mp3'),
+      tatoebaNote('Sit down.', 'Siéntate.', 'Siéntate'),
+    ],
+    media: { 'arh 1.mp3': mp3 },
+  });
+
+  const asked = await parseApkg(apkg, { ...base, recordings: true });
+  assert.equal(asked.summary.recordingsFound, 1);
+  assert.equal(asked.recordings.length, 1);
+  assert.equal(asked.recordings[0].text, 'Es lo que es.');
+  assert.equal(asked.recordings[0].language, 'es');
+  assert.deepEqual([...asked.recordings[0].audio], [...mp3]);
+
+  // Not asked for, the audio is left in the archive.
+  const plain = await parseApkg(apkg, base);
+  assert.equal(plain.recordings, undefined);
+  assert.equal(plain.summary.recordingsFound, 1);
+});
+
+test('a word deck uses the word recording, not the example sentence one', async () => {
+  const apkg = buildApkg({
+    schema: 11,
+    decks: ['Spanish'],
+    fieldNames: ['Word', 'Meaning', 'Sentence', 'Sentence Audio', 'Word Audio'],
+    notes: [{ fields: ['hablar', 'to speak', 'Ella habla.', '[sound:s.mp3]', '[sound:w.mp3]'] }],
+    media: { 's.mp3': strToU8('sentence'), 'w.mp3': strToU8('word') },
+  });
+
+  const { recordings } = await parseApkg(apkg, { ...base, recordings: true });
+  assert.equal(recordings.length, 1);
+  assert.equal(new TextDecoder().decode(recordings[0].audio), 'word');
+});

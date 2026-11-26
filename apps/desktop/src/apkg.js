@@ -59,7 +59,15 @@ function core() {
  * importing the deck.
  *
  * @param {string} filePath
- * @param {{ userId: string, language?: string, flatten?: boolean, deckName?: string }} options
+ * @param {{
+ *   userId: string,
+ *   language?: string,
+ *   flatten?: boolean,
+ *   deckName?: string,
+ *   saveRecordings?: (recordings: { text: string, language: string, audio: Uint8Array }[]) => Promise<unknown>,
+ * }} options
+ *   `saveRecordings` receives the deck's own recordings of its fronts; they
+ *   stay in this process rather than crossing to the page.
  */
 async function importApkg(filePath, options) {
   try {
@@ -85,7 +93,17 @@ async function importApkg(filePath, options) {
       language: options.language,
       flatten: options.flatten,
       deckName: options.deckName,
+      recordings: Boolean(options.saveRecordings),
     });
+
+    if (options.saveRecordings && result.recordings?.length) {
+      try {
+        await options.saveRecordings(result.recordings);
+      } catch (error) {
+        // The cards are still worth importing; Gemini reads them instead.
+        result.summary.warnings.push(`The deck's recordings could not be saved: ${error?.message ?? error}`);
+      }
+    }
 
     return { ok: true, decks: result.decks, cards: result.cards, summary: result.summary };
   } catch (error) {

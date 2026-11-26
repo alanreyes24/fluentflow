@@ -3,6 +3,7 @@ import type { Card, CardPhase, Deck, TargetLanguage } from '../types.js';
 import { detectLanguage, type LanguageDetection } from '../language.js';
 import { stableId } from '../id.js';
 import { MIN_EASE_FACTOR, DEFAULT_EASE_FACTOR, statusFor, collectionDayKey } from '../scheduler.js';
+import { stripHtml } from './html.js';
 import { extractNote, mapFields, splitFields, type FieldMapping, type NoteTypeField } from './fields.js';
 
 /**
@@ -83,6 +84,19 @@ export interface ApkgImportOptions {
    * happens to share its Anki name.
    */
   deckName?: string;
+  /**
+   * Hand back the package's own recordings of each card's front. Off by
+   * default: a sentence deck carries a hundred megabytes of them, which only
+   * the places that keep audio (the desktop shell, the server) want.
+   */
+  recordings?: boolean;
+}
+
+/** A recording that shipped with the deck, of one card's front. */
+export interface ApkgRecording {
+  text: string;
+  language: TargetLanguage;
+  audio: Uint8Array;
 }
 
 export interface ApkgImportSummary {
@@ -95,6 +109,11 @@ export interface ApkgImportSummary {
   cardsSkipped: number;
   decksCreated: number;
   mediaCount: number;
+  /**
+   * Cards whose front came with a recording in the package. Absent from an
+   * older server or desktop shell's answer.
+   */
+  recordingsFound?: number;
   detection: LanguageDetection;
   /** Note types whose fields had to be matched by position, not by name. */
   positionalNoteTypes: string[];
@@ -105,6 +124,8 @@ export interface ApkgImportResult {
   decks: Deck[];
   cards: Card[];
   summary: ApkgImportSummary;
+  /** Present when {@link ApkgImportOptions.recordings} was asked for. */
+  recordings?: ApkgRecording[];
 }
 
 const DAY_SECONDS = 86_400;
@@ -191,6 +212,10 @@ export async function parseApkg(
     /** Anki's new-card position (`due` on a new card), by index in `cards`. */
     const newPositions = new Map<number, number>();
     let cardsSkipped = 0;
+    const media = mediaIndex(entries);
+    const recordings = new Map<string, ApkgRecording>();
+    /** A new card's grade from a "Difficulty"/"Rank" field, by index in `cards`. */
+    const graded = new Map<number, number | null>();
 
     for (const note of notes) {
       const noteId = num(note.id);
@@ -208,7 +233,8 @@ export async function parseApkg(
         continue;
       }
 
-      const extracted = extractNote(splitFields(str(note.flds)), mapping);
+      const values = splitFields(str(note.flds));
+      const extracted = extractNote(values, mapping);
       if (!extracted.front || !extracted.back) {
         cardsSkipped++;
         continue;
@@ -229,7 +255,19 @@ export async function parseApkg(
         nowIso,
       });
 
+      const audio = extracted.sound ? media.get(extracted.sound) : undefined;
+      if (audio) {
+        recordings.set(`${deck.language}\u0000${extracted.front}`, {
+          text: extracted.front,
+          language: deck.language,
+          audio,
+        });
+      }
+
       newPositions.set(cards.length, num(cardRow.type) === 0 ? num(cardRow.due) : -Infinity);
+      if (num(cardRow.type) === 0 && mapping.orderIndex !== null) {
+        graded.set(cards.length, gradeOf(values[mapping.orderIndex]));
+      }
       cards.push(
         toCard({
           cardRow,
@@ -259,7 +297,7 @@ export async function parseApkg(
 
     return {
       decks: [...decks.values()],
-      cards: inNewCardOrder(cards, newPositions),
+      cards: inNewCardOrder(cards, gradedPositions(newPositions, graded)),
       summary: {
         schema,
         collectionFile,
@@ -269,10 +307,12 @@ export async function parseApkg(
         cardsSkipped,
         decksCreated: decks.size,
         mediaCount: countMedia(entries),
+        recordingsFound: recordings.size,
         detection,
         positionalNoteTypes: unique(positionalNoteTypes),
         warnings,
       },
+      ...(options.recordings ? { recordings: [...recordings.values()] } : {}),
     };
   } finally {
     db.close();
@@ -296,6 +336,23 @@ function hideExamplesForSentenceDecks(decks: Map<string, Deck>, cards: Card[]): 
 
 function isSentenceFront(front: string): boolean {
   return /[.!?…]["'”’»)]*$/.test(front.trim());
+}
+
+/**
+ * A deck graded "easiest to hardest" keeps the grade in a field. When every
+ * new card has a number there, that number is the order; otherwise Anki's
+ * stored position stands.
+ */
+function gradedPositions(positions: Map<number, number>, graded: Map<number, number | null>): Map<number, number> {
+  if (graded.size === 0 || [...graded.values()].some((grade) => grade === null)) return positions;
+  const result = new Map(positions);
+  for (const [index, grade] of graded) result.set(index, grade!);
+  return result;
+}
+
+function gradeOf(field: string | undefined): number | null {
+  const text = stripHtml(field ?? '');
+  return /^-?\d+(\.\d+)?$/.test(text) ? Number(text) : null;
 }
 
 /**
@@ -347,6 +404,30 @@ function pickCollection(entries: Record<string, Uint8Array>): { name: string; da
 
 function countMedia(entries: Record<string, Uint8Array>): number {
   return Object.keys(entries).filter((name) => /^\d+$/.test(name)).length;
+}
+
+/**
+ * Media files by the name cards use for them. A legacy package lists them in a
+ * JSON `media` entry (`{"0": "clip.mp3"}`) and stores each under its number.
+ * Newer exports compress media and list it in protobuf; those are refused
+ * earlier (see `pickCollection`), so an unreadable list just means no audio.
+ */
+function mediaIndex(entries: Record<string, Uint8Array>): Map<string, Uint8Array> {
+  const index = new Map<string, Uint8Array>();
+  const list = entries.media;
+  if (!list) return index;
+  let names: unknown;
+  try {
+    names = JSON.parse(new TextDecoder().decode(list));
+  } catch {
+    return index;
+  }
+  if (!names || typeof names !== 'object') return index;
+  for (const [entry, name] of Object.entries(names as Record<string, unknown>)) {
+    const data = entries[entry];
+    if (typeof name === 'string' && data && data.byteLength > 0) index.set(name, data);
+  }
+  return index;
 }
 
 async function open(

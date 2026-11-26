@@ -31,6 +31,11 @@ const ENTITIES: Record<string, string> = {
   rsquo: '’',
 };
 
+/** The media file names a field plays, in order (`[sound:name.mp3]`). */
+export function soundFiles(field: string): string[] {
+  return [...(field ?? '').matchAll(/\[sound:([^\]]+)\]/gi)].map((match) => match[1]!.trim()).filter(Boolean);
+}
+
 /** Collapse an Anki HTML field down to a single line of readable text. */
 export function stripHtml(field: string): string {
   if (!field) return '';

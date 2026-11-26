@@ -76,7 +76,7 @@ test('field mapping prefers names, then the sort field, then position', () => {
       { ord: 1, name: 'Meaning' },
       { ord: 2, name: 'Example Sentence' },
     ]),
-    { frontIndex: 0, backIndex: 1, exampleIndex: 2, positional: false },
+    { frontIndex: 0, backIndex: 1, exampleIndex: 2, audioIndex: null, orderIndex: null, positional: false },
   );
 
   // Reversed layout: the names still win over the order.
@@ -85,13 +85,13 @@ test('field mapping prefers names, then the sort field, then position', () => {
       { ord: 0, name: 'Translation' },
       { ord: 1, name: 'Word' },
     ]),
-    { frontIndex: 1, backIndex: 0, exampleIndex: null, positional: false },
+    { frontIndex: 1, backIndex: 0, exampleIndex: null, audioIndex: null, orderIndex: null, positional: false },
   );
 
   // Nothing recognisable: fall back to the sort field and the next free slot.
   assert.deepEqual(
     mapFields([{ ord: 0, name: 'A' }, { ord: 1, name: 'B' }, { ord: 2, name: 'C' }], 1),
-    { frontIndex: 1, backIndex: 0, exampleIndex: null, positional: true },
+    { frontIndex: 1, backIndex: 0, exampleIndex: null, audioIndex: null, orderIndex: null, positional: true },
   );
 });
 

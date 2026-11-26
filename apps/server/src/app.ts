@@ -7,6 +7,8 @@ import {
   DEFAULT_SPEECH_VOICE,
   isSpeechModel,
   isSpeechVoice,
+  audioMimeType,
+  recordedSpeechKey,
   speechCacheKey,
   synthesizeSpeech,
   validateChatMessages,
@@ -107,6 +109,7 @@ export function createApp({ config, store }: AppDeps): express.Express {
    * layer in front saves the round trip for a card replayed in one session.
    * When there is no database, clips are still made, just not kept.
    */
+  const clipKey = (name: string) => createHash('sha256').update(name).digest('hex');
   const speechCache = new Map<string, Uint8Array>();
   const SPEECH_CACHE_LIMIT = 200;
   const rememberClip = (key: string, audio: Uint8Array) => {
@@ -124,13 +127,23 @@ export function createApp({ config, store }: AppDeps): express.Express {
     const key = createHash('sha256')
       .update(speechCacheKey(text, language, speechVoice, speechModel))
       .digest('hex');
+    // A recording that came with the deck is read first, whatever the voice.
+    const recordedKey = clipKey(recordedSpeechKey(text, language));
+    const lookup = (name: string) =>
+      store.getSpeechClip(name).catch((error: unknown) => {
+        if (!(error instanceof StoreUnavailableError)) console.warn('[fluentflow] speech clip lookup failed', error);
+        return null;
+      });
     try {
-      let audio = speechCache.get(key) ?? null;
+      let audio = speechCache.get(recordedKey) ?? speechCache.get(key) ?? null;
       if (!audio) {
-        audio = await store.getSpeechClip(key).catch((error: unknown) => {
-          if (!(error instanceof StoreUnavailableError)) console.warn('[fluentflow] speech clip lookup failed', error);
-          return null;
-        });
+        const recorded = await lookup(recordedKey);
+        if (recorded) {
+          rememberClip(recordedKey, recorded);
+          res.type(audioMimeType(recorded)).send(Buffer.from(recorded));
+          return;
+        }
+        audio = await lookup(key);
       }
       if (!audio) {
         const clip = await synthesizeSpeech(
@@ -144,7 +157,7 @@ export function createApp({ config, store }: AppDeps): express.Express {
         });
       }
       rememberClip(key, audio);
-      res.type('audio/wav').send(Buffer.from(audio));
+      res.type(audioMimeType(audio)).send(Buffer.from(audio));
     } catch (error) {
       const status = (error as { status?: number }).status;
       if (status && status >= 400 && status < 500) {
@@ -302,6 +315,21 @@ export function createApp({ config, store }: AppDeps): express.Express {
   });
 
   /**
+   * Keep a deck's own recordings where read-aloud finds them. A deck without
+   * a database still imports; its cards are just read by Gemini instead.
+   */
+  async function storeRecordings(recordings: { text: string; language: TargetLanguage; audio: Uint8Array }[]) {
+    for (const recording of recordings) {
+      try {
+        await store.putSpeechClip(clipKey(recordedSpeechKey(recording.text, recording.language)), recording.audio);
+      } catch (error) {
+        if (!(error instanceof StoreUnavailableError)) console.warn('[fluentflow] deck recording not stored', error);
+        return;
+      }
+    }
+  }
+
+  /**
    * Import an `.apkg`.
    *
    * The body is the raw archive (`application/octet-stream`); options ride in
@@ -333,6 +361,7 @@ export function createApp({ config, store }: AppDeps): express.Express {
           language,
           flatten: queryString(req, 'flatten') === 'true',
           deckName: queryString(req, 'deckName')?.slice(0, 200),
+          recordings: !dryRun,
         });
 
         const decks: Deck[] = recomputeCardCounts(result.decks, result.cards);
@@ -344,6 +373,7 @@ export function createApp({ config, store }: AppDeps): express.Express {
           const epoch = await store.getEpoch(userId);
           if (!epoch) throw new EpochError(null);
           await store.push(userId, epoch, { decks, cards, reviewEvents: [] });
+          await storeRecordings(result.recordings ?? []);
         }
 
         res.json({ decks, cards, summary: result.summary, stored: !dryRun });
