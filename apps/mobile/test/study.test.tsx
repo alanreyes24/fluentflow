@@ -185,6 +185,32 @@ describe('StudyScreen', () => {
     expect(screen.getByText('1 / 1')).toBeTruthy();
   });
 
+  it('keeps cards on their learning steps when sync echoes this device\'s own answers', async () => {
+    await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
+    const view = await show();
+    await screen.findByText('hablar');
+    expect(screen.getByText('1 / 2')).toBeTruthy();
+
+    // "Again" puts a new card on its first learning step, minutes away, so it
+    // goes back on the end of this session's queue.
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Again' }));
+    await screen.findByText('comer');
+    expect(screen.getByText('2 / 3')).toBeTruthy();
+
+    // The push/pull round trip hands this device its own review back, which
+    // the app reports as a remote change. Nothing was answered elsewhere, so
+    // the learning card must still be waiting at the end of the session.
+    await view.updateState({ remoteChanges: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByText('2 / 3')).toBeTruthy();
+
+    await reveal();
+    await fireEvent.press(screen.getByRole('button', { name: 'Good' }));
+    await screen.findByText('hablar');
+    expect(screen.getByText('3 / 4')).toBeTruthy();
+  });
+
   it('keeps a revealed card on screen when another device answers it', async () => {
     const [first] = await seed([['hablar', 'to speak'], ['comer', 'to eat']]);
     const view = await show();

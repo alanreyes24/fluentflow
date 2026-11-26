@@ -1,6 +1,18 @@
 import type { Card, Deck } from '@fluentflow/core';
 import type { Repository } from '../db/repository';
 
+/** Anki's learn-ahead limit: how early a learning card may be shown again. */
+export const LEARN_AHEAD_MS = 20 * 60 * 1000;
+
+/**
+ * True while a card is still on its (re)learning steps and comes back within
+ * the learn-ahead window, so it belongs at the end of the open session.
+ */
+export function dueWithinSession(card: Pick<Card, 'phase' | 'nextReview'>, now: Date = new Date()): boolean {
+  if (card.phase !== 'learning' && card.phase !== 'relearning') return false;
+  return Date.parse(card.nextReview) - now.getTime() <= LEARN_AHEAD_MS;
+}
+
 /**
  * Bring the unanswered part of a study queue up to date with SQLite.
  *
@@ -13,7 +25,10 @@ import type { Repository } from '../db/repository';
  * The answered part (`queue[0..index)`) is kept as it is, so the session's
  * position and progress read the same. From `index` on, each card is re-read;
  * it stays only while it is still in the deck's study queue — the same one
- * Home counts — and stays as the fresh row, not the snapshot. The card on
+ * Home counts — or is on a learning step inside the learn-ahead window, and
+ * stays as the fresh row, not the snapshot. Without that second rule, a card
+ * rated "again" here and re-queued for later in the session would be dropped
+ * as soon as sync echoed this device's own answer back. The card on
  * screen is kept when `keepCurrent` is set, so an answer being read is not
  * pulled away mid-thought.
  *
@@ -28,12 +43,13 @@ export async function reconcileStudyQueue(
 ): Promise<Card[] | null> {
   const remaining = queue.slice(index);
   if (remaining.length === 0) return null;
+  const now = options.now ?? new Date();
 
   const [latestRows, due] = await Promise.all([
     Promise.all(remaining.map((card) => repository.getCard(card.id))),
     repository.dueCards(
       deck.id,
-      options.now ?? new Date(),
+      now,
       Math.max(200, remaining.length),
       deck.newCardsPerDay,
       deck.maxReviewsPerDay,
@@ -47,7 +63,8 @@ export async function reconcileStudyQueue(
     const latest = latestRows[offset];
     const live = latest && !latest.deleted && !latest.suspended ? latest : null;
     const isCurrent = offset === 0;
-    if (live && (dueIds.has(live.id) || (isCurrent && options.keepCurrent))) {
+    const belongs = live && (dueIds.has(live.id) || dueWithinSession(live, now));
+    if (live && (belongs || (isCurrent && options.keepCurrent))) {
       if (live.lastModified !== card.lastModified) changed = true;
       kept.push(live);
     } else {

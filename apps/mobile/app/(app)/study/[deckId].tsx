@@ -16,7 +16,7 @@ import {
 import { useI18n } from '../../../src/i18n';
 import { normalizeCardFront, normalizedFrontFrom } from '../../../src/ai/card-fronts';
 import { useApp } from '../../../src/state/app';
-import { reconcileStudyQueue } from '../../../src/state/study-session';
+import { dueWithinSession, reconcileStudyQueue } from '../../../src/state/study-session';
 import type { ExampleResult } from '../../../src/ai/service';
 import { lookUpMeanings, lookupSources } from '../../../src/ai/desktop';
 import {
@@ -1319,15 +1319,6 @@ interface SentenceItem {
   word?: string;
   punctuation?: string;
   text?: string;
-}
-
-/** Anki's learn-ahead limit: how early a learning card may be shown again. */
-const LEARN_AHEAD_MS = 20 * 60 * 1000;
-
-/** True while a card is still on its (re)learning steps and will return today. */
-function dueWithinSession(card: Card): boolean {
-  if (card.phase !== 'learning' && card.phase !== 'relearning') return false;
-  return Date.parse(card.nextReview) - Date.now() <= LEARN_AHEAD_MS;
 }
 
 function countQueue(cards: readonly Card[]) {
