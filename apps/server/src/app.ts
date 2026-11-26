@@ -3,6 +3,9 @@ import cors from 'cors';
 import {
   ApkgError,
   chatWithGemini,
+  isSpeechModel,
+  speechCacheKey,
+  synthesizeSpeech,
   validateChatMessages,
   parseApkg,
   recomputeCardCounts,
@@ -87,6 +90,46 @@ export function createApp({ config, store }: AppDeps): express.Express {
       }, messages);
       res.json({ text });
     } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * Read-aloud audio. Clips are kept in memory so replaying a card, or the
+   * next person studying the same sentence, costs nothing; the desktop shell
+   * keeps its own cache on disk.
+   */
+  const speechCache = new Map<string, Uint8Array>();
+  const SPEECH_CACHE_LIMIT = 500;
+  app.post('/api/ai/speech', auth, async (req: AuthedRequest, res: Response, next: NextFunction) => {
+    const { text, language, voice, model } = (req.body ?? {}) as Record<string, unknown>;
+    if (typeof text !== 'string' || !text.trim() || !isTargetLanguage(language)) {
+      res.status(400).json({ message: 'text and language are required.' });
+      return;
+    }
+    const speechModel = isSpeechModel(model) ? model : config.geminiSpeechModel;
+    try {
+      const key = speechCacheKey(text, language, String(voice ?? ''), String(speechModel ?? ''));
+      let audio = speechCache.get(key);
+      if (!audio) {
+        const clip = await synthesizeSpeech(
+          { apiKey: config.geminiApiKey ?? '', model: speechModel, voice: typeof voice === 'string' ? voice : undefined },
+          text,
+          language,
+        );
+        audio = clip.audio;
+        speechCache.set(key, audio);
+        if (speechCache.size > SPEECH_CACHE_LIMIT) {
+          speechCache.delete(speechCache.keys().next().value!);
+        }
+      }
+      res.type('audio/wav').send(Buffer.from(audio));
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status && status >= 400 && status < 500) {
+        res.status(status).json({ message: (error as Error).message });
+        return;
+      }
       next(error);
     }
   });
@@ -268,6 +311,7 @@ export function createApp({ config, store }: AppDeps): express.Express {
           filename,
           language,
           flatten: queryString(req, 'flatten') === 'true',
+          deckName: queryString(req, 'deckName')?.slice(0, 200),
         });
 
         const decks: Deck[] = recomputeCardCounts(result.decks, result.cards);

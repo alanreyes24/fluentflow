@@ -59,7 +59,7 @@ function core() {
  * importing the deck.
  *
  * @param {string} filePath
- * @param {{ userId: string, language?: string, flatten?: boolean }} options
+ * @param {{ userId: string, language?: string, flatten?: boolean, deckName?: string }} options
  */
 async function importApkg(filePath, options) {
   try {
@@ -84,6 +84,7 @@ async function importApkg(filePath, options) {
       filename: path.basename(filePath),
       language: options.language,
       flatten: options.flatten,
+      deckName: options.deckName,
     });
 
     return { ok: true, decks: result.decks, cards: result.cards, summary: result.summary };

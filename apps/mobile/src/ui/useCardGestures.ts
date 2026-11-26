@@ -24,18 +24,21 @@ export interface CardGestureOptions {
   active?: boolean;
   /** Reveal the answer; a tap or Space when the answer is hidden. */
   onReveal: () => void;
+  /** Read the card aloud again; the R key, as in Anki's replay. */
+  onReplay?: () => void;
 }
 
 export function useCardGestures({
   onRate,
   enabled,
   onReveal,
+  onReplay,
   active = true,
 }: CardGestureOptions): CardGestures {
   // The keyboard listener is created once, so the callbacks it closes over
   // have to be read through a ref or they go stale after the first card.
-  const latest = useRef({ onRate, enabled, onReveal, active });
-  latest.current = { onRate, enabled, onReveal, active };
+  const latest = useRef({ onRate, enabled, onReveal, onReplay, active });
+  latest.current = { onRate, enabled, onReveal, onReplay, active };
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -59,6 +62,12 @@ export function useCardGestures({
         if (!canRate) {
           reveal();
         }
+        return;
+      }
+
+      if ((keyboard.key === 'r' || keyboard.key === 'R') && latest.current.onReplay) {
+        event.preventDefault();
+        latest.current.onReplay();
         return;
       }
 

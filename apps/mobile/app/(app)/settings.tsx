@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
-import { LANGUAGE_NAMES, MIN_OPTIMIZE_REVIEWS, SUPPORTED_LANGUAGES, type LanguageCode } from '@fluentflow/core';
+import {
+  LANGUAGE_NAMES,
+  MIN_OPTIMIZE_REVIEWS,
+  SPEECH_VOICES,
+  SUPPORTED_LANGUAGES,
+  type LanguageCode,
+  type SpeechVoice,
+} from '@fluentflow/core';
 import type { FsrsOptimizeOutcome } from '../../src/state/fsrs-optimize';
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
@@ -28,6 +35,21 @@ import {
   useContentStyle,
 } from '../../src/ui/components';
 import { useTheme, useThemeContext, type ThemePreference } from '../../src/ui/theme';
+import {
+  autoReadEnabled,
+  describeVoice,
+  naturalVoice,
+  setAutoReadEnabled,
+  setNaturalVoice,
+  setSpeechEngine,
+  speak,
+  speechEngine,
+  speechSupported,
+  useSpeechVoice,
+  type SpeechEngine,
+} from '../../src/speech';
+import { naturalSpeechReachable } from '../../src/ai/desktop';
+import { requestSpeechBackfill, useSpeechBackfillStatus } from '../../src/state/speech-backfill';
 
 /**
  * Settings: interface language, appearance, where examples come from, and the
@@ -71,6 +93,8 @@ export default function SettingsScreen() {
         </Section>
 
         <ExamplesSection />
+
+        {speechSupported() ? <ReadAloudSection /> : null}
 
         {user ? <FsrsSection /> : null}
 
@@ -418,6 +442,100 @@ function WebBundleUpdates({ bridge }: { bridge: NonNullable<DesktopBridge['webBu
         </>
       ) : null}
     </>
+  );
+}
+
+/** When study cards are spoken, and which installed voice speaks Bosnian. */
+function ReadAloudSection() {
+  const { t } = useI18n();
+  const theme = useTheme();
+  const [auto, setAuto] = useState(autoReadEnabled);
+  const [engine, setEngine] = useState<SpeechEngine>(speechEngine);
+  const [voice, setVoice] = useState<SpeechVoice>(naturalVoice);
+  const bosnian = useSpeechVoice('bs');
+  const spanish = useSpeechVoice('es');
+  const natural = naturalSpeechReachable() && engine === 'natural';
+  const backfill = useSpeechBackfillStatus();
+
+  return (
+    <Section title={t('readAloudSection')}>
+      {naturalSpeechReachable() ? (
+        <>
+          <SegmentedControl
+            options={[
+              { value: 'natural', label: t('readAloudNatural') },
+              { value: 'system', label: t('readAloudSystem') },
+            ]}
+            value={engine}
+            onChange={(value) => {
+              setSpeechEngine(value);
+              setEngine(value);
+              if (value === 'natural') requestSpeechBackfill();
+            }}
+          />
+          <Spacer size={theme.spacing.xs} />
+        </>
+      ) : null}
+      {natural ? (
+        <>
+          <SegmentedControl
+            options={SPEECH_VOICES.map((name) => ({ value: name, label: name }))}
+            value={voice}
+            onChange={(value) => {
+              setNaturalVoice(value);
+              setVoice(value);
+              requestSpeechBackfill();
+            }}
+          />
+          <Label variant="caption" tone="faint">
+            {t('readAloudNaturalHint')} {t('readAloudVoiceCost')}
+          </Label>
+          {backfill && backfill.total > 0 ? (
+            <Label variant="caption" tone={backfill.error && !backfill.running ? 'danger' : 'muted'}>
+              {backfill.resumesAt
+                ? t('readAloudProgressDaily', {
+                    ready: String(backfill.ready),
+                    total: String(backfill.total),
+                    time: new Date(backfill.resumesAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+                  })
+                : backfill.error && !backfill.running
+                ? t('readAloudProgressError', { error: backfill.error })
+                : backfill.ready >= backfill.total
+                  ? t('readAloudProgressDone', { total: String(backfill.total) })
+                  : t('readAloudProgress', { ready: String(backfill.ready), total: String(backfill.total) })}
+            </Label>
+          ) : null}
+          <Spacer size={theme.spacing.xs} />
+        </>
+      ) : null}
+      <SegmentedControl
+        options={[
+          { value: 'manual', label: t('readAloudManual') },
+          { value: 'auto', label: t('readAloudAuto') },
+        ]}
+        value={auto ? 'auto' : 'manual'}
+        onChange={(value) => {
+          const enabled = value === 'auto';
+          setAutoReadEnabled(enabled);
+          setAuto(enabled);
+        }}
+      />
+      <Spacer size={theme.spacing.xs} />
+      {natural
+        ? null
+        : ([['bs', bosnian], ['es', spanish]] as const).map(([code, systemVoice]) => (
+            <Label key={code} variant="caption" tone={systemVoice ? 'muted' : 'faint'}>
+              {systemVoice
+                ? t('readAloudVoice', { language: LANGUAGE_NAMES[code], voice: describeVoice(systemVoice) })
+                : t('readAloudNoVoice', { language: LANGUAGE_NAMES[code] })}
+            </Label>
+          ))}
+      <Button
+        label={t('readAloudSample')}
+        variant="ghost"
+        onPress={() => speak('Baš ti hvala. Gdje je najbliža apoteka?', 'bs')}
+      />
+    </Section>
   );
 }
 

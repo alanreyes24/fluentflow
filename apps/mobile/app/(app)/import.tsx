@@ -15,6 +15,7 @@ import { onShellImport } from '../../src/desktop-import';
 import { canImportLocally } from '../../src/desktop';
 import {
   Button,
+  Field,
   Label,
   Loading,
   Screen,
@@ -52,6 +53,7 @@ export function AnkiImportPanel({ embedded = false }: { embedded?: boolean }) {
   const [file, setFile] = useState<PickedFile | null>(null);
   const [language, setLanguage] = useState<TargetLanguage | null>(null);
   const [flatten, setFlatten] = useState(false);
+  const [deckName, setDeckName] = useState('');
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<ApkgImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +95,7 @@ export function AnkiImportPanel({ embedded = false }: { embedded?: boolean }) {
         userId: user.id,
         language: language ?? undefined,
         flatten,
+        deckName: deckName.trim() || undefined,
       });
       setSummary(result.summary);
       await refreshDecks();
@@ -154,11 +157,22 @@ export function AnkiImportPanel({ embedded = false }: { embedded?: boolean }) {
                 onChange={(value) => setLanguage(value === 'auto' ? null : value)}
               />
 
-              <Button
-                label={flatten ? 'Subdecks: merged into one' : 'Subdecks: kept separate'}
-                variant="ghost"
-                onPress={() => setFlatten(!flatten)}
+              <Field
+                label={t('importDeckName')}
+                hint={t('importDeckNameHint')}
+                value={deckName}
+                onChangeText={setDeckName}
+                editable={!busy}
+                maxLength={200}
               />
+
+              {deckName.trim() ? null : (
+                <Button
+                  label={flatten ? 'Subdecks: merged into one' : 'Subdecks: kept separate'}
+                  variant="ghost"
+                  onPress={() => setFlatten(!flatten)}
+                />
+              )}
             </Surface>
 
             <Spacer size={theme.spacing.md} />

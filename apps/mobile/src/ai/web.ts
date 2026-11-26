@@ -72,6 +72,23 @@ async function request(path: string, init: RequestInit): Promise<any> {
   return body;
 }
 
+/** Read-aloud audio from the server's Gemini proxy, as WAV bytes. */
+export async function speechOnWeb(text: string, language: TargetLanguage, voice?: string): Promise<Uint8Array> {
+  const base = appConfig.apiBaseUrl;
+  if (!webAiAvailable() || !base) throw new Error('The AI server is not configured.');
+  const token = (await authApi()?.idToken()) ?? 'local:local-user';
+  const response = await fetch(`${base}/api/ai/speech`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify({ text, language, voice }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.message ?? `Read-aloud failed (HTTP ${response.status}).`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
 export async function chatOnWeb(messages: import('@fluentflow/core').ChatMessage[]): Promise<string> {
   const result = await request('/api/ai/chat', {
     method: 'POST', body: JSON.stringify({ messages }),

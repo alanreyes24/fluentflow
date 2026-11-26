@@ -291,6 +291,8 @@ function applyContentSecurityPolicy() {
             // react-native-web injects styles at runtime.
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' data: blob:",
+            // Read-aloud clips play from blob URLs made from the shell's audio.
+            "media-src 'self' blob: data:",
             "font-src 'self' data:",
             // wa-sqlite runs in a worker instantiated from a blob URL.
             "worker-src 'self' blob:",
@@ -379,6 +381,7 @@ function registerImportHandlers() {
       userId: String(request?.userId ?? ''),
       language: request?.language || undefined,
       flatten: request?.flatten === true,
+      deckName: typeof request?.deckName === 'string' ? request.deckName.slice(0, 200) : undefined,
     });
   });
 
@@ -549,6 +552,32 @@ function registerAiHandlers() {
       return { ok: false, error: error.message };
     }
   });
+
+  ipcMain.handle('ai:speech', async (_event, request) => {
+    const { text, language, voice } = request ?? {};
+    if (typeof text !== 'string' || !text.trim() || text.length > 600 || (language !== 'bs' && language !== 'es')) {
+      return { ok: false, error: 'Nothing to read aloud.' };
+    }
+    try {
+      return { ok: true, audio: await ai.speech({ text, language, voice: typeof voice === 'string' ? voice : undefined }) };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('ai:speech:prepare', async (event, request) => {
+    const items = Array.isArray(request?.items) ? request.items.slice(0, 50_000) : [];
+    const voice = typeof request?.voice === 'string' ? request.voice : undefined;
+    const sender = event.sender;
+    try {
+      return await ai.prepareSpeech(items, voice, (status) => {
+        if (!sender.isDestroyed()) sender.send('ai:speech:progress', status);
+      });
+    } catch (error) {
+      return { total: 0, ready: 0, failed: 0, remaining: 0, running: false, error: error.message };
+    }
+  });
+  ipcMain.handle('ai:speech:status', () => ai.backfillStatus());
 
   ipcMain.handle('ai:resolve', async (event, request) => {
     const { words, language, useModel } = request ?? {};

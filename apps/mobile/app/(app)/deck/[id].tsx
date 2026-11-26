@@ -12,6 +12,9 @@ import {
   type StudyQueue,
 } from '@fluentflow/core';
 import { useI18n } from '../../../src/i18n';
+import { deckAudioEnabled, setDeckAudioEnabled } from '../../../src/speech';
+import { speechBackfillSupported } from '../../../src/ai/desktop';
+import { requestSpeechBackfill } from '../../../src/state/speech-backfill';
 import { normalizeCardFront } from '../../../src/ai/card-fronts';
 import { useApp } from '../../../src/state/app';
 import { CardForm } from '../../../src/ui/CardForm';
@@ -48,6 +51,7 @@ export default function DeckScreen() {
   const { repository, user, refreshDecks } = useApp();
 
   const [deck, setDeck] = useState<Deck | null>(null);
+  const [audioOn, setAudioOn] = useState(() => (typeof id === 'string' ? deckAudioEnabled(id) : true));
   const [cards, setCards] = useState<Card[]>([]);
   const [progress, setProgress] = useState<DeckProgress | null>(null);
   const [today, setToday] = useState<StudyQueue | null>(null);
@@ -449,6 +453,22 @@ export default function DeckScreen() {
                   void repository.setStudyPresentation(deck, { showRelatedWords: value }).then((updated) => setDeck(updated));
                 }}
               />
+              {speechBackfillSupported() ? (
+                <>
+                  <ToggleRow
+                    label={t('deckAudio')}
+                    value={audioOn}
+                    onChange={(value) => {
+                      setDeckAudioEnabled(deck.id, value);
+                      setAudioOn(value);
+                      if (value) requestSpeechBackfill();
+                    }}
+                  />
+                  <Label variant="caption" tone="faint">
+                    {t('deckAudioHint')}
+                  </Label>
+                </>
+              ) : null}
             </Surface>
 
             <Spacer size={theme.spacing.md} />

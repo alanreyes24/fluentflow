@@ -65,6 +65,7 @@ export interface DesktopBridge {
     userId: string;
     language?: TargetLanguage;
     flatten?: boolean;
+    deckName?: string;
   }): Promise<DesktopImportResult>;
   /**
    * Import requests from outside the page: the File menu, a dropped file, or a

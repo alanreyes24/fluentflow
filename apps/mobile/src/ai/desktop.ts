@@ -5,7 +5,7 @@ import type {
   ResolvedMeaning,
   TargetLanguage,
 } from '@fluentflow/core';
-import { webAiAvailable, lookupSourcesOnWeb, resolveMeaningsOnWeb, chatOnWeb } from './web';
+import { webAiAvailable, lookupSourcesOnWeb, resolveMeaningsOnWeb, chatOnWeb, speechOnWeb } from './web';
 
 /**
  * The desktop shell's lookup bridge, as the app sees it.
@@ -107,6 +107,17 @@ interface DesktopBridge {
   platform: string;
   ai?: {
     chat?(messages: ChatMessage[]): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+    /** Optional: absent on a shell built before read-aloud existed. */
+    speech?(request: { text: string; language: TargetLanguage; voice?: string }): Promise<
+      { ok: true; audio: Uint8Array } | { ok: false; error: string }
+    >;
+    /** Optional: background audio for the whole collection. */
+    prepareSpeech?(request: {
+      items: { text: string; language: TargetLanguage }[];
+      voice?: string;
+    }): Promise<SpeechBackfillStatus>;
+    speechStatus?(): Promise<SpeechBackfillStatus>;
+    onSpeechProgress?(listener: (status: SpeechBackfillStatus) => void): () => void;
     status(): Promise<LookupSources>;
     resolve(
       words: string[],
@@ -273,6 +284,58 @@ export async function generateExamplesOnDesktop(
   } finally {
     signal?.removeEventListener('abort', cancel);
   }
+}
+
+/** Where the shell's background audio run stands. */
+export interface SpeechBackfillStatus {
+  /** Distinct clips the collection needs. */
+  total: number;
+  /** Of those, how many are on disk. */
+  ready: number;
+  failed: number;
+  remaining: number;
+  running: boolean;
+  error: string | null;
+  /** Set while Gemini's daily request cap is used up: when the run resumes. */
+  resumesAt?: string | null;
+}
+
+/** Whether this shell can make audio for a whole collection in the background. */
+export function speechBackfillSupported(): boolean {
+  return Boolean(bridge()?.prepareSpeech);
+}
+
+export async function prepareSpeechForCards(
+  items: { text: string; language: TargetLanguage }[],
+  voice?: string,
+): Promise<SpeechBackfillStatus | null> {
+  const ai = bridge();
+  return ai?.prepareSpeech ? ai.prepareSpeech({ items, voice }) : null;
+}
+
+export async function speechBackfillStatus(): Promise<SpeechBackfillStatus | null> {
+  return (await bridge()?.speechStatus?.()) ?? null;
+}
+
+export function onSpeechBackfillProgress(listener: (status: SpeechBackfillStatus) => void): () => void {
+  return bridge()?.onSpeechProgress?.(listener) ?? (() => undefined);
+}
+
+/** Whether this build can ask Gemini for read-aloud audio at all. */
+export function naturalSpeechReachable(): boolean {
+  return Boolean(bridge()?.speech) || webAiAvailable();
+}
+
+/** One card's read-aloud clip, as WAV bytes, from the shell or the AI server. */
+export async function fetchSpeech(text: string, language: TargetLanguage, voice?: string): Promise<Uint8Array> {
+  const ai = bridge();
+  if (ai?.speech) {
+    const result = await ai.speech({ text, language, voice });
+    if (!result.ok) throw new Error(result.error);
+    return result.audio;
+  }
+  if (webAiAvailable()) return speechOnWeb(text, language, voice);
+  throw new Error('Natural read-aloud needs the desktop app or the AI server.');
 }
 
 export async function sendChat(messages: ChatMessage[]): Promise<string> {

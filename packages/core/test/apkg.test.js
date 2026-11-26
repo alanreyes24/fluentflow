@@ -365,3 +365,87 @@ test('an opener that skips the collation repair degrades to positional mapping',
   assert.equal(cards[0].back, 'the table');
   assert.match(summary.warnings.join(' '), /mapped by position/);
 });
+
+test('a sentence deck maps Sentence to the front and keeps Anki\'s new-card order', async () => {
+  // The field layout of AnkiWeb's "Bosnian Sentences" deck (1159030937).
+  const fieldNames = [
+    'Sentence', 'Sentence (English)', 'Sentence (Search Field)', 'Language Code', 'Language', '[1]', '[2]',
+  ];
+  const sentence = (bs, en) => [bs, en, bs, 'bs', 'Serbo-Croatian', '', ''];
+  const apkg = buildApkg({
+    schema: 11,
+    decks: ['Bosnian Sentences'],
+    noteTypeName: 'Sentences',
+    fieldNames,
+    // Stored out of order: Anki's new-card position, not the note id, is the
+    // easiest-to-hardest order the deck was published in.
+    notes: [
+      { fields: sentence('Gdje je najbliža apoteka?', 'Where is the nearest pharmacy?'), due: 2 },
+      { fields: sentence('Baš ti hvala.', 'Thank you very much.'), due: 0 },
+      { fields: sentence('Idem.', "I'm going."), due: 1 },
+      {
+        fields: [
+          'Ovo je samo početak. <br> To je samo početak.', 'This is just the beginning.',
+          'Ovo je samo početak.  /  To je samo početak.', 'bs', 'Serbo-Croatian', '', '',
+        ],
+        due: 3,
+      },
+    ],
+  });
+
+  const { cards, decks, summary } = await parseApkg(apkg, base);
+
+  assert.deepEqual(summary.positionalNoteTypes, []);
+  assert.equal(decks[0].language, 'bs');
+  assert.deepEqual(
+    cards.map((card) => [card.front, card.back]),
+    [
+      ['Baš ti hvala.', 'Thank you very much.'],
+      ['Idem.', "I'm going."],
+      ['Gdje je najbliža apoteka?', 'Where is the nearest pharmacy?'],
+      // Alternative phrasings stay apart rather than reading as one sentence.
+      ['Ovo je samo početak. / To je samo početak.', 'This is just the beginning.'],
+    ],
+  );
+  // The search-field copy of the sentence is not an example of itself.
+  assert.ok(cards.every((card) => card.examples.length === 0));
+  // The sentence already is the example, so the deck does not ask for more.
+  assert.equal(decks[0].showExamples, false);
+});
+
+test('vocabulary decks with an example Sentence field keep the word on the front', async () => {
+  const apkg = buildApkg({
+    schema: 11,
+    decks: ['Spanish'],
+    fieldNames: ['Word', 'Meaning', 'Sentence'],
+    notes: [{ fields: ['hablar', 'to speak', 'Ella habla español.'] }],
+  });
+
+  const { cards, decks } = await parseApkg(apkg, base);
+
+  assert.equal(cards[0].front, 'hablar');
+  assert.deepEqual(cards[0].examples, ['Ella habla español.']);
+  assert.equal(decks[0].showExamples, true);
+});
+
+test('a chosen deck name puts every card in one new deck of that name', async () => {
+  const apkg = buildApkg({
+    schema: 18,
+    decks: ['Bosnian', 'Bosnian::Level 2'],
+    fieldNames: ['Front', 'Back'],
+    notes: [
+      { fields: ['kuća', 'house'] },
+      { fields: ['voda', 'water'], deck: 'Bosnian::Level 2' },
+    ],
+  });
+
+  const plain = await parseApkg(apkg, base);
+  const named = await parseApkg(apkg, { ...base, deckName: '  Bosnian sentences ' });
+
+  assert.equal(named.decks.length, 1);
+  assert.equal(named.decks[0].name, 'Bosnian sentences');
+  assert.equal(named.decks[0].language, 'bs');
+  assert.ok(named.cards.every((card) => card.deckId === named.decks[0].id));
+  // A different name is a different deck, never the one called "Bosnian".
+  assert.ok(!plain.decks.some((deck) => deck.id === named.decks[0].id));
+});

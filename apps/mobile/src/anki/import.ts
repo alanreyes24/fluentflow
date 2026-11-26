@@ -87,6 +87,8 @@ export interface ImportOptions {
   userId: string;
   language?: TargetLanguage;
   flatten?: boolean;
+  /** Import everything into one new deck with this name. */
+  deckName?: string;
   /**
    * Force the sync server. Required in a browser tab, where there is neither a
    * native SQLite nor a desktop shell to borrow one from.
@@ -215,6 +217,7 @@ async function parse(file: PickedFile, options: ImportOptions): Promise<ApkgImpo
         filename: file.name,
         language: options.language,
         flatten: options.flatten,
+        deckName: options.deckName,
       });
 }
 
@@ -237,6 +240,7 @@ async function importViaShell(
     userId: options.userId,
     language: options.language,
     flatten: options.flatten,
+    deckName: options.deckName,
   });
 
   if (!result.ok) {
@@ -307,6 +311,7 @@ async function importViaServer(
   const params = new URLSearchParams({ filename, dryRun: 'true' });
   if (options.language) params.set('language', options.language);
   if (options.flatten) params.set('flatten', 'true');
+  if (options.deckName?.trim()) params.set('deckName', options.deckName.trim());
 
   // The endpoint requires a bearer token and decides the owning account from
   // it, so the token is fetched here rather than accepted from the caller —

@@ -64,7 +64,7 @@ export async function normalizeCards(cards: Card[]): Promise<NormalizedCardsResu
   for (const language of ['es', 'bs'] as const) {
     if (!dictionaryAvailableFor(sources.dictionary, language)) continue;
     const languageIndexes = cards
-      .map((card, index) => (card.language === language ? index : -1))
+      .map((card, index) => (card.language === language && !isSentence(card.front) ? index : -1))
       .filter((index) => index >= 0);
 
     for (let offset = 0; offset < languageIndexes.length; offset += LOOKUP_BATCH_SIZE) {
@@ -127,6 +127,14 @@ export async function normalizeExistingCards(
     await repository.updateCard(card, { front: card.front });
   }
   return result.summary;
+}
+
+/**
+ * Sentence cards are left as written. A one-word sentence such as "Idem." is
+ * still a sentence, and turning it into "ići" would wreck a sentence deck.
+ */
+function isSentence(front: string): boolean {
+  return /[.!?…]["'”’»)]*$/.test(front.trim());
 }
 
 function isPointerMeaning(value: string): boolean {
