@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react-native';
-import { collectionDayKey, type Deck } from '@fluentflow/core';
+import { addCollectionDays, collectionDayKey, dayToDate, type Deck } from '@fluentflow/core';
 import DecksScreen from '../app/(app)/decks';
 import DeckScreen from '../app/(app)/deck/[id]';
 import NewDeckScreen from '../app/(app)/new-deck';
@@ -138,9 +138,10 @@ describe('DecksScreen', () => {
   it('shows the streak at the top of the deck screen', async () => {
     const deck = await repository.createDeck(TEST_USER.id, 'Spanish', 'es');
     const subject = await repository.addCard(TEST_USER.id, deck, 'hablar', 'to speak');
-    const date = new Date();
-    date.setHours(12, 0, 0, 0);
-    date.setDate(date.getDate() - 1);
+    // Noon of the previous *study* day. The app's day starts at 4am (Anki's
+    // collection day), so between midnight and 4am the calendar's yesterday
+    // is still today and the streak would read 1.
+    const date = dayToDate(addCollectionDays(collectionDayKey(), -1));
     await repository.rateCard(subject, 'good', date);
     await repository.rateCard(subject, 'good');
     const [stored] = await repository.listDecks(TEST_USER.id);
