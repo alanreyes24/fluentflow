@@ -63,24 +63,18 @@ describe('DecksScreen', () => {
     expect(screen.getByRole('button', { name: 'Add cards' })).toBeTruthy();
   });
 
-  it('opens on the words waiting in the busiest deck', async () => {
+  it('starts on the busiest deck', async () => {
     const small = await repository.createDeck(TEST_USER.id, 'Spanish', 'es');
     await repository.addCard(TEST_USER.id, small, 'hablar', 'to speak');
     const big = await repository.createDeck(TEST_USER.id, 'Bosnian', 'bs');
     await repository.addCard(TEST_USER.id, big, 'kuća', 'house');
     await repository.addCard(TEST_USER.id, big, 'voda', 'water');
-    // A sentence front would turn the wall into a paragraph, so it is left out.
-    await repository.addCard(TEST_USER.id, big, 'Gdje je najbliža autobusna stanica?', 'Where is the nearest bus stop?');
     const stored = await repository.listDecks(TEST_USER.id);
 
     await renderScreen(<DecksScreen />, { repository, decks: stored });
 
-    expect(await screen.findByText('4 cards waiting')).toBeTruthy();
+    expect(await screen.findByText('3 cards waiting')).toBeTruthy();
     expect(screen.getByText('About 1 min. First up: Bosnian')).toBeTruthy();
-    expect(screen.getByText('kuća')).toBeTruthy();
-    expect(screen.getByText('voda')).toBeTruthy();
-    expect(screen.queryByText('hablar')).toBeNull();
-    expect(screen.queryByText('Gdje je najbliža autobusna stanica?')).toBeNull();
 
     await fireEvent.press(screen.getByRole('button', { name: 'Start studying' }));
     expect(mockRouter.push).toHaveBeenCalledWith({

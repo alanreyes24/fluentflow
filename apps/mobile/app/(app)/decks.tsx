@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
   LANGUAGE_NAMES,
@@ -31,11 +31,8 @@ import { useLayout, useTheme } from '../../src/ui/theme';
 /**
  * The home screen: what is waiting today, and the decks it comes from.
  *
- * The screen opens on the words themselves. The cards next in the queue are
- * set large, like dictionary headwords, fading the further back in the queue
- * they are, with one button under them that starts on exactly those cards.
- * The count is a sentence above them rather than a big number, because the
- * words say more about the next few minutes than a total does.
+ * The top is one sentence about what is owed, how long it should take and
+ * which deck it starts with, and the one button that starts on it.
  *
  * Below that the decks are rows, not tiles: each one is a name, how far
  * along it is and what it owes today, read across in one line. The streak,
@@ -78,7 +75,6 @@ export default function DecksScreen() {
           due: queue.cards.length,
           pendingLearning: queue.pendingLearning,
           nextLearningAt: queue.nextLearningAt,
-          upcoming: queue.cards.slice(0, 40).map((card) => card.front),
         }] as const;
       }),
     );
@@ -139,8 +135,7 @@ export default function DecksScreen() {
   }, [nextLearningAt, loadProgress]);
 
   // The deck with the most waiting is where "Start studying" goes: one press
-  // from opening the app to the first card. Its queue is also the one the
-  // words at the top come from, so what is shown is what will be asked.
+  // from opening the app to the first card.
   const busiest = decks
     .map((deck) => ({ deck, due: progress[deck.id]?.due ?? 0 }))
     .filter((entry) => entry.due > 0)
@@ -176,7 +171,6 @@ export default function DecksScreen() {
               pendingLearning={totals.pendingLearning}
               cards={totals.cards}
               first={busiest}
-              words={busiest ? progress[busiest.id]?.upcoming ?? [] : []}
               onStart={busiest ? () => router.push({
                 pathname: '/(app)/study/[deckId]',
                 params: { deckId: busiest.id, ahead: '0' },
@@ -219,29 +213,11 @@ const SIDE_WIDTH = 288;
 const SIDE_GAP = 56;
 
 /**
- * Headwords: an old-style serif, the face of a dictionary entry or a primer.
- * Only the target-language words are set in it, so it marks them as the
- * thing being learned against the interface's sans. All three named faces
- * ship with macOS; Georgia covers Windows.
- */
-const HEADWORD_FONT = '"Iowan Old Style", Charter, "Palatino Linotype", Palatino, Georgia, serif';
-
-/** The longest front that still reads as a word or short phrase in the wall. */
-const MAX_WORD_LENGTH = 26;
-/**
- * How many letters the wall holds in all: about three lines at the wide size.
- * Counted in letters rather than words because a phrase deck ("rapar al
- * cero") fills a line twice as fast as a deck of single words.
- */
-const WALL_LETTERS = 90;
-const MAX_WORDS = 12;
-
-/**
- * The top of the screen: the date, one sentence about what is waiting, the
- * words themselves, and the button that starts on them.
+ * The top of the screen: the date, one sentence about what is waiting, and
+ * the button that starts on it.
  *
  * When nothing is owed it says so plainly rather than showing a zero, which
- * reads as an error, and there are no words to show.
+ * reads as an error.
  */
 function Hero({
   date,
@@ -250,7 +226,6 @@ function Hero({
   pendingLearning,
   cards,
   first,
-  words,
   onStart,
 }: {
   date: string;
@@ -259,7 +234,6 @@ function Hero({
   pendingLearning: number;
   cards: number;
   first?: Deck;
-  words: string[];
   onStart?: () => void;
 }) {
   const { t } = useI18n();
@@ -287,17 +261,6 @@ function Hero({
           ? t('learningPendingHint')
           : t('allCaughtUpHint');
 
-  // Sentence decks would turn the wall into a paragraph, so only fronts short
-  // enough to read as a word or phrase go in, de-duplicated in queue order.
-  const shown: string[] = [];
-  let letters = 0;
-  for (const word of new Set(words.map((front) => front.trim()))) {
-    if (word.length === 0 || word.length > MAX_WORD_LENGTH) continue;
-    if (shown.length >= MAX_WORDS || letters + word.length > WALL_LETTERS) break;
-    shown.push(word);
-    letters += word.length;
-  }
-
   return (
     <View style={[styles.hero, wide ? styles.heroWide : null]}>
       <Label variant="caption" tone="muted">{date}</Label>
@@ -305,8 +268,6 @@ function Hero({
         {headline}
       </Label>
       {detail ? <Label variant="body" tone="muted" style={styles.detail}>{detail}</Label> : null}
-
-      {shown.length > 0 ? <WordWall words={shown} /> : null}
 
       {onStart ? (
         <Button
@@ -316,39 +277,6 @@ function Hero({
           style={compact ? styles.startFull : styles.start}
         />
       ) : null}
-    </View>
-  );
-}
-
-/**
- * The next words in the queue, in the order they will be asked.
- *
- * Each one is a step fainter than the one before, so the wall reads as a
- * queue that recedes rather than a tag cloud. Announced as one list.
- */
-function WordWall({ words }: { words: string[] }) {
-  const { t } = useI18n();
-  const theme = useTheme();
-  const { wide } = useLayout();
-
-  return (
-    <View
-      accessible
-      accessibilityLabel={`${t('wordsInQueue')}: ${words.join(', ')}`}
-      style={[styles.wall, wide ? styles.wallWide : null]}
-    >
-      {words.map((word, index) => (
-        <Text
-          key={word}
-          style={[
-            styles.word,
-            wide ? styles.wordWide : null,
-            { color: theme.colors.text, opacity: Math.max(0.2, 1 - index * 0.075) },
-          ]}
-        >
-          {word}
-        </Text>
-      ))}
     </View>
   );
 }
@@ -396,11 +324,7 @@ function Numbers({
   );
 }
 
-type DeckStudyProgress = DeckProgress &
-  Pick<StudyQueue, 'pendingLearning' | 'nextLearningAt'> & {
-    /** Fronts of the cards in today's queue, in the order they will be asked. */
-    upcoming: string[];
-  };
+type DeckStudyProgress = DeckProgress & Pick<StudyQueue, 'pendingLearning' | 'nextLearningAt'>;
 
 /**
  * One deck, read across: which language, its name, how far along it is, what
@@ -536,26 +460,8 @@ const styles = StyleSheet.create({
   heroWide: { paddingTop: 24 },
   headlineWide: { fontSize: 34, lineHeight: 40, letterSpacing: -0.6 },
   detail: { maxWidth: 560 },
-  wall: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    columnGap: 20,
-    rowGap: 2,
-    marginTop: 24,
-    marginBottom: 4,
-    maxWidth: 880,
-  },
-  wallWide: { columnGap: 28, marginTop: 32, marginBottom: 8 },
-  word: {
-    fontFamily: HEADWORD_FONT,
-    fontSize: 30,
-    lineHeight: 40,
-    fontWeight: '600',
-    letterSpacing: -0.3,
-  },
-  wordWide: { fontSize: 42, lineHeight: 54, letterSpacing: -0.6 },
-  start: { alignSelf: 'flex-start', minWidth: 200, marginTop: 18 },
-  startFull: { width: '100%', marginTop: 18 },
+  start: { alignSelf: 'flex-start', minWidth: 200, marginTop: 20 },
+  startFull: { width: '100%', marginTop: 20 },
   body: { marginTop: 56, gap: 40 },
   bodySide: { flexDirection: 'row', alignItems: 'flex-start', gap: SIDE_GAP },
   main: { flex: 1, minWidth: 0 },
