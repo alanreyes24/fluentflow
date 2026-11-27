@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import {
   LANGUAGE_NAMES,
@@ -15,7 +15,6 @@ import {
 import { useI18n } from '../../src/i18n';
 import { useApp } from '../../src/state/app';
 import {
-  Badge,
   Button,
   EmptyState,
   Label,
@@ -23,29 +22,34 @@ import {
   ProgressBar,
   Row,
   Screen,
-  Surface,
   useContentStyle,
 } from '../../src/ui/components';
-import { Icon, type IconName } from '../../src/ui/Icon';
+import { Icon } from '../../src/ui/Icon';
 import { StreakCard } from '../../src/ui/Streak';
 import { useLayout, useTheme } from '../../src/ui/theme';
 
 /**
- * The deck list, and the home screen in practice.
+ * The home screen: what is waiting today, and the decks it comes from.
  *
- * The due count is the only number that drives a decision here, so it gets the
- * accent treatment while totals stay muted.
+ * The screen opens on the words themselves. The cards next in the queue are
+ * set large, like dictionary headwords, fading the further back in the queue
+ * they are, with one button under them that starts on exactly those cards.
+ * The count is a sentence above them rather than a big number, because the
+ * words say more about the next few minutes than a total does.
  *
- * Top to bottom: what is due and one button to start on it, a strip of the
- * numbers that say how it is going, then the decks. The study calendar takes
- * a rail beside the decks when the window is wide enough to spare one, and
- * follows them down the page when it is not.
+ * Below that the decks are rows, not tiles: each one is a name, how far
+ * along it is and what it owes today, read across in one line. The streak,
+ * the month and three running numbers take a narrow column beside the decks
+ * when the window has room for it and follow them down the page when not.
+ *
+ * There is no sidebar; navigation is the bar across the top of the window
+ * (see `BottomBar.tsx`).
  */
 export default function DecksScreen() {
   const { t } = useI18n();
   const theme = useTheme();
   const { wide, paneWidth } = useLayout();
-  const content = useContentStyle({ maxWidth: 1180 });
+  const content = useContentStyle({ maxWidth: CONTENT_WIDTH });
   const { decks, repository, user, refreshDecks } = useApp();
 
   const [progress, setProgress] = useState<Record<string, DeckStudyProgress>>({});
@@ -74,6 +78,7 @@ export default function DecksScreen() {
           due: queue.cards.length,
           pendingLearning: queue.pendingLearning,
           nextLearningAt: queue.nextLearningAt,
+          upcoming: queue.cards.slice(0, 40).map((card) => card.front),
         }] as const;
       }),
     );
@@ -134,87 +139,71 @@ export default function DecksScreen() {
   }, [nextLearningAt, loadProgress]);
 
   // The deck with the most waiting is where "Start studying" goes: one press
-  // from opening the app to the first card.
+  // from opening the app to the first card. Its queue is also the one the
+  // words at the top come from, so what is shown is what will be asked.
   const busiest = decks
     .map((deck) => ({ deck, due: progress[deck.id]?.due ?? 0 }))
     .filter((entry) => entry.due > 0)
     .sort((a, b) => b.due - a.due)[0]?.deck;
 
-  // The calendar earns a rail of its own only when the decks beside it still
-  // get two columns; otherwise it follows them down the page.
-  const rail = paneWidth >= 1000 && Boolean(streakData) && decks.length > 0;
-  const mainWidth = Math.min(paneWidth, 1180) - (wide ? 48 : 32) - (rail ? RAIL_WIDTH + theme.spacing.lg : 0);
-  const deckColumns = mainWidth >= 620 ? 2 : 1;
+  // The side column earns its place only when the decks beside it still get
+  // a full-width row; otherwise it follows them down the page.
+  const side = paneWidth >= 1040 && Boolean(streakData) && decks.length > 0;
+  const mainWidth =
+    Math.min(paneWidth, CONTENT_WIDTH) - (wide ? 48 : 32) - (side ? SIDE_WIDTH + SIDE_GAP : 0);
+  const rowsWide = mainWidth >= 640;
   const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
     <Screen>
       <ScrollView contentContainerStyle={content}>
-        <PageHeader overline={dateLabel} title={t('today')} />
-
         {decks.length === 0 ? (
-          <EmptyState
-            icon="layers"
-            title={t('noDecksYet')}
-            hint={t('noDecksHint')}
-            action={<Button label={t('newDeck')} icon="plus" onPress={() => router.push('/(app)/new-deck')} />}
-          />
+          <>
+            <PageHeader title={t('today')} subtitle={dateLabel} />
+            <EmptyState
+              icon="layers"
+              title={t('noDecksYet')}
+              hint={t('noDecksHint')}
+              action={<Button label={t('newDeck')} icon="plus" onPress={() => router.push('/(app)/new-deck')} />}
+            />
+          </>
         ) : (
           <>
-            {progressReady ? (
-              <Hero
-                due={totals.due}
-                pendingLearning={totals.pendingLearning}
-                cards={totals.cards}
-                onStart={busiest ? () => router.push({
-                  pathname: '/(app)/study/[deckId]',
-                  params: { deckId: busiest.id, ahead: '0' },
-                }) : undefined}
-              />
-            ) : null}
+            <Hero
+              date={dateLabel}
+              ready={progressReady}
+              due={totals.due}
+              pendingLearning={totals.pendingLearning}
+              cards={totals.cards}
+              first={busiest}
+              words={busiest ? progress[busiest.id]?.upcoming ?? [] : []}
+              onStart={busiest ? () => router.push({
+                pathname: '/(app)/study/[deckId]',
+                params: { deckId: busiest.id, ahead: '0' },
+              }) : undefined}
+            />
 
-            {streakData ? (
-              <StatStrip
-                streak={streakData.streak.current}
-                days={streakData.days}
-                forecast={streakData.forecast}
-                today={streakData.today}
-              />
-            ) : null}
-
-            <View style={[styles.body, rail ? styles.bodyRail : null]}>
+            <View style={[styles.body, side ? styles.bodySide : null]}>
               <View style={styles.main}>
-                <View style={styles.sectionHead}>
-                  <Row gap={theme.spacing.sm} style={styles.grow}>
-                    <Label variant="heading" accessibilityRole="header">{t('yourDecks')}</Label>
-                    <Badge tone="plain">{decks.length}</Badge>
-                  </Row>
-                  <Button
-                    label={t('newDeck')}
-                    icon="plus"
-                    variant="ghost"
-                    size="small"
-                    onPress={() => router.push('/(app)/new-deck')}
-                  />
-                </View>
-                <View style={styles.grid}>
+                <Label variant="heading" accessibilityRole="header" style={styles.sectionTitle}>
+                  {t('yourDecks')}
+                </Label>
+                <View style={[styles.rows, { borderTopColor: theme.colors.divider }]}>
                   {decks.map((deck) => (
-                    <View key={deck.id} style={deckColumns === 2 ? styles.gridHalf : styles.gridFull}>
-                      <DeckCard deck={deck} progress={progress[deck.id]} />
-                    </View>
+                    <DeckRow key={deck.id} deck={deck} progress={progress[deck.id]} wide={rowsWide} />
                   ))}
                 </View>
               </View>
 
               {streakData ? (
-                <View style={rail ? styles.rail : styles.below}>
-                  <Surface style={styles.calendarCard}>
-                    <StreakCard
-                      streak={streakData.streak}
-                      days={streakData.days}
-                      today={streakData.today}
-                    />
-                  </Surface>
+                <View style={side ? styles.side : styles.below}>
+                  <StreakCard
+                    compact
+                    streak={streakData.streak}
+                    days={streakData.days}
+                    today={streakData.today}
+                  />
+                  <Numbers days={streakData.days} forecast={streakData.forecast} today={streakData.today} />
                 </View>
               ) : null}
             </View>
@@ -225,71 +214,95 @@ export default function DecksScreen() {
   );
 }
 
-const RAIL_WIDTH = 300;
+const CONTENT_WIDTH = 1200;
+const SIDE_WIDTH = 288;
+const SIDE_GAP = 56;
 
 /**
- * What is waiting, across every deck, and the one button that starts on it.
+ * Headwords: an old-style serif, the face of a dictionary entry or a primer.
+ * Only the target-language words are set in it, so it marks them as the
+ * thing being learned against the interface's sans. All three named faces
+ * ship with macOS; Georgia covers Windows.
+ */
+const HEADWORD_FONT = '"Iowan Old Style", Charter, "Palatino Linotype", Palatino, Georgia, serif';
+
+/** The longest front that still reads as a word or short phrase in the wall. */
+const MAX_WORD_LENGTH = 26;
+const MAX_WORDS = 14;
+
+/**
+ * The top of the screen: the date, one sentence about what is waiting, the
+ * words themselves, and the button that starts on them.
  *
- * The one number worth putting at the top of a window: not how much has been
- * collected, but how much is owed right now. When nothing is owed it says so
- * plainly rather than showing a zero, which reads as an error.
+ * When nothing is owed it says so plainly rather than showing a zero, which
+ * reads as an error, and there are no words to show.
  */
 function Hero({
+  date,
+  ready,
   due,
   pendingLearning,
   cards,
+  first,
+  words,
   onStart,
 }: {
+  date: string;
+  ready: boolean;
   due: number;
   pendingLearning: number;
   cards: number;
+  first?: Deck;
+  words: string[];
   onStart?: () => void;
 }) {
   const { t } = useI18n();
-  const theme = useTheme();
-  const { compact } = useLayout();
-  const active = due > 0;
-  // A review averages a few seconds; a rough minute count makes "20 due"
+  const { wide, compact } = useLayout();
+  // A review averages a few seconds; a rough minute count makes the queue
   // feel like a decision about time rather than a pile.
   const minutes = Math.max(1, Math.round((due * 8) / 60));
 
+  const headline = !ready
+    ? t('today')
+    : cards === 0
+      ? t('readyForCards')
+      : due > 0
+        ? t('cardsWaiting', { count: due })
+        : pendingLearning > 0
+          ? t('learningPending', { count: pendingLearning })
+          : t('allCaughtUp');
+  const detail = !ready
+    ? null
+    : cards === 0
+      ? t('readyForCardsHint')
+      : due > 0
+        ? `${t('estimatedMinutes', { count: minutes })}.${first ? ` ${t('firstUp', { deck: first.name })}` : ''}`
+        : pendingLearning > 0
+          ? t('learningPendingHint')
+          : t('allCaughtUpHint');
+
+  // Sentence decks would turn the wall into a paragraph, so only fronts short
+  // enough to read as a word or phrase go in, de-duplicated in queue order.
+  const shown = [...new Set(words.map((word) => word.trim()))]
+    .filter((word) => word.length > 0 && word.length <= MAX_WORD_LENGTH)
+    .slice(0, MAX_WORDS);
+
   return (
-    <View
-      style={[
-        styles.hero,
-        {
-          backgroundColor: active ? theme.colors.accentSoft : theme.colors.surface,
-          borderColor: active ? 'transparent' : theme.colors.border,
-          borderRadius: theme.radius.lg,
-        },
-      ]}
-    >
-      <View style={styles.heroText}>
-        <Label variant="display" tone={active ? 'accent' : 'default'} style={!active ? styles.heroQuiet : null}>
-          {cards === 0
-            ? t('readyForCards')
-            : due > 0
-              ? t('dueCount', { count: due })
-              : pendingLearning > 0
-                ? t('learningPending', { count: pendingLearning })
-                : t('allCaughtUp')}
-        </Label>
-        <Label variant="body" tone="muted">
-          {cards === 0
-            ? t('readyForCardsHint')
-            : due > 0
-              ? `${t('cardCount', { count: cards })} · ${t('estimatedMinutes', { count: minutes })}`
-              : pendingLearning > 0
-                ? t('learningPendingHint')
-                : t('allCaughtUpHint')}
-        </Label>
-      </View>
+    <View style={[styles.hero, wide ? styles.heroWide : null]}>
+      <Label variant="caption" tone="muted">{date}</Label>
+      <Label variant="title" accessibilityRole="header" style={wide ? styles.headlineWide : null}>
+        {headline}
+      </Label>
+      {detail ? <Label variant="body" tone="muted" style={styles.detail}>{detail}</Label> : null}
+
+      {shown.length > 0 ? <WordWall words={shown} /> : null}
+
       {onStart ? (
         <Button
           label={t('startStudying')}
           icon="play"
           onPress={onStart}
-          style={compact ? styles.heroButtonFull : styles.heroButton}
+          style={compact ? styles.startFull : styles.start}
         />
       ) : null}
     </View>
@@ -297,162 +310,198 @@ function Hero({
 }
 
 /**
- * Four numbers in one strip: the streak, today's reviews, and what is coming.
- * One row of equal cells rather than two cards of two, so the eye reads it
- * left to right as a single status line.
+ * The next words in the queue, in the order they will be asked.
+ *
+ * Each one is a step fainter than the one before, so the wall reads as a
+ * queue that recedes rather than a tag cloud. Announced as one list.
  */
-function StatStrip({
-  streak,
+function WordWall({ words }: { words: string[] }) {
+  const { t } = useI18n();
+  const theme = useTheme();
+  const { wide } = useLayout();
+
+  return (
+    <View
+      accessible
+      accessibilityLabel={`${t('wordsInQueue')}: ${words.join(', ')}`}
+      style={[styles.wall, wide ? styles.wallWide : null]}
+    >
+      {words.map((word, index) => (
+        <Text
+          key={word}
+          style={[
+            styles.word,
+            wide ? styles.wordWide : null,
+            { color: theme.colors.text, opacity: Math.max(0.2, 1 - index * 0.075) },
+          ]}
+        >
+          {word}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+/** Three running numbers under the calendar, as plain label and value lines. */
+function Numbers({
   days,
   forecast,
   today,
 }: {
-  streak: number;
   days: StudyDay[];
   forecast: { day: string; count: number }[];
   today: string;
 }) {
   const { t } = useI18n();
   const theme = useTheme();
-  const { compact } = useLayout();
   const reviewedToday = days.find((day) => day.day === today)?.reviews ?? 0;
   const weekReviews = days
     .filter((day) => day.day >= addDays(today, -6) && day.day <= today)
     .reduce((total, day) => total + day.reviews, 0);
   const tomorrow = forecast[1]?.count ?? 0;
 
-  const cells: { icon: IconName; label: string; value: number; color?: string }[] = [
-    { icon: 'flame', label: t('dayStreak'), value: streak, color: streak > 0 ? theme.colors.streak : undefined },
-    { icon: 'check', label: t('reviewedTodayLabel'), value: reviewedToday },
-    { icon: 'barChart', label: t('lastSevenDays'), value: weekReviews },
-    { icon: 'calendar', label: t('dueTomorrow'), value: tomorrow },
+  const lines = [
+    { label: t('reviewedTodayLabel'), value: reviewedToday },
+    { label: t('lastSevenDays'), value: weekReviews },
+    { label: t('dueTomorrow'), value: tomorrow },
   ];
 
   return (
-    <View
-      style={[
-        styles.strip,
-        compact ? styles.stripCompact : null,
-        { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg },
-      ]}
-    >
-      {cells.map((cell, index) => (
+    <View style={[styles.numbers, { borderTopColor: theme.colors.divider }]}>
+      {lines.map((line) => (
         <View
-          key={cell.label}
+          key={line.label}
           accessible
-          accessibilityLabel={`${cell.label}: ${cell.value}`}
-          style={[
-            styles.stripCell,
-            compact ? styles.stripCellCompact : null,
-            index > 0 && !compact ? { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: theme.colors.divider } : null,
-          ]}
+          accessibilityLabel={`${line.label}: ${line.value}`}
+          style={styles.numberLine}
         >
-          <Row gap={6}>
-            <Icon name={cell.icon} size={14} color={cell.color ?? theme.colors.textFaint} />
-            <Label variant="caption" tone="faint" numberOfLines={1} style={styles.grow}>
-              {cell.label}
-            </Label>
-          </Row>
-          <Label variant="metric">{cell.value}</Label>
+          <Label variant="caption" tone="muted" numberOfLines={1} style={styles.grow}>
+            {line.label}
+          </Label>
+          <Label variant="label" style={styles.tabular}>{line.value}</Label>
         </View>
       ))}
     </View>
   );
 }
 
-type DeckStudyProgress = DeckProgress & Pick<StudyQueue, 'pendingLearning' | 'nextLearningAt'>;
+type DeckStudyProgress = DeckProgress &
+  Pick<StudyQueue, 'pendingLearning' | 'nextLearningAt'> & {
+    /** Fronts of the cards in today's queue, in the order they will be asked. */
+    upcoming: string[];
+  };
 
-function DeckCard({ deck, progress }: { deck: Deck; progress?: DeckStudyProgress }) {
+/**
+ * One deck, read across: which language, its name, how far along it is, what
+ * it owes today, and the two things to do with it. On a narrow window the
+ * same pieces stack into three lines.
+ */
+function DeckRow({ deck, progress, wide }: { deck: Deck; progress?: DeckStudyProgress; wide: boolean }) {
   const { t } = useI18n();
   const theme = useTheme();
   const due = progress?.due ?? 0;
-  const [hovered, setHovered] = useState(false);
   const open = () => router.push({ pathname: '/(app)/deck/[id]', params: { id: deck.id } });
+  const study = () =>
+    deck.cardCount === 0 ? router.push({
+      pathname: '/(app)/text-import',
+      params: { deckId: deck.id },
+    }) : router.push({
+      pathname: '/(app)/study/[deckId]',
+      params: { deckId: deck.id, ahead: due > 0 ? '0' : '1' },
+    });
 
-  return (
-    <View
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
-      style={styles.deckWrap}
-    >
-      <Surface
-        elevation={hovered ? 'md' : 'none'}
-        style={[
-          styles.deck,
-          { borderRadius: theme.radius.lg },
-          hovered ? { borderColor: theme.colors.borderStrong } : null,
-          Platform.OS === 'web' && hovered ? styles.lifted : null,
-          Platform.OS === 'web' ? styles.liftTransition : null,
-        ]}
+  // Name, then how far along, then the bar's key. The total
+  // is the sum of the key, so it is only spelled out for a deck with no cards.
+  const hasCards = Boolean(progress && progress.total > 0);
+  const identity = (
+    <Row gap={theme.spacing.md} align="flex-start" style={styles.grow}>
+      {/* The code names the language; its full name is for a screen reader,
+          where "ES" would be read as a word. */}
+      <View
+        accessible
+        accessibilityLabel={LANGUAGE_NAMES[deck.language]}
+        style={[styles.code, { borderColor: theme.colors.borderStrong, borderRadius: theme.radius.sm }]}
       >
-        <View style={styles.deckHeader}>
-          <View style={[styles.avatar, { backgroundColor: theme.colors.accentSoft, borderRadius: theme.radius.sm }]}>
-            <Label variant="label" tone="accent" style={styles.avatarText}>
-              {deck.language.toUpperCase()}
-            </Label>
-          </View>
-          <View style={styles.grow}>
-            <Label variant="heading" numberOfLines={2}>
-              {deck.name}
-            </Label>
-            <Label variant="caption" tone="faint">
-              {LANGUAGE_NAMES[deck.language]} · {t('cardCount', { count: deck.cardCount })}
-            </Label>
-          </View>
-          {progress && deck.cardCount > 0 ? (
-            progress.due > 0
-              ? <Badge accessibilityLabel={t('dueCount', { count: progress.due })}>{progress.due}</Badge>
-              : progress.pendingLearning > 0
-                ? (
-                  <Badge
-                    tone="plain"
-                    icon="timer"
-                    accessibilityLabel={t('learningPending', { count: progress.pendingLearning })}
-                  >
-                    {progress.pendingLearning}
-                  </Badge>
-                )
-                : <Badge tone="plain" icon="check" accessibilityLabel={t('allCaughtUp')} />
-          ) : null}
-        </View>
-
-        {progress && progress.total > 0 ? (
-          <View style={styles.deckProgress}>
+        <Label variant="caption" tone="muted" style={styles.codeText}>
+          {deck.language.toUpperCase()}
+        </Label>
+      </View>
+      <View style={[styles.grow, styles.identity]}>
+        <Label variant="label" numberOfLines={1} style={styles.deckName}>{deck.name}</Label>
+        {progress && hasCards ? (
+          <View style={styles.bar}>
             <ProgressBar
               progress={progress}
-              height={6}
+              height={4}
               accessibilityLabel={`${t('statusMastered')} ${progress.mastered} / ${progress.total}`}
             />
-            <Row gap={theme.spacing.md} wrap>
+          </View>
+        ) : null}
+        <Row gap={theme.spacing.md} wrap style={styles.legend}>
+          {progress && hasCards ? (
+            <>
               <Legend color={theme.colors.statusNew}>{t('statusNew')} {progress.new}</Legend>
               <Legend color={theme.colors.statusLearning}>{t('statusLearning')} {progress.learning}</Legend>
               <Legend color={theme.colors.statusMastered}>{t('statusMastered')} {progress.mastered}</Legend>
-            </Row>
-          </View>
-        ) : null}
+            </>
+          ) : (
+            <Label variant="caption" tone="faint">{t('cardCount', { count: deck.cardCount })}</Label>
+          )}
+        </Row>
+      </View>
+    </Row>
+  );
 
-        <View style={[styles.deckFooter, { borderTopColor: theme.colors.divider }]}>
-          <Button
-            label={deck.cardCount === 0 ? t('addCards') : due > 0 ? t('study') : t('studyAhead')}
-            icon={deck.cardCount === 0 ? 'plus' : 'play'}
-            // Secondary on every card: "Start studying" above is the screen's
-            // one primary action, and a filled button per deck competed with it.
-            variant="secondary"
-            size="small"
-            onPress={() =>
-              deck.cardCount === 0 ? router.push({
-                pathname: '/(app)/text-import',
-                params: { deckId: deck.id },
-              }) : router.push({
-                pathname: '/(app)/study/[deckId]',
-                params: { deckId: deck.id, ahead: due > 0 ? '0' : '1' },
-              })
-            }
-            style={styles.grow}
-          />
-          <Button label={t('manageDeck')} variant="ghost" size="small" onPress={open} />
-        </View>
-      </Surface>
+  const owed = progress && deck.cardCount > 0 ? (
+    progress.due > 0 ? (
+      <Label variant="label" align="right" style={styles.tabular}>
+        {t('dueCount', { count: progress.due })}
+      </Label>
+    ) : progress.pendingLearning > 0 ? (
+      <View accessible accessibilityLabel={t('learningPending', { count: progress.pendingLearning })} style={styles.owedIcon}>
+        <Icon name="timer" size={14} color={theme.colors.textMuted} />
+        <Label variant="caption" tone="muted">{progress.pendingLearning}</Label>
+      </View>
+    ) : (
+      <View accessible accessibilityLabel={t('allCaughtUp')} style={styles.owedIcon}>
+        <Icon name="check" size={16} color={theme.colors.statusMastered} />
+      </View>
+    )
+  ) : null;
+
+  const actions = (
+    <Row gap={theme.spacing.xs}>
+      <Button
+        label={deck.cardCount === 0 ? t('addCards') : due > 0 ? t('study') : t('studyAhead')}
+        icon={deck.cardCount === 0 ? 'plus' : 'play'}
+        // Secondary on every row: "Start studying" above is the screen's one
+        // primary action, and a filled button per deck would compete with it.
+        variant="secondary"
+        size="small"
+        onPress={study}
+        style={wide ? styles.studyWide : styles.grow}
+      />
+      <Button label={t('manageDeck')} variant="ghost" size="small" onPress={open} />
+    </Row>
+  );
+
+  return (
+    <View style={[styles.row, wide ? styles.rowWide : styles.rowNarrow, { borderBottomColor: theme.colors.divider }]}>
+      {wide ? (
+        <>
+          {identity}
+          <View style={styles.owed}>{owed}</View>
+          {actions}
+        </>
+      ) : (
+        <>
+          <Row gap={theme.spacing.md} align="flex-start">
+            {identity}
+            {owed}
+          </Row>
+          {actions}
+        </>
+      )}
     </View>
   );
 }
@@ -471,51 +520,57 @@ function Legend({ color, children }: { color: string; children: ReactNode }) {
 
 const styles = StyleSheet.create({
   grow: { flex: 1, minWidth: 0 },
-  hero: {
+  tabular: { fontVariant: ['tabular-nums'] },
+  hero: { gap: 6, paddingTop: 8 },
+  heroWide: { paddingTop: 24 },
+  headlineWide: { fontSize: 34, lineHeight: 40, letterSpacing: -0.6 },
+  detail: { maxWidth: 560 },
+  wall: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    columnGap: 20,
+    rowGap: 2,
+    marginTop: 24,
+    marginBottom: 4,
+    maxWidth: 880,
+  },
+  wallWide: { columnGap: 28, marginTop: 32, marginBottom: 8 },
+  word: {
+    fontFamily: HEADWORD_FONT,
+    fontSize: 30,
+    lineHeight: 40,
+    fontWeight: '600',
+    letterSpacing: -0.3,
+  },
+  wordWide: { fontSize: 42, lineHeight: 54, letterSpacing: -0.6 },
+  start: { alignSelf: 'flex-start', minWidth: 200, marginTop: 18 },
+  startFull: { width: '100%', marginTop: 18 },
+  body: { marginTop: 56, gap: 40 },
+  bodySide: { flexDirection: 'row', alignItems: 'flex-start', gap: SIDE_GAP },
+  main: { flex: 1, minWidth: 0 },
+  side: { width: SIDE_WIDTH },
+  below: {},
+  sectionTitle: { marginBottom: 12 },
+  rows: { borderTopWidth: StyleSheet.hairlineWidth },
+  row: { borderBottomWidth: StyleSheet.hairlineWidth },
+  rowWide: { flexDirection: 'row', alignItems: 'center', gap: 24, paddingVertical: 16 },
+  rowNarrow: { gap: 12, paddingVertical: 16 },
+  code: {
+    width: 36,
+    height: 36,
     alignItems: 'center',
-    gap: 20,
-    padding: 24,
+    justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  heroText: { flex: 1, minWidth: 240, gap: 6 },
-  heroQuiet: { fontSize: 30, lineHeight: 36 },
-  heroButton: { minWidth: 180 },
-  heroButtonFull: { width: '100%' },
-  strip: { flexDirection: 'row', marginTop: 16, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
-  stripCompact: { flexWrap: 'wrap' },
-  stripCell: { flex: 1, minWidth: 0, paddingVertical: 14, paddingHorizontal: 16, gap: 6 },
-  stripCellCompact: { flexBasis: '50%' },
-  body: { marginTop: 32, gap: 24 },
-  bodyRail: { flexDirection: 'row', alignItems: 'flex-start' },
-  main: { flex: 1, minWidth: 0 },
-  rail: { width: RAIL_WIDTH },
-  below: {},
-  calendarCard: { padding: 20 },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -8 },
-  gridHalf: { width: '50%', paddingHorizontal: 8, paddingBottom: 16 },
-  gridFull: { width: '100%', paddingHorizontal: 8, paddingBottom: 16 },
-  deckWrap: { flex: 1 },
-  deck: { flex: 1, padding: 0 },
-  deckHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, paddingBottom: 12 },
-  avatar: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 13, letterSpacing: 0.6 },
-  deckProgress: { gap: 8, paddingHorizontal: 16, paddingBottom: 14 },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
-  deckFooter: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 'auto',
-    padding: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  lifted: { transform: [{ translateY: -2 }] },
-  // The lift eases in rather than snapping. Web only: the keys are CSS.
-  liftTransition: {
-    transitionProperty: 'transform, box-shadow, border-color',
-    transitionDuration: '160ms',
-    transitionTimingFunction: 'ease-out',
-  } as object,
+  codeText: { fontWeight: '700', letterSpacing: 0.4 },
+  deckName: { fontSize: 17, lineHeight: 22 },
+  identity: { gap: 6 },
+  bar: { maxWidth: 360 },
+  owed: { width: 80, alignItems: 'flex-end' },
+  owedIcon: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 20 },
+  studyWide: { minWidth: 120 },
+  legend: { rowGap: 4 },
+  legendDot: { width: 7, height: 7, borderRadius: 3.5 },
+  numbers: { marginTop: 24, paddingTop: 16, gap: 10, borderTopWidth: StyleSheet.hairlineWidth },
+  numberLine: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
 });

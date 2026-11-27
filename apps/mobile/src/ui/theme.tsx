@@ -27,8 +27,6 @@ export interface Palette {
   surfaceSunken: string;
   /** The toolbar strip along the bottom of the window. Recedes; never competes. */
   bar: string;
-  /** The navigation sidebar on a wide window: a step back from the content. */
-  sidebar: string;
   border: string;
   /** A border that has to carry weight: a focused field, a divider that must read. */
   borderStrong: string;
@@ -82,7 +80,6 @@ const light: Palette = {
   surfaceRaised: '#ffffff',
   surfaceSunken: '#f0f0f2',
   bar: 'rgba(255, 255, 255, 0.8)',
-  sidebar: '#efeff1',
   border: '#e4e4e7',
   borderStrong: '#d4d4d8',
   divider: '#ececee',
@@ -129,7 +126,6 @@ const dark: Palette = {
   surfaceRaised: '#1e1e22',
   surfaceSunken: '#121214',
   bar: 'rgba(16, 16, 18, 0.9)',
-  sidebar: '#0b0b0d',
   border: '#2a2a2e',
   borderStrong: '#3f3f46',
   divider: '#242428',
@@ -359,8 +355,6 @@ export const layout = {
   /** Above this a window has desktop room: roomier padding, tighter controls. */
   wide: 900,
   measure: 680,
-  /** The navigation sidebar's width, on a window above `wide`. */
-  sidebar: 232,
   /**
    * The shortest side, in points, from which a touch screen counts as a
    * tablet. Every phone is under it held either way (the largest is ~440pt
@@ -376,7 +370,7 @@ export interface LayoutInfo {
   wide: boolean;
   /** Is there enough room for a full desktop control row? */
   compact: boolean;
-  /** The width left for the screen once the sidebar has taken its share. */
+  /** The width the screen gets. The whole window: there is no sidebar. */
   paneWidth: number;
   /**
    * Is the main input a finger rather than a mouse? Controls keep thumb-sized
@@ -396,7 +390,7 @@ export function useLayout(): LayoutInfo {
     height,
     wide,
     compact: width < 560,
-    paneWidth: wide ? width - layout.sidebar : width,
+    paneWidth: width,
     touch,
     tablet: touch && Math.min(width, height) >= layout.tablet,
   };

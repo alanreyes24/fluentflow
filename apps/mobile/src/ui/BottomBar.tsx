@@ -8,15 +8,17 @@ import { Label } from './components';
 import { Icon, type IconName } from './Icon';
 import { SyncIndicator } from './SyncIndicator';
 import { useDesktopChrome } from './DesktopChrome';
-import { dragRegionProps, noDragProps, onMacDesktop, TITLE_BAR_HEIGHT } from './shell';
-import { layout, useLayout, useTheme } from './theme';
+import { dragRegionProps, noDragProps, onMacDesktop, TITLE_BAR_HEIGHT, WINDOW_BUTTONS_WIDTH } from './shell';
+import { useLayout, useTheme } from './theme';
 
 /**
- * The app's navigation: a sidebar on a wide window, a tab bar on a narrow one.
+ * The app's navigation: a bar along the top on a wide window, a tab bar along
+ * the bottom on a narrow one. There is no sidebar: the screen gets the whole
+ * width of the window.
  *
- * Both draw from one list, so the destinations never drift apart between the
- * two layouts. Everything here acts on the app rather than on the screen that
- * is open, which is why it sits outside the stack instead of in a header.
+ * Both bars draw from one list, so the destinations never drift apart between
+ * the two layouts. Everything here acts on the app rather than on the screen
+ * that is open, which is why it sits outside the stack instead of in a header.
  *
  * "Paste" rather than the sentence the screen is titled with. A navigation
  * label is a word, and the deck screen has its own "Paste a word list" that
@@ -60,59 +62,53 @@ function go(destination: Destination) {
   router.push(destination.href as Parameters<typeof router.push>[0]);
 }
 
-// --- sidebar -----------------------------------------------------------------
+// --- top bar -----------------------------------------------------------------
 
 /**
- * The wide-window navigation, down the leading edge.
+ * The wide-window navigation, one row across the top of the window.
  *
- * On macOS the column is transparent so the window's vibrancy shows through,
- * the way a native sidebar looks, and its top strip is the drag handle the
- * traffic lights sit in. Every content screen paints itself opaque beside it.
+ * On macOS it is the title strip itself: it starts after the traffic lights,
+ * drags the window everywhere it has no control, and stays transparent so the
+ * window's vibrancy shows through. Places to go (decks, library) sit on the
+ * leading side; things to make, sync and settings on the trailing side.
  */
-export function Sidebar() {
+export function TopBar() {
   const { t } = useI18n();
   const theme = useTheme();
   const pathname = usePathname();
   const { fullscreen } = useDesktopChrome();
   const mac = onMacDesktop();
-  const titleStrip = mac && !fullscreen;
+  // In native full-screen macOS hides the window buttons, so nothing needs
+  // clearing and the brand can take the leading edge as it does elsewhere.
+  const clearWindowButtons = mac && !fullscreen;
 
   return (
     <View
+      {...dragRegionProps}
+      accessibilityRole="toolbar"
       style={[
-        styles.sidebar,
+        styles.top,
         {
-          backgroundColor: mac ? 'transparent' : theme.colors.sidebar,
-          borderRightColor: theme.colors.border,
+          height: mac ? TITLE_BAR_HEIGHT : 52,
+          paddingLeft: clearWindowButtons ? WINDOW_BUTTONS_WIDTH : 16,
+          backgroundColor: mac ? 'transparent' : theme.colors.bar,
+          borderBottomColor: theme.colors.border,
         },
+        Platform.OS === 'web' && !mac ? ({ backdropFilter: 'blur(20px)' } as unknown as ViewStyle) : null,
       ]}
     >
-      {titleStrip ? <View {...dragRegionProps} style={{ height: TITLE_BAR_HEIGHT }} /> : null}
-
-      <View style={[styles.brand, titleStrip ? null : styles.brandSpaced]}>
-        <View style={[styles.brandMark, { backgroundColor: theme.colors.fill }]}>
-          <Icon name="layers" size={16} strokeWidth={2.25} color={theme.colors.fillText} />
+      {!clearWindowButtons ? (
+        <View style={styles.brand}>
+          <View style={[styles.brandMark, { backgroundColor: theme.colors.fill }]}>
+            <Icon name="layers" size={13} strokeWidth={2.25} color={theme.colors.fillText} />
+          </View>
+          <Label variant="label" style={styles.brandName}>FluentFlow</Label>
         </View>
-        <Label variant="label" style={styles.brandName}>FluentFlow</Label>
-      </View>
+      ) : null}
 
-      <View {...noDragProps} style={styles.group}>
+      <View {...noDragProps} style={styles.topGroup}>
         {BROWSE.map((destination) => (
-          <SidebarItem
-            key={destination.key}
-            destination={destination}
-            label={t(destination.label)}
-            active={isActive(destination, pathname)}
-          />
-        ))}
-      </View>
-
-      <Label variant="overline" tone="faint" style={styles.groupLabel}>
-        {t('sidebarCreate')}
-      </Label>
-      <View {...noDragProps} style={styles.group}>
-        {CREATE.map((destination) => (
-          <SidebarItem
+          <TopItem
             key={destination.key}
             destination={destination}
             label={t(destination.label)}
@@ -123,21 +119,47 @@ export function Sidebar() {
 
       <View style={styles.grow} />
 
-      <View {...noDragProps} style={styles.group}>
-        <SidebarItem destination={SETTINGS} label={t(SETTINGS.label)} active={isActive(SETTINGS, pathname)} />
-      </View>
-      <View style={[styles.sidebarFooter, { borderTopColor: theme.colors.divider }]}>
-        <SyncIndicator />
+      <View {...noDragProps} style={styles.topGroup}>
+        {CREATE.map((destination) => (
+          <TopItem
+            key={destination.key}
+            destination={destination}
+            label={t(destination.label)}
+            active={isActive(destination, pathname)}
+            showIcon
+          />
+        ))}
+        <View style={[styles.topRule, { backgroundColor: theme.colors.divider }]} />
+        <SyncIndicator compact />
+        <TopItem
+          destination={SETTINGS}
+          label={t(SETTINGS.label)}
+          active={isActive(SETTINGS, pathname)}
+          showIcon
+          iconOnly
+        />
       </View>
     </View>
   );
 }
 
-function SidebarItem({ destination, label, active }: { destination: Destination; label: string; active: boolean }) {
+function TopItem({
+  destination,
+  label,
+  active,
+  showIcon = false,
+  iconOnly = false,
+}: {
+  destination: Destination;
+  label: string;
+  active: boolean;
+  showIcon?: boolean;
+  iconOnly?: boolean;
+}) {
   const theme = useTheme();
   const { touch } = useLayout();
   const [hovered, setHovered] = useState(false);
-  const color = active ? theme.colors.accent : hovered ? theme.colors.text : theme.colors.textMuted;
+  const color = active || hovered ? theme.colors.text : theme.colors.textMuted;
 
   return (
     <Pressable
@@ -148,9 +170,10 @@ function SidebarItem({ destination, label, active }: { destination: Destination;
       onPointerEnter={() => setHovered(true)}
       onPointerLeave={() => setHovered(false)}
       style={({ pressed }) => [
-        styles.sidebarItem,
-        // A tablet in landscape gets this sidebar too; 36pt rows are a mouse size.
-        touch ? styles.sidebarItemTouch : null,
+        styles.topItem,
+        // A tablet in landscape gets this bar too; 30pt rows are a mouse size.
+        touch ? styles.topItemTouch : null,
+        iconOnly ? styles.topItemIcon : null,
         {
           backgroundColor: active ? theme.colors.accentSoft : hovered ? theme.colors.hover : 'transparent',
           borderRadius: theme.radius.sm,
@@ -159,14 +182,16 @@ function SidebarItem({ destination, label, active }: { destination: Destination;
         web({ transitionProperty: 'background-color', transitionDuration: '150ms' }),
       ]}
     >
-      <Icon name={destination.icon} size={touch ? 20 : 18} color={color} />
-      <Label
-        variant="label"
-        numberOfLines={1}
-        style={[styles.sidebarLabel, { color }, active ? styles.activeLabel : null]}
-      >
-        {label}
-      </Label>
+      {showIcon ? <Icon name={destination.icon} size={16} color={color} /> : null}
+      {!iconOnly ? (
+        <Label
+          variant="label"
+          numberOfLines={1}
+          style={[styles.topLabel, { color }, active ? styles.activeLabel : null]}
+        >
+          {label}
+        </Label>
+      ) : null}
     </Pressable>
   );
 }
@@ -176,8 +201,7 @@ function SidebarItem({ destination, label, active }: { destination: Destination;
 /**
  * The narrow-window navigation: a tab bar along the bottom, icon over label.
  *
- * Kept under its old name because it still is the bar along the bottom of the
- * window; it is only mounted when there is no room for the sidebar.
+ * Only mounted when the window is too narrow for the top bar.
  */
 export function BottomBar() {
   const { t } = useI18n();
@@ -260,24 +284,24 @@ function web(style: Record<string, string>): ViewStyle | null {
 }
 
 const styles = StyleSheet.create({
-  sidebar: {
-    width: layout.sidebar,
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    borderRightWidth: StyleSheet.hairlineWidth,
+  top: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingRight: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  brand: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 8, marginBottom: 20 },
-  brandSpaced: { marginTop: 18 },
-  brandMark: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  brandName: { fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
-  group: { gap: 2 },
-  groupLabel: { paddingHorizontal: 10, marginTop: 20, marginBottom: 6 },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: 8, marginRight: 16 },
+  brandMark: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  brandName: { fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
+  topGroup: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  topItem: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 30, paddingHorizontal: 10 },
+  topItemTouch: { minHeight: 44, paddingHorizontal: 14 },
+  topItemIcon: { paddingHorizontal: 0, width: 32, justifyContent: 'center' },
+  topLabel: { fontSize: 14, fontWeight: '500' },
+  topRule: { width: StyleSheet.hairlineWidth, height: 18, marginHorizontal: 6 },
+  activeLabel: { fontWeight: '600' },
   grow: { flex: 1 },
-  sidebarItem: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 36, paddingHorizontal: 10 },
-  sidebarItemTouch: { minHeight: 48, gap: 12, paddingHorizontal: 12 },
-  sidebarLabel: { fontWeight: '500', flexShrink: 1 },
-  activeLabel: { fontWeight: '700' },
-  sidebarFooter: { marginTop: 10, paddingTop: 12, paddingHorizontal: 10, borderTopWidth: StyleSheet.hairlineWidth },
   bar: {
     flexDirection: 'row',
     alignItems: 'stretch',

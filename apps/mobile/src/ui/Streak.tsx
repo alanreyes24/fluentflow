@@ -20,11 +20,14 @@ export function StreakCard({
   streak,
   days,
   today,
+  compact = false,
   style,
 }: {
   streak: StreakSummary;
   days: readonly StudyDay[];
   today: string;
+  /** A smaller count, for a side column where something else leads the screen. */
+  compact?: boolean;
   style?: ViewStyleProp;
 }) {
   const theme = useTheme();
@@ -43,6 +46,7 @@ export function StreakCard({
         <View
           style={[
             styles.flame,
+            compact ? styles.flameCompact : null,
             {
               backgroundColor: streak.atRisk ? theme.colors.streakSoft : theme.colors.accentSoft,
               borderRadius: theme.radius.pill,
@@ -52,12 +56,12 @@ export function StreakCard({
           {streak.current > 0 ? (
             <Icon
               name="flame"
-              size={28}
+              size={compact ? 22 : 28}
               filled={!streak.atRisk}
               color={streak.atRisk ? theme.colors.streak : theme.colors.accent}
             />
           ) : (
-            <Icon name="sprout" size={28} color={theme.colors.textFaint} />
+            <Icon name="sprout" size={compact ? 22 : 28} color={theme.colors.textFaint} />
           )}
         </View>
 
@@ -66,13 +70,13 @@ export function StreakCard({
             {/* "3" on its own is announced as a bare number, and the caption
                 beside it is a separate node a screen reader will not join. */}
             <Label
-              variant="display"
+              variant={compact ? 'metric' : 'display'}
               tone={tone}
               accessibilityLabel={t('streakDays', { count: streak.current })}
             >
               {streak.current}
             </Label>
-            <Label variant="overline" tone="faint">
+            <Label variant={compact ? 'caption' : 'overline'} tone="faint">
               {t('dayStreak')}
             </Label>
           </Row>
@@ -169,6 +173,7 @@ const styles = StyleSheet.create({
   // becoming the flex row's implicit minimum width.
   grow: { flex: 1, minWidth: 0 },
   flame: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center' },
+  flameCompact: { width: 44, height: 44 },
   calendar: { marginTop: 16, gap: 8 },
   weekdayRow: { flexDirection: 'row' },
   calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 8 },

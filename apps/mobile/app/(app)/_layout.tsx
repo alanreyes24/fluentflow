@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../src/state/app';
 import { useSpeechBackfill } from '../../src/state/speech-backfill';
 import { subscribeToShellImports } from '../../src/desktop-import';
-import { BottomBar, Sidebar } from '../../src/ui/BottomBar';
+import { BottomBar, TopBar } from '../../src/ui/BottomBar';
 import { TitleBar } from '../../src/ui/TitleBar';
 import { onMacDesktop } from '../../src/ui/shell';
 import { useLayout, useTheme } from '../../src/ui/theme';
@@ -16,9 +16,11 @@ import { useLayout, useTheme } from '../../src/ui/theme';
  * The redirect is what stops a deep link (a shared deck URL) from landing on a
  * screen that would query with no user id.
  *
- * Two shells, by width. A wide window gets a sidebar down the leading edge
- * with the screen beside it; a narrow one gets the screen with a tab bar along
- * the bottom. Both hold the same destinations (see `BottomBar.tsx`).
+ * Two shells, by width. A wide window gets a bar across the top, which on
+ * macOS is also the title strip the window buttons sit in; a narrow one gets
+ * a tab bar along the bottom. Neither has a sidebar, so the screen always has
+ * the full width of the window. Both hold the same destinations (see
+ * `BottomBar.tsx`).
  */
 export default function AppLayout() {
   const { user } = useApp();
@@ -53,17 +55,16 @@ export default function AppLayout() {
   if (!user) return <Redirect href="/sign-in" />;
 
   // On macOS the outer container is transparent so the window's vibrancy shows
-  // through the title strip and the sidebar (or the tab bar); every content
+  // through the top bar (or the title strip and the tab bar); every content
   // Screen paints its own opaque background.
   const shellBackground = onMacDesktop() ? 'transparent' : theme.colors.background;
 
   return (
-    <View style={[styles.shell, wide ? styles.row : null, { backgroundColor: shellBackground, paddingTop: top }]}>
-      {wide ? <Sidebar /> : null}
+    <View style={[styles.shell, { backgroundColor: shellBackground, paddingTop: top }]}>
       {/* `minWidth: 0` so a long word on a card shrinks the pane's content
           rather than stretching the window. */}
       <View style={styles.pane}>
-        <TitleBar />
+        {wide ? <TopBar /> : <TitleBar />}
         <View style={styles.pane}>
           <Stack
             screenOptions={{
@@ -90,6 +91,5 @@ export default function AppLayout() {
 
 const styles = StyleSheet.create({
   shell: { flex: 1 },
-  row: { flexDirection: 'row' },
   pane: { flex: 1, minWidth: 0 },
 });

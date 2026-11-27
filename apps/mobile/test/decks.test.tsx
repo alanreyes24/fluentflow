@@ -4,7 +4,7 @@ import { addCollectionDays, collectionDayKey, dayToDate, type Deck } from '@flue
 import DecksScreen from '../app/(app)/decks';
 import DeckScreen from '../app/(app)/deck/[id]';
 import NewDeckScreen from '../app/(app)/new-deck';
-import { BottomBar } from '../src/ui/BottomBar';
+import { BottomBar, TopBar } from '../src/ui/BottomBar';
 import { SyncIndicator } from '../src/ui/SyncIndicator';
 import { Repository } from '../src/db/repository';
 import { createTestRepository } from './fakes/database';
@@ -40,7 +40,7 @@ describe('DecksScreen', () => {
     expect(screen.getByText('Create a deck, paste a word list, or import one from Anki.')).toBeTruthy();
   });
 
-  it('lists a deck with its language and card count', async () => {
+  it('lists a deck with its language', async () => {
     const deck = await repository.createDeck(TEST_USER.id, 'Spanish Verbs', 'es');
     await repository.addCard(TEST_USER.id, deck, 'hablar', 'to speak');
     const [stored] = await repository.listDecks(TEST_USER.id);
@@ -48,8 +48,45 @@ describe('DecksScreen', () => {
     await renderScreen(<DecksScreen />, { repository, decks: [stored!] });
 
     await screen.findByText('Spanish Verbs');
+    expect(screen.getByText('ES')).toBeTruthy();
     // Languages are named in their own language, not the interface's.
-    expect(screen.getByText('Español · 1 cards')).toBeTruthy();
+    expect(screen.getByLabelText('Español')).toBeTruthy();
+  });
+
+  it('spells out the card count for a deck with no cards', async () => {
+    await repository.createDeck(TEST_USER.id, 'Empty', 'es');
+    const [stored] = await repository.listDecks(TEST_USER.id);
+
+    await renderScreen(<DecksScreen />, { repository, decks: [stored!] });
+
+    expect(await screen.findByText('0 cards')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add cards' })).toBeTruthy();
+  });
+
+  it('opens on the words waiting in the busiest deck', async () => {
+    const small = await repository.createDeck(TEST_USER.id, 'Spanish', 'es');
+    await repository.addCard(TEST_USER.id, small, 'hablar', 'to speak');
+    const big = await repository.createDeck(TEST_USER.id, 'Bosnian', 'bs');
+    await repository.addCard(TEST_USER.id, big, 'kuća', 'house');
+    await repository.addCard(TEST_USER.id, big, 'voda', 'water');
+    // A sentence front would turn the wall into a paragraph, so it is left out.
+    await repository.addCard(TEST_USER.id, big, 'Gdje je najbliža autobusna stanica?', 'Where is the nearest bus stop?');
+    const stored = await repository.listDecks(TEST_USER.id);
+
+    await renderScreen(<DecksScreen />, { repository, decks: stored });
+
+    expect(await screen.findByText('4 cards waiting')).toBeTruthy();
+    expect(screen.getByText('About 1 min. First up: Bosnian')).toBeTruthy();
+    expect(screen.getByText('kuća')).toBeTruthy();
+    expect(screen.getByText('voda')).toBeTruthy();
+    expect(screen.queryByText('hablar')).toBeNull();
+    expect(screen.queryByText('Gdje je najbliža autobusna stanica?')).toBeNull();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Start studying' }));
+    expect(mockRouter.push).toHaveBeenCalledWith({
+      pathname: '/(app)/study/[deckId]',
+      params: { deckId: big.id, ahead: '0' },
+    });
   });
 
   it('shows the number of cards available in today\'s study queue', async () => {
@@ -266,6 +303,27 @@ describe('BottomBar', () => {
 
     await fireEvent.press(screen.getByRole('button', { name: 'New deck' }));
     expect(mockRouter.push).toHaveBeenCalledWith('/(app)/new-deck');
+  });
+});
+
+/**
+ * The bar across the top of a wide window, which replaced the sidebar. It
+ * has to reach the same places the bottom bar does.
+ */
+describe('TopBar', () => {
+  it('routes to every destination the bottom bar has', async () => {
+    await renderScreen(<TopBar />);
+
+    for (const [name, href] of [
+      ['Decks', '/(app)/decks'],
+      ['Library', '/(app)/cards'],
+      ['New deck', '/(app)/new-deck'],
+      ['Paste', '/(app)/text-import'],
+      ['Settings', '/(app)/settings'],
+    ] as const) {
+      await fireEvent.press(screen.getByRole('button', { name }));
+      expect(mockRouter.push).toHaveBeenCalledWith(href);
+    }
   });
 });
 
