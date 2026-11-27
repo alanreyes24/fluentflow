@@ -42,7 +42,8 @@
     "react-dom": "19.2.3"
   },
   "devDependencies": {
-    "puppeteer-core": "^24.43.1"
+    "puppeteer-core": "^24.43.1",
+    "railway": "^3.19.0"
   },
   "license": "MIT",
   "repository": {
