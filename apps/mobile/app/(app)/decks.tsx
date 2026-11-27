@@ -148,7 +148,7 @@ export default function DecksScreen() {
 
   // The side column earns its place only when the decks beside it still get
   // a full-width row; otherwise it follows them down the page.
-  const side = paneWidth >= 1040 && Boolean(streakData) && decks.length > 0;
+  const side = paneWidth >= 1200 && Boolean(streakData) && decks.length > 0;
   const mainWidth =
     Math.min(paneWidth, CONTENT_WIDTH) - (wide ? 48 : 32) - (side ? SIDE_WIDTH + SIDE_GAP : 0);
   const rowsWide = mainWidth >= 640;
@@ -228,7 +228,13 @@ const HEADWORD_FONT = '"Iowan Old Style", Charter, "Palatino Linotype", Palatino
 
 /** The longest front that still reads as a word or short phrase in the wall. */
 const MAX_WORD_LENGTH = 26;
-const MAX_WORDS = 14;
+/**
+ * How many letters the wall holds in all: about three lines at the wide size.
+ * Counted in letters rather than words because a phrase deck ("rapar al
+ * cero") fills a line twice as fast as a deck of single words.
+ */
+const WALL_LETTERS = 90;
+const MAX_WORDS = 12;
 
 /**
  * The top of the screen: the date, one sentence about what is waiting, the
@@ -283,9 +289,14 @@ function Hero({
 
   // Sentence decks would turn the wall into a paragraph, so only fronts short
   // enough to read as a word or phrase go in, de-duplicated in queue order.
-  const shown = [...new Set(words.map((word) => word.trim()))]
-    .filter((word) => word.length > 0 && word.length <= MAX_WORD_LENGTH)
-    .slice(0, MAX_WORDS);
+  const shown: string[] = [];
+  let letters = 0;
+  for (const word of new Set(words.map((front) => front.trim()))) {
+    if (word.length === 0 || word.length > MAX_WORD_LENGTH) continue;
+    if (shown.length >= MAX_WORDS || letters + word.length > WALL_LETTERS) break;
+    shown.push(word);
+    letters += word.length;
+  }
 
   return (
     <View style={[styles.hero, wide ? styles.heroWide : null]}>
